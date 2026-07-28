@@ -13,6 +13,7 @@ import { Transaction, TransactionType } from './entities/transaction.entity';
 import { WalletsService } from '../wallets/wallets.service';
 import { IdempotencyService } from '../idempotency/idempotency.service';
 import { LoggingService } from '../logging/logging.service';
+import { serializeWallet } from '../wallets/wallet.serializer';
 
 export interface MoneyResult {
   transactionId: string;
@@ -281,6 +282,46 @@ export class TransactionsService {
       where: [{ fromWalletId: In(walletIds) }, { toWalletId: In(walletIds) }],
       order: { createdAt: 'DESC' },
     });
+  }
+
+  // Full detail for a single transaction, including the type/currency of
+  // whichever wallet(s) it touched — enough for a standalone detail view
+  // without extra round trips. Scoped to transactions that touch at least
+  // one of the caller's own wallets.
+  async getById(userId: string, transactionId: string) {
+    const transaction = await this.transactionsRepository.findOne({
+      where: { id: transactionId },
+    });
+    if (!transaction) {
+      throw new NotFoundException('Transaction not found');
+    }
+
+    const [fromWallet, toWallet] = await Promise.all([
+      transaction.fromWalletId
+        ? this.walletsService.getByIdUnscoped(transaction.fromWalletId)
+        : null,
+      transaction.toWalletId
+        ? this.walletsService.getByIdUnscoped(transaction.toWalletId)
+        : null,
+    ]);
+
+    const ownsFrom = fromWallet?.userId === userId;
+    const ownsTo = toWallet?.userId === userId;
+    if (!ownsFrom && !ownsTo) {
+      throw new ForbiddenException('This transaction does not belong to you');
+    }
+
+    return {
+      id: transaction.id,
+      type: transaction.type,
+      amount: transaction.amount,
+      note: transaction.note,
+      idempotencyKey: transaction.idempotencyKey,
+      createdAt: transaction.createdAt,
+      fromWallet: fromWallet ? serializeWallet(fromWallet) : null,
+      toWallet: toWallet ? serializeWallet(toWallet) : null,
+      direction: ownsFrom && ownsTo ? 'BOTH' : ownsFrom ? 'OUT' : 'IN',
+    };
   }
 
   private async run(

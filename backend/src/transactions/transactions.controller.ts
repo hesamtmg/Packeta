@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  Param,
   Post,
   Query,
   UseGuards,
@@ -71,5 +72,10 @@ export class TransactionsController {
     @Query('walletId') walletId?: string,
   ) {
     return this.transactionsService.getHistory(user.userId, walletId);
+  }
+
+  @Get(':id')
+  getOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.transactionsService.getById(user.userId, id);
   }
 }

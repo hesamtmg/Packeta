@@ -227,9 +227,11 @@ function logout() {
       <h2>Transaction history</h2>
       <ul>
         <li v-for="tx in wallet.transactions" :key="tx.id">
-          <span>{{ describeTransaction(tx) }}</span>
-          <span>{{ formatTransactionAmount(tx) }}</span>
-          <span>{{ new Date(tx.createdAt).toLocaleString() }}</span>
+          <router-link :to="{ name: 'transaction-detail', params: { id: tx.id } }" class="tx-row">
+            <span>{{ describeTransaction(tx) }}</span>
+            <span>{{ formatTransactionAmount(tx) }}</span>
+            <span>{{ new Date(tx.createdAt).toLocaleString() }}</span>
+          </router-link>
         </li>
         <li v-if="!wallet.transactions.length">No transactions yet.</li>
       </ul>
@@ -330,10 +332,17 @@ header {
   gap: 0.5rem;
 }
 .history li {
+  border-bottom: 1px solid #eee;
+}
+.tx-row {
   display: flex;
   justify-content: space-between;
-  border-bottom: 1px solid #eee;
   padding: 0.4rem 0;
+  color: inherit;
+  text-decoration: none;
+}
+.tx-row:hover {
+  text-decoration: underline;
 }
 .error {
   color: #b00020;

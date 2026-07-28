@@ -3,6 +3,7 @@ import { useAuthStore } from '../stores/auth';
 import LoginView from '../views/LoginView.vue';
 import SignupView from '../views/SignupView.vue';
 import DashboardView from '../views/DashboardView.vue';
+import TransactionDetailView from '../views/TransactionDetailView.vue';
 import AdminUsersView from '../views/AdminUsersView.vue';
 import AdminWalletTypesView from '../views/AdminWalletTypesView.vue';
 
@@ -15,6 +16,12 @@ const router = createRouter({
       path: '/',
       name: 'dashboard',
       component: DashboardView,
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/transactions/:id',
+      name: 'transaction-detail',
+      component: TransactionDetailView,
       meta: { requiresAuth: true },
     },
     {

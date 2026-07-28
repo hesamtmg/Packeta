@@ -109,6 +109,7 @@ All endpoints are JSON. Authenticated endpoints require `Authorization: Bearer <
 | POST   | `/transactions/withdraw`  | ✅   | `{ walletId, amount }` + `Idempotency-Key` header (blocked if the wallet type disallows withdrawals) |
 | POST   | `/transactions/transfer`  | ✅   | `{ fromWalletId, toEmail, amount }` + `Idempotency-Key` header (both wallets' types must allow peer-to-peer) |
 | GET    | `/transactions`           | ✅   | transaction history across all of the current user's wallets (optionally `?walletId=` to filter to one) |
+| GET    | `/transactions/:id`       | ✅   | full detail for one transaction (type, amount, from/to wallet + currency, note, idempotency key) — must touch one of the caller's own wallets |
 | GET    | `/users/me`               | ✅   | the current user's id, email, and role                              |
 | POST   | `/wallet-types`           | 🔒 admin | `{ code, name, currencyCode, allowNegativeBalance, creditLimit?, allowWithdraw, allowP2pOut, allowP2pIn }` → create a new wallet type |
 | PATCH  | `/wallet-types/:id`       | 🔒 admin | partial update of a wallet type's rules (currency can't be changed after creation) |
