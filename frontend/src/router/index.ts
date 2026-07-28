@@ -4,8 +4,13 @@ import LoginView from '../views/LoginView.vue';
 import SignupView from '../views/SignupView.vue';
 import DashboardView from '../views/DashboardView.vue';
 import TransactionDetailView from '../views/TransactionDetailView.vue';
-import AdminUsersView from '../views/AdminUsersView.vue';
-import AdminWalletTypesView from '../views/AdminWalletTypesView.vue';
+import AdminDashboardView from '../views/admin/AdminDashboardView.vue';
+import AdminTransactionsView from '../views/admin/AdminTransactionsView.vue';
+import AdminWalletsView from '../views/admin/AdminWalletsView.vue';
+import AdminCustomersView from '../views/admin/AdminCustomersView.vue';
+import AdminAdminsView from '../views/admin/AdminAdminsView.vue';
+import AdminWalletTypesView from '../views/admin/AdminWalletTypesView.vue';
+import AdminReportsView from '../views/admin/AdminReportsView.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -25,15 +30,45 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
-      path: '/admin/users',
-      name: 'admin-users',
-      component: AdminUsersView,
+      path: '/admin',
+      name: 'admin-dashboard',
+      component: AdminDashboardView,
+      meta: { requiresAuth: true, requiresAdmin: true },
+    },
+    {
+      path: '/admin/transactions',
+      name: 'admin-transactions',
+      component: AdminTransactionsView,
+      meta: { requiresAuth: true, requiresAdmin: true },
+    },
+    {
+      path: '/admin/wallets',
+      name: 'admin-wallets',
+      component: AdminWalletsView,
+      meta: { requiresAuth: true, requiresAdmin: true },
+    },
+    {
+      path: '/admin/customers',
+      name: 'admin-customers',
+      component: AdminCustomersView,
+      meta: { requiresAuth: true, requiresAdmin: true },
+    },
+    {
+      path: '/admin/admins',
+      name: 'admin-admins',
+      component: AdminAdminsView,
       meta: { requiresAuth: true, requiresAdmin: true },
     },
     {
       path: '/admin/wallet-types',
       name: 'admin-wallet-types',
       component: AdminWalletTypesView,
+      meta: { requiresAuth: true, requiresAdmin: true },
+    },
+    {
+      path: '/admin/reports',
+      name: 'admin-reports',
+      component: AdminReportsView,
       meta: { requiresAuth: true, requiresAdmin: true },
     },
   ],

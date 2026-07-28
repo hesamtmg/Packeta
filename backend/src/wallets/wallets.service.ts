@@ -9,6 +9,10 @@ import { Wallet } from './entities/wallet.entity';
 import { WalletType } from '../wallet-types/entities/wallet-type.entity';
 
 const WALLET_RELATIONS = { walletType: { currency: true } } as const;
+const WALLET_RELATIONS_WITH_OWNER = {
+  walletType: { currency: true },
+  user: true,
+} as const;
 
 @Injectable()
 export class WalletsService {
@@ -69,6 +73,14 @@ export class WalletsService {
       throw new ForbiddenException('This wallet does not belong to you');
     }
     return wallet;
+  }
+
+  // Admin use only: every wallet in the system, with its owner attached.
+  async listAll(): Promise<Wallet[]> {
+    return this.walletsRepository.find({
+      relations: WALLET_RELATIONS_WITH_OWNER,
+      order: { createdAt: 'DESC' },
+    });
   }
 
   // No ownership check — for admin use only, where the caller is explicitly

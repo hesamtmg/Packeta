@@ -48,12 +48,19 @@ A multi-wallet app.
   already-committed Postgres transaction.
 - **Admin panel**: users have a `role` (`USER`/`ADMIN`). `AdminGuard` re-checks the caller's role against the
   DB on every admin request (rather than trusting a claim baked into the JWT), so revoking admin access
-  takes effect immediately. Admins can manage the `wallet_types` table itself (create new types, edit an
-  existing type's rules), look up any user and their wallets/transaction history, and make manual balance
-  adjustments. An adjustment is its own ledger entry (`ADJUSTMENT`) recording the admin's reason and who
-  performed it, still bounded by the wallet's own balance floor — admins can correct balances, not bypass
-  the wallet type's fundamental rules. There's no UI for granting the *first* admin (that would be a
-  privilege-escalation hole); use the `promote-admin` script instead.
+  takes effect immediately. There's no UI for granting the *first* admin (that would be a
+  privilege-escalation hole); use the `promote-admin` script instead — after that, admins can promote/demote
+  other users from the panel itself. Balance adjustments are their own ledger entry (`ADJUSTMENT`) recording
+  the admin's reason and who performed it, still bounded by the wallet's own balance floor — admins can
+  correct balances, not bypass a wallet type's fundamental rules.
+
+  The panel (`/admin`) is a dark dashboard-style UI with a sidebar: **Dashboard** (KPI tiles, a signups
+  chart, latest transaction, recent activity table), **Transactions** (every transaction system-wide,
+  filterable by type), **Wallets** (every wallet system-wide, searchable, with inline balance adjustment),
+  **Customers** (`role: USER` accounts — drill into one to see its wallets, adjust balances, and view its
+  history), **Admins** (promote a customer / demote an admin — you can't demote yourself), **Wallet Types**
+  (the existing type/currency rule editor), and **Reports** (30-day activity chart, breakdowns by
+  transaction type and wallet type, most-active customers).
 
 ## Running locally
 
@@ -115,7 +122,10 @@ All endpoints are JSON. Authenticated endpoints require `Authorization: Bearer <
 | PATCH  | `/wallet-types/:id`       | 🔒 admin | partial update of a wallet type's rules (currency can't be changed after creation) |
 | GET    | `/admin/users`            | 🔒 admin | list all users                                                       |
 | GET    | `/admin/users/:id`        | 🔒 admin | a user's profile + all of their wallets                              |
+| PATCH  | `/admin/users/:id/role`   | 🔒 admin | `{ role: "USER" \| "ADMIN" }` → promote/demote (can't target yourself) |
 | GET    | `/admin/users/:id/transactions` | 🔒 admin | that user's full transaction history                           |
+| GET    | `/admin/wallets`          | 🔒 admin | every wallet system-wide, each with its owner's email                |
+| GET    | `/admin/transactions`     | 🔒 admin | every transaction system-wide, most recent first (`?limit=`)         |
 | POST   | `/admin/wallets/:id/adjust` | 🔒 admin | `{ amount, reason }` (signed minor units) + `Idempotency-Key` header → manual balance correction |
 
 ## Tests

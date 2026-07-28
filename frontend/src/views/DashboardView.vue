@@ -156,8 +156,7 @@ function logout() {
     <header>
       <h1>Packeta Wallet</h1>
       <nav v-if="auth.isAdmin" class="admin-nav">
-        <router-link :to="{ name: 'admin-users' }">Admin: Users</router-link>
-        <router-link :to="{ name: 'admin-wallet-types' }">Admin: Wallet Types</router-link>
+        <router-link :to="{ name: 'admin-dashboard' }">Admin Panel</router-link>
       </nav>
       <button @click="logout">Log out</button>
     </header>

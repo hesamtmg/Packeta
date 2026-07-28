@@ -1,11 +1,14 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
   Headers,
   NotFoundException,
   Param,
+  Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -19,6 +22,7 @@ import { WalletsService } from '../wallets/wallets.service';
 import { TransactionsService } from '../transactions/transactions.service';
 import { serializeWallet } from '../wallets/wallet.serializer';
 import { AdjustWalletDto } from './dto/adjust-wallet.dto';
+import { UpdateUserRoleDto } from './dto/update-user-role.dto';
 
 @Controller('admin')
 @UseGuards(JwtAuthGuard, AdminGuard)
@@ -56,9 +60,40 @@ export class AdminController {
     };
   }
 
+  @Patch('users/:id/role')
+  async updateUserRole(
+    @CurrentUser() admin: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateUserRoleDto,
+  ) {
+    if (id === admin.userId) {
+      throw new BadRequestException(
+        'Cannot change your own admin role from the panel',
+      );
+    }
+    const user = await this.usersService.setRole(id, dto.role);
+    return { id: user.id, email: user.email, role: user.role };
+  }
+
   @Get('users/:id/transactions')
   async getUserTransactions(@Param('id') id: string) {
     return this.transactionsService.getHistory(id);
+  }
+
+  @Get('wallets')
+  async listWallets() {
+    const wallets = await this.walletsService.listAll();
+    return wallets.map((wallet) => ({
+      ...serializeWallet(wallet),
+      ownerId: wallet.user.id,
+      ownerEmail: wallet.user.email,
+    }));
+  }
+
+  @Get('transactions')
+  async listTransactions(@Query('limit') limit?: string) {
+    const parsedLimit = limit ? parseInt(limit, 10) : undefined;
+    return this.transactionsService.listAll(parsedLimit);
   }
 
   @Post('wallets/:id/adjust')
