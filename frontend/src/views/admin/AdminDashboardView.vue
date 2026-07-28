@@ -1,0 +1,251 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue';
+import { apiRequest, ApiError } from '../../api/client';
+import { formatAmount } from '../../utils/currency';
+import {
+  walletLookup,
+  transactionCurrency,
+  type AdminUser,
+  type AdminWallet,
+  type AdminTransaction,
+} from '../../types/admin';
+import AdminLayout from '../../components/admin/AdminLayout.vue';
+import MiniLineChart from '../../components/admin/MiniLineChart.vue';
+
+const users = ref<AdminUser[]>([]);
+const wallets = ref<AdminWallet[]>([]);
+const transactions = ref<AdminTransaction[]>([]);
+const error = ref('');
+
+const walletsById = computed(() => walletLookup(wallets.value));
+
+const customerCount = computed(() => users.value.filter((u) => u.role === 'USER').length);
+const adminCount = computed(() => users.value.filter((u) => u.role === 'ADMIN').length);
+const walletCount = computed(() => wallets.value.length);
+const transactionCount = computed(() => transactions.value.length);
+
+const signupsPerDay = computed(() => {
+  const days = 14;
+  const buckets = new Array(days).fill(0);
+  const now = new Date();
+  const dayMs = 24 * 60 * 60 * 1000;
+  for (const u of users.value) {
+    const diff = Math.floor((now.getTime() - new Date(u.createdAt).getTime()) / dayMs);
+    const idx = days - 1 - diff;
+    if (idx >= 0 && idx < days) buckets[idx] += 1;
+  }
+  return buckets;
+});
+
+const latestTransaction = computed(() => transactions.value[0] ?? null);
+
+function formatTxAmount(tx: AdminTransaction): string {
+  const currency = transactionCurrency(tx, walletsById.value);
+  return currency ? formatAmount(tx.amount, currency) : tx.amount;
+}
+
+function walletLabel(walletId: string | null): string {
+  if (!walletId) return '—';
+  const w = walletsById.value.get(walletId);
+  return w ? `${w.walletType.name} (${w.walletType.currency.code})` : 'Unknown';
+}
+
+function ownerEmail(tx: AdminTransaction): string {
+  const w =
+    (tx.fromWalletId && walletsById.value.get(tx.fromWalletId)) ||
+    (tx.toWalletId && walletsById.value.get(tx.toWalletId));
+  return w ? w.ownerEmail : '—';
+}
+
+async function load() {
+  error.value = '';
+  try {
+    [users.value, wallets.value, transactions.value] = await Promise.all([
+      apiRequest<AdminUser[]>('/admin/users'),
+      apiRequest<AdminWallet[]>('/admin/wallets'),
+      apiRequest<AdminTransaction[]>('/admin/transactions?limit=300'),
+    ]);
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : 'Failed to load dashboard';
+  }
+}
+
+onMounted(load);
+</script>
+
+<template>
+  <AdminLayout title="Dashboard">
+    <p v-if="error" class="admin-error">{{ error }}</p>
+
+    <div class="admin-grid admin-grid-2">
+      <div class="hero-card">
+        <div class="hero-copy">
+          <span class="hero-eyebrow">Overview</span>
+          <h2>Every wallet, currency, and customer in one place</h2>
+          <p>
+            {{ customerCount }} customers hold {{ walletCount }} wallets across
+            all currencies, with {{ transactionCount }} recent transactions on record.
+          </p>
+          <router-link :to="{ name: 'admin-reports' }" class="admin-btn admin-btn-primary">
+            View reports
+          </router-link>
+        </div>
+
+        <div class="hero-pills">
+          <div class="pill">
+            <span class="pill-value">{{ customerCount }}</span>
+            <span class="pill-label"><i class="dot dot-orange" />Customers</span>
+          </div>
+          <div class="pill">
+            <span class="pill-value">{{ walletCount }}</span>
+            <span class="pill-label"><i class="dot dot-lime" />Wallets</span>
+          </div>
+          <div class="pill">
+            <span class="pill-value">{{ transactionCount }}</span>
+            <span class="pill-label"><i class="dot dot-blue" />Transactions</span>
+          </div>
+          <div class="pill">
+            <span class="pill-value">{{ adminCount }}</span>
+            <span class="pill-label"><i class="dot dot-red" />Admins</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="side-stack">
+        <div class="admin-card">
+          <h2>New signups (14d)</h2>
+          <MiniLineChart :data="signupsPerDay" color="#d8ff5c" :height="70" />
+        </div>
+        <div class="admin-card" v-if="latestTransaction">
+          <h2>Latest transaction</h2>
+          <div class="latest-amount">{{ formatTxAmount(latestTransaction) }}</div>
+          <div class="latest-meta">
+            {{ latestTransaction.type }} · {{ walletLabel(latestTransaction.toWalletId ?? latestTransaction.fromWalletId) }}
+          </div>
+          <div class="latest-meta">{{ new Date(latestTransaction.createdAt).toLocaleString() }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="admin-card">
+      <h2>Recent transactions</h2>
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Amount</th>
+            <th>Wallet</th>
+            <th>Customer</th>
+            <th>Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="tx in transactions.slice(0, 8)" :key="tx.id">
+            <td><span class="admin-badge">{{ tx.type }}</span></td>
+            <td>{{ formatTxAmount(tx) }}</td>
+            <td>{{ walletLabel(tx.toWalletId ?? tx.fromWalletId) }}</td>
+            <td>{{ ownerEmail(tx) }}</td>
+            <td>{{ new Date(tx.createdAt).toLocaleDateString() }}</td>
+          </tr>
+          <tr v-if="!transactions.length"><td colspan="5">No transactions yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </AdminLayout>
+</template>
+
+<style scoped>
+.hero-card {
+  position: relative;
+  border-radius: var(--radius-md);
+  padding: 32px 28px 56px;
+  background: linear-gradient(135deg, #3a2418 0%, #1e1c25 65%);
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 260px;
+}
+
+.hero-eyebrow {
+  font-size: 0.78rem;
+  color: var(--accent-orange-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+
+.hero-copy h2 {
+  font-size: 1.9rem;
+  line-height: 1.2;
+  margin: 10px 0 12px;
+  max-width: 420px;
+}
+
+.hero-copy p {
+  color: var(--text-dim);
+  max-width: 440px;
+  margin: 0 0 20px;
+}
+
+.hero-pills {
+  position: absolute;
+  left: 28px;
+  right: 28px;
+  bottom: -22px;
+  display: flex;
+  background: rgba(15, 13, 18, 0.85);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+  gap: 28px;
+}
+
+.pill {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pill-value {
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.pill-label {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.dot-orange { background: var(--accent-orange); }
+.dot-lime { background: var(--accent-lime); }
+.dot-blue { background: var(--accent-blue); }
+.dot-red { background: var(--accent-red); }
+
+.side-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.latest-amount {
+  font-size: 1.8rem;
+  font-weight: 700;
+}
+
+.latest-meta {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  margin-top: 4px;
+}
+</style>

@@ -1,7 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { User } from './entities/user.entity';
+import { User, UserRole } from './entities/user.entity';
 
 @Injectable()
 export class UsersService {
@@ -24,5 +24,14 @@ export class UsersService {
 
   findAll(): Promise<User[]> {
     return this.usersRepository.find({ order: { createdAt: 'ASC' } });
+  }
+
+  async setRole(id: string, role: UserRole): Promise<User> {
+    const user = await this.findById(id);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    user.role = role;
+    return this.usersRepository.save(user);
   }
 }

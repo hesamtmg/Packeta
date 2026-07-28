@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue';
-import { apiRequest, ApiError } from '../api/client';
-import { amountStep, toMinorUnits, type CurrencyInfo } from '../utils/currency';
+import { apiRequest, ApiError } from '../../api/client';
+import { amountStep, toMinorUnits, type CurrencyInfo } from '../../utils/currency';
+import AdminLayout from '../../components/admin/AdminLayout.vue';
 
 interface WalletType {
   id: string;
@@ -125,52 +126,51 @@ loadTypes();
 </script>
 
 <template>
-  <div class="admin-page">
-    <header>
-      <h1>Admin: Wallet Types</h1>
-      <router-link :to="{ name: 'dashboard' }">Back to wallet</router-link>
-    </header>
+  <AdminLayout title="Wallet Types">
+    <p v-if="error" class="admin-error">{{ error }}</p>
 
-    <p v-if="error" class="error">{{ error }}</p>
-
-    <div class="types">
-      <article v-for="t in types" :key="t.id" class="type-card">
-        <span class="code">{{ t.code }} · {{ t.currency.code }}</span>
-        <label>Name <input v-model="t.name" type="text" /></label>
-        <label>
-          <input v-model="t.allowNegativeBalance" type="checkbox" />
-          Allow negative balance (credit line)
-        </label>
-        <label v-if="t.allowNegativeBalance">
-          Credit limit ({{ t.currency.code }})
-          <input
-            :value="creditLimitDisplay(t)"
-            type="number"
-            :step="amountStep(t.currency)"
-            @input="onCreditLimitInput(t, $event)"
-          />
-        </label>
-        <label><input v-model="t.allowWithdraw" type="checkbox" /> Allow withdrawals</label>
-        <label><input v-model="t.allowP2pOut" type="checkbox" /> Can send transfers</label>
-        <label><input v-model="t.allowP2pIn" type="checkbox" /> Can receive transfers</label>
-        <button :disabled="busy" @click="save(t)">Save</button>
-      </article>
+    <div class="admin-card">
+      <h2>Types ({{ types.length }})</h2>
+      <div class="types">
+        <article v-for="t in types" :key="t.id" class="type-card">
+          <span class="code">{{ t.code }} · {{ t.currency.code }}</span>
+          <label>Name <input v-model="t.name" type="text" class="admin-input" /></label>
+          <label class="checkbox-label">
+            <input v-model="t.allowNegativeBalance" type="checkbox" />
+            Allow negative balance (credit line)
+          </label>
+          <label v-if="t.allowNegativeBalance">
+            Credit limit ({{ t.currency.code }})
+            <input
+              :value="creditLimitDisplay(t)"
+              type="number"
+              :step="amountStep(t.currency)"
+              class="admin-input"
+              @input="onCreditLimitInput(t, $event)"
+            />
+          </label>
+          <label class="checkbox-label"><input v-model="t.allowWithdraw" type="checkbox" /> Allow withdrawals</label>
+          <label class="checkbox-label"><input v-model="t.allowP2pOut" type="checkbox" /> Can send transfers</label>
+          <label class="checkbox-label"><input v-model="t.allowP2pIn" type="checkbox" /> Can receive transfers</label>
+          <button class="admin-btn admin-btn-primary" :disabled="busy" @click="save(t)">Save</button>
+        </article>
+      </div>
     </div>
 
-    <form class="type-card new-type" @submit.prevent="createType">
+    <form class="admin-card new-type" @submit.prevent="createType">
       <h2>Add wallet type</h2>
-      <label>Code <input v-model="newType.code" type="text" required placeholder="e.g. REWARDS" /></label>
-      <label>Name <input v-model="newType.name" type="text" required /></label>
+      <label>Code <input v-model="newType.code" type="text" class="admin-input" required placeholder="e.g. REWARDS" /></label>
+      <label>Name <input v-model="newType.name" type="text" class="admin-input" required /></label>
       <label>
         Currency
-        <select v-model="newType.currencyCode" required>
+        <select v-model="newType.currencyCode" class="admin-input" required>
           <option value="" disabled>Choose currency</option>
           <option v-for="c in currencies" :key="c.code" :value="c.code">
             {{ c.code }}
           </option>
         </select>
       </label>
-      <label>
+      <label class="checkbox-label">
         <input v-model="newType.allowNegativeBalance" type="checkbox" />
         Allow negative balance (credit line)
       </label>
@@ -179,76 +179,62 @@ loadTypes();
         <input
           v-model="newType.creditLimit"
           type="number"
+          class="admin-input"
           :step="newTypeCurrency ? amountStep(newTypeCurrency) : '0.01'"
           required
         />
       </label>
-      <label><input v-model="newType.allowWithdraw" type="checkbox" /> Allow withdrawals</label>
-      <label><input v-model="newType.allowP2pOut" type="checkbox" /> Can send transfers</label>
-      <label><input v-model="newType.allowP2pIn" type="checkbox" /> Can receive transfers</label>
-      <button type="submit" :disabled="busy">Create</button>
+      <label class="checkbox-label"><input v-model="newType.allowWithdraw" type="checkbox" /> Allow withdrawals</label>
+      <label class="checkbox-label"><input v-model="newType.allowP2pOut" type="checkbox" /> Can send transfers</label>
+      <label class="checkbox-label"><input v-model="newType.allowP2pIn" type="checkbox" /> Can receive transfers</label>
+      <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">Create</button>
     </form>
-  </div>
+  </AdminLayout>
 </template>
 
 <style scoped>
-.admin-page {
-  max-width: 900px;
-  margin: 0 auto;
-  padding: 2rem 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
 .types {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 1rem;
+  gap: 14px;
 }
 .type-card {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 1rem;
+  gap: 8px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
 }
 .code {
-  font-size: 0.75rem;
-  color: #666;
+  font-size: 0.72rem;
+  color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
 .type-card label {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 4px;
   font-size: 0.85rem;
+  color: var(--text-dim);
 }
-.type-card label:has(input[type='checkbox']) {
-  flex-direction: row;
+.checkbox-label {
+  flex-direction: row !important;
   align-items: center;
-  gap: 0.5rem;
-}
-.type-card input[type='text'],
-.type-card input[type='number'],
-.type-card select {
-  padding: 0.4rem;
-}
-.type-card button {
-  padding: 0.5rem;
-  cursor: pointer;
+  gap: 8px !important;
 }
 .new-type {
   max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
-.error {
-  color: #b00020;
-  font-size: 0.9rem;
+.new-type label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: var(--text-dim);
 }
 </style>

@@ -284,6 +284,14 @@ export class TransactionsService {
     });
   }
 
+  // Admin use only: every transaction in the system, most recent first.
+  async listAll(limit = 200): Promise<Transaction[]> {
+    return this.transactionsRepository.find({
+      order: { createdAt: 'DESC' },
+      take: limit,
+    });
+  }
+
   // Full detail for a single transaction, including the type/currency of
   // whichever wallet(s) it touched — enough for a standalone detail view
   // without extra round trips. Scoped to transactions that touch at least
