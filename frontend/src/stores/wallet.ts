@@ -1,9 +1,21 @@
 import { defineStore } from 'pinia';
 import { apiRequest } from '../api/client';
 
-interface Wallet {
+export interface WalletType {
+  code: string;
+  name: string;
+  allowNegativeBalance: boolean;
+  creditLimit: string | null;
+  allowWithdraw: boolean;
+  allowP2pOut: boolean;
+  allowP2pIn: boolean;
+}
+
+export interface Wallet {
   id: string;
   balance: string;
+  walletType: WalletType;
+  createdAt: string;
 }
 
 interface Transaction {
@@ -17,39 +29,50 @@ interface Transaction {
 
 export const useWalletStore = defineStore('wallet', {
   state: () => ({
-    wallet: null as Wallet | null,
+    wallets: [] as Wallet[],
+    walletTypes: [] as WalletType[],
     transactions: [] as Transaction[],
   }),
   actions: {
-    async fetchWallet() {
-      this.wallet = await apiRequest<Wallet>('/wallets/me');
+    async fetchWallets() {
+      this.wallets = await apiRequest<Wallet[]>('/wallets');
+    },
+    async fetchWalletTypes() {
+      this.walletTypes = await apiRequest<WalletType[]>('/wallet-types');
     },
     async fetchTransactions() {
       this.transactions = await apiRequest<Transaction[]>('/transactions');
     },
-    async deposit(amount: number) {
+    async createWallet(walletTypeCode: string) {
+      await apiRequest('/wallets', {
+        method: 'POST',
+        body: { walletTypeCode },
+      });
+      await this.fetchWallets();
+    },
+    async deposit(walletId: string, amount: number) {
       await apiRequest('/transactions/deposit', {
         method: 'POST',
-        body: { amount },
+        body: { walletId, amount },
         idempotent: true,
       });
-      await Promise.all([this.fetchWallet(), this.fetchTransactions()]);
+      await Promise.all([this.fetchWallets(), this.fetchTransactions()]);
     },
-    async withdraw(amount: number) {
+    async withdraw(walletId: string, amount: number) {
       await apiRequest('/transactions/withdraw', {
         method: 'POST',
-        body: { amount },
+        body: { walletId, amount },
         idempotent: true,
       });
-      await Promise.all([this.fetchWallet(), this.fetchTransactions()]);
+      await Promise.all([this.fetchWallets(), this.fetchTransactions()]);
     },
-    async transfer(toEmail: string, amount: number) {
+    async transfer(fromWalletId: string, toEmail: string, amount: number) {
       await apiRequest('/transactions/transfer', {
         method: 'POST',
-        body: { toEmail, amount },
+        body: { fromWalletId, toEmail, amount },
         idempotent: true,
       });
-      await Promise.all([this.fetchWallet(), this.fetchTransactions()]);
+      await Promise.all([this.fetchWallets(), this.fetchTransactions()]);
     },
   },
 });

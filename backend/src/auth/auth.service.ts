@@ -45,7 +45,10 @@ export class AuthService {
         passwordHash,
       });
       const savedUser = await manager.save(created);
-      await this.walletsService.createForUser(manager, savedUser.id);
+      await this.walletsService.createDefaultWalletsForUser(
+        manager,
+        savedUser.id,
+      );
       return savedUser;
     });
 

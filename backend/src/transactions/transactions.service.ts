@@ -1,11 +1,12 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { Wallet } from '../wallets/entities/wallet.entity';
 import { User } from '../users/entities/user.entity';
 import { Transaction, TransactionType } from './entities/transaction.entity';
@@ -33,16 +34,20 @@ export class TransactionsService {
 
   async deposit(
     userId: string,
+    walletId: string,
     amount: number,
     idempotencyKey: string,
   ): Promise<MoneyResult> {
     return this.run(
       'deposit',
       userId,
-      { amount },
+      { walletId, amount },
       idempotencyKey,
       async (manager) => {
-        const wallet = await this.walletsService.lockByUserId(manager, userId);
+        // Ownership check; deposits are allowed on every wallet type.
+        await this.walletsService.getById(userId, walletId);
+
+        const wallet = await this.walletsService.lockById(manager, walletId);
         const newBalance = (BigInt(wallet.balance) + BigInt(amount)).toString();
         await manager.update(Wallet, wallet.id, { balance: newBalance });
 
@@ -67,21 +72,34 @@ export class TransactionsService {
 
   async withdraw(
     userId: string,
+    walletId: string,
     amount: number,
     idempotencyKey: string,
   ): Promise<MoneyResult> {
     return this.run(
       'withdraw',
       userId,
-      { amount },
+      { walletId, amount },
       idempotencyKey,
       async (manager) => {
-        const wallet = await this.walletsService.lockByUserId(manager, userId);
-        if (BigInt(wallet.balance) < BigInt(amount)) {
+        const walletRef = await this.walletsService.getById(userId, walletId);
+        if (!walletRef.walletType.allowWithdraw) {
+          throw new ForbiddenException(
+            `${walletRef.walletType.name} wallets do not support withdrawals`,
+          );
+        }
+
+        const wallet = await this.walletsService.lockById(manager, walletId);
+        const floor = walletRef.walletType.allowNegativeBalance
+          ? -BigInt(walletRef.walletType.creditLimit ?? '0')
+          : 0n;
+        const newBalance = BigInt(wallet.balance) - BigInt(amount);
+        if (newBalance < floor) {
           throw new UnprocessableEntityException('Insufficient balance');
         }
-        const newBalance = (BigInt(wallet.balance) - BigInt(amount)).toString();
-        await manager.update(Wallet, wallet.id, { balance: newBalance });
+        await manager.update(Wallet, wallet.id, {
+          balance: newBalance.toString(),
+        });
 
         const transaction = manager.create(Transaction, {
           type: TransactionType.WITHDRAW,
@@ -96,7 +114,7 @@ export class TransactionsService {
           transactionId: transaction.id,
           fromWalletId: wallet.id,
           toWalletId: null,
-          balance: newBalance,
+          balance: newBalance.toString(),
         };
       },
     );
@@ -104,6 +122,7 @@ export class TransactionsService {
 
   async transfer(
     userId: string,
+    fromWalletId: string,
     toEmail: string,
     amount: number,
     idempotencyKey: string,
@@ -111,9 +130,19 @@ export class TransactionsService {
     return this.run(
       'transfer',
       userId,
-      { toEmail, amount },
+      { fromWalletId, toEmail, amount },
       idempotencyKey,
       async (manager) => {
+        const fromWalletRef = await this.walletsService.getById(
+          userId,
+          fromWalletId,
+        );
+        if (!fromWalletRef.walletType.allowP2pOut) {
+          throw new ForbiddenException(
+            `${fromWalletRef.walletType.name} wallets cannot send transfers`,
+          );
+        }
+
         const recipient = await manager.findOne(User, {
           where: { email: toEmail },
         });
@@ -124,44 +153,47 @@ export class TransactionsService {
           throw new BadRequestException('Cannot transfer to your own wallet');
         }
 
-        const [senderWalletRef, recipientWalletRef] = await Promise.all([
-          this.walletsService.getByUserId(userId),
-          this.walletsService.getByUserId(recipient.id),
-        ]);
+        const toWalletRef = await this.walletsService.findEligibleP2pInWallet(
+          manager,
+          recipient.id,
+        );
+        if (!toWalletRef) {
+          throw new NotFoundException(
+            'Recipient has no wallet eligible to receive this transfer',
+          );
+        }
 
         // Lock both wallet rows in a fixed order (ascending wallet id)
         // regardless of transfer direction, so two concurrent transfers
         // between the same pair of wallets can never deadlock.
-        const orderedIds = [senderWalletRef.id, recipientWalletRef.id].sort();
+        const orderedIds = [fromWalletRef.id, toWalletRef.id].sort();
         const locked = new Map<string, Wallet>();
         for (const id of orderedIds) {
           locked.set(id, await this.walletsService.lockById(manager, id));
         }
-        const senderWallet = locked.get(senderWalletRef.id)!;
-        const recipientWallet = locked.get(recipientWalletRef.id)!;
+        const fromWallet = locked.get(fromWalletRef.id)!;
+        const toWallet = locked.get(toWalletRef.id)!;
 
-        if (BigInt(senderWallet.balance) < BigInt(amount)) {
+        const floor = fromWalletRef.walletType.allowNegativeBalance
+          ? -BigInt(fromWalletRef.walletType.creditLimit ?? '0')
+          : 0n;
+        const newFromBalance = BigInt(fromWallet.balance) - BigInt(amount);
+        if (newFromBalance < floor) {
           throw new UnprocessableEntityException('Insufficient balance');
         }
-
-        const newSenderBalance = (
-          BigInt(senderWallet.balance) - BigInt(amount)
-        ).toString();
-        const newRecipientBalance = (
-          BigInt(recipientWallet.balance) + BigInt(amount)
+        const newToBalance = (
+          BigInt(toWallet.balance) + BigInt(amount)
         ).toString();
 
-        await manager.update(Wallet, senderWallet.id, {
-          balance: newSenderBalance,
+        await manager.update(Wallet, fromWallet.id, {
+          balance: newFromBalance.toString(),
         });
-        await manager.update(Wallet, recipientWallet.id, {
-          balance: newRecipientBalance,
-        });
+        await manager.update(Wallet, toWallet.id, { balance: newToBalance });
 
         const transaction = manager.create(Transaction, {
           type: TransactionType.TRANSFER,
-          fromWalletId: senderWallet.id,
-          toWalletId: recipientWallet.id,
+          fromWalletId: fromWallet.id,
+          toWalletId: toWallet.id,
           amount: amount.toString(),
           idempotencyKey,
         });
@@ -169,18 +201,24 @@ export class TransactionsService {
 
         return {
           transactionId: transaction.id,
-          fromWalletId: senderWallet.id,
-          toWalletId: recipientWallet.id,
-          balance: newSenderBalance,
+          fromWalletId: fromWallet.id,
+          toWalletId: toWallet.id,
+          balance: newFromBalance.toString(),
         };
       },
     );
   }
 
-  async getHistory(userId: string): Promise<Transaction[]> {
-    const wallet = await this.walletsService.getByUserId(userId);
+  async getHistory(userId: string, walletId?: string): Promise<Transaction[]> {
+    const wallets = walletId
+      ? [await this.walletsService.getById(userId, walletId)]
+      : await this.walletsService.listForUser(userId);
+    const walletIds = wallets.map((wallet) => wallet.id);
+    if (walletIds.length === 0) {
+      return [];
+    }
     return this.transactionsRepository.find({
-      where: [{ fromWalletId: wallet.id }, { toWalletId: wallet.id }],
+      where: [{ fromWalletId: In(walletIds) }, { toWalletId: In(walletIds) }],
       order: { createdAt: 'DESC' },
     });
   }
@@ -190,7 +228,7 @@ export class TransactionsService {
     userId: string,
     payload: Record<string, unknown>,
     idempotencyKey: string,
-    work: (manager: import('typeorm').EntityManager) => Promise<MoneyResult>,
+    work: (manager: EntityManager) => Promise<MoneyResult>,
   ): Promise<MoneyResult> {
     if (!idempotencyKey) {
       throw new BadRequestException('Idempotency-Key header is required');
