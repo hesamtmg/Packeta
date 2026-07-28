@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import { apiRequest, ApiError } from '../api/client';
+import { amountStep, toMinorUnits, type CurrencyInfo } from '../utils/currency';
 
 interface WalletType {
   id: string;
   code: string;
   name: string;
+  currency: CurrencyInfo;
   allowNegativeBalance: boolean;
   creditLimit: string | null;
   allowWithdraw: boolean;
@@ -14,12 +16,14 @@ interface WalletType {
 }
 
 const types = ref<WalletType[]>([]);
+const currencies = ref<CurrencyInfo[]>([]);
 const error = ref('');
 const busy = ref(false);
 
 const newType = reactive({
   code: '',
   name: '',
+  currencyCode: '',
   allowNegativeBalance: false,
   creditLimit: '',
   allowWithdraw: true,
@@ -27,10 +31,29 @@ const newType = reactive({
   allowP2pIn: false,
 });
 
+const newTypeCurrency = computed(
+  () => currencies.value.find((c) => c.code === newType.currencyCode) ?? null,
+);
+
+function creditLimitDisplay(type: WalletType): string {
+  if (!type.creditLimit) return '';
+  return (Number(type.creditLimit) / 10 ** type.currency.decimalPlaces).toFixed(
+    type.currency.decimalPlaces,
+  );
+}
+
+function onCreditLimitInput(type: WalletType, event: Event) {
+  const raw = (event.target as HTMLInputElement).value;
+  type.creditLimit = String(toMinorUnits(raw, type.currency));
+}
+
 async function loadTypes() {
   error.value = '';
   try {
-    types.value = await apiRequest<WalletType[]>('/wallet-types');
+    [types.value, currencies.value] = await Promise.all([
+      apiRequest<WalletType[]>('/wallet-types'),
+      apiRequest<CurrencyInfo[]>('/currencies'),
+    ]);
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : 'Failed to load wallet types';
   }
@@ -65,15 +88,18 @@ async function createType() {
   error.value = '';
   busy.value = true;
   try {
+    const currency = newTypeCurrency.value;
     await apiRequest('/wallet-types', {
       method: 'POST',
       body: {
         code: newType.code.toUpperCase(),
         name: newType.name,
+        currencyCode: newType.currencyCode,
         allowNegativeBalance: newType.allowNegativeBalance,
-        creditLimit: newType.allowNegativeBalance
-          ? Math.round(parseFloat(newType.creditLimit || '0') * 100)
-          : undefined,
+        creditLimit:
+          newType.allowNegativeBalance && currency
+            ? toMinorUnits(newType.creditLimit, currency)
+            : undefined,
         allowWithdraw: newType.allowWithdraw,
         allowP2pOut: newType.allowP2pOut,
         allowP2pIn: newType.allowP2pIn,
@@ -81,6 +107,7 @@ async function createType() {
     });
     newType.code = '';
     newType.name = '';
+    newType.currencyCode = '';
     newType.allowNegativeBalance = false;
     newType.creditLimit = '';
     newType.allowWithdraw = true;
@@ -108,19 +135,19 @@ loadTypes();
 
     <div class="types">
       <article v-for="t in types" :key="t.id" class="type-card">
-        <span class="code">{{ t.code }}</span>
+        <span class="code">{{ t.code }} · {{ t.currency.code }}</span>
         <label>Name <input v-model="t.name" type="text" /></label>
         <label>
           <input v-model="t.allowNegativeBalance" type="checkbox" />
           Allow negative balance (credit line)
         </label>
         <label v-if="t.allowNegativeBalance">
-          Credit limit ($)
+          Credit limit ({{ t.currency.code }})
           <input
-            :value="t.creditLimit ? (Number(t.creditLimit) / 100).toFixed(2) : ''"
+            :value="creditLimitDisplay(t)"
             type="number"
-            step="0.01"
-            @input="t.creditLimit = String(Math.round(Number(($event.target as HTMLInputElement).value) * 100))"
+            :step="amountStep(t.currency)"
+            @input="onCreditLimitInput(t, $event)"
           />
         </label>
         <label><input v-model="t.allowWithdraw" type="checkbox" /> Allow withdrawals</label>
@@ -135,12 +162,26 @@ loadTypes();
       <label>Code <input v-model="newType.code" type="text" required placeholder="e.g. REWARDS" /></label>
       <label>Name <input v-model="newType.name" type="text" required /></label>
       <label>
+        Currency
+        <select v-model="newType.currencyCode" required>
+          <option value="" disabled>Choose currency</option>
+          <option v-for="c in currencies" :key="c.code" :value="c.code">
+            {{ c.code }}
+          </option>
+        </select>
+      </label>
+      <label>
         <input v-model="newType.allowNegativeBalance" type="checkbox" />
         Allow negative balance (credit line)
       </label>
       <label v-if="newType.allowNegativeBalance">
-        Credit limit ($)
-        <input v-model="newType.creditLimit" type="number" step="0.01" required />
+        Credit limit ({{ newType.currencyCode || '…' }})
+        <input
+          v-model="newType.creditLimit"
+          type="number"
+          :step="newTypeCurrency ? amountStep(newTypeCurrency) : '0.01'"
+          required
+        />
       </label>
       <label><input v-model="newType.allowWithdraw" type="checkbox" /> Allow withdrawals</label>
       <label><input v-model="newType.allowP2pOut" type="checkbox" /> Can send transfers</label>
@@ -195,7 +236,8 @@ header {
   gap: 0.5rem;
 }
 .type-card input[type='text'],
-.type-card input[type='number'] {
+.type-card input[type='number'],
+.type-card select {
   padding: 0.4rem;
 }
 .type-card button {

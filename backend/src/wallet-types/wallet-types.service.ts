@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { WalletType } from './entities/wallet-type.entity';
+import { CurrenciesService } from '../currencies/currencies.service';
 import { CreateWalletTypeDto } from './dto/create-wallet-type.dto';
 import { UpdateWalletTypeDto } from './dto/update-wallet-type.dto';
 
@@ -15,22 +16,21 @@ export class WalletTypesService {
   constructor(
     @InjectRepository(WalletType)
     private readonly walletTypesRepository: Repository<WalletType>,
+    private readonly currenciesService: CurrenciesService,
   ) {}
 
   findAll(): Promise<WalletType[]> {
-    return this.walletTypesRepository.find({ order: { name: 'ASC' } });
-  }
-
-  async findByCode(code: string): Promise<WalletType> {
-    const type = await this.walletTypesRepository.findOne({ where: { code } });
-    if (!type) {
-      throw new NotFoundException(`Unknown wallet type "${code}"`);
-    }
-    return type;
+    return this.walletTypesRepository.find({
+      relations: { currency: true },
+      order: { name: 'ASC' },
+    });
   }
 
   async findById(id: string): Promise<WalletType> {
-    const type = await this.walletTypesRepository.findOne({ where: { id } });
+    const type = await this.walletTypesRepository.findOne({
+      where: { id },
+      relations: { currency: true },
+    });
     if (!type) {
       throw new NotFoundException('Wallet type not found');
     }
@@ -38,11 +38,15 @@ export class WalletTypesService {
   }
 
   async create(dto: CreateWalletTypeDto): Promise<WalletType> {
+    const currency = await this.currenciesService.findByCode(dto.currencyCode);
+
     const existing = await this.walletTypesRepository.findOne({
-      where: { code: dto.code },
+      where: { code: dto.code, currencyId: currency.id },
     });
     if (existing) {
-      throw new ConflictException(`Wallet type "${dto.code}" already exists`);
+      throw new ConflictException(
+        `Wallet type "${dto.code}" already exists for ${currency.code}`,
+      );
     }
     if (dto.allowNegativeBalance && dto.creditLimit === undefined) {
       throw new BadRequestException(
@@ -53,13 +57,16 @@ export class WalletTypesService {
     const type = this.walletTypesRepository.create({
       code: dto.code,
       name: dto.name,
+      currencyId: currency.id,
       allowNegativeBalance: dto.allowNegativeBalance,
       creditLimit: dto.allowNegativeBalance ? String(dto.creditLimit) : null,
       allowWithdraw: dto.allowWithdraw,
       allowP2pOut: dto.allowP2pOut,
       allowP2pIn: dto.allowP2pIn,
     });
-    return this.walletTypesRepository.save(type);
+    const saved = await this.walletTypesRepository.save(type);
+    saved.currency = currency;
+    return saved;
   }
 
   async update(id: string, dto: UpdateWalletTypeDto): Promise<WalletType> {

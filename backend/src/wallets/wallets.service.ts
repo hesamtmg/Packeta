@@ -8,6 +8,8 @@ import { EntityManager, Repository } from 'typeorm';
 import { Wallet } from './entities/wallet.entity';
 import { WalletType } from '../wallet-types/entities/wallet-type.entity';
 
+const WALLET_RELATIONS = { walletType: { currency: true } } as const;
+
 @Injectable()
 export class WalletsService {
   constructor(
@@ -28,13 +30,19 @@ export class WalletsService {
     return manager.save(wallet);
   }
 
-  // Gives every new user one wallet of each currently-known type as a
-  // starting set; they can create additional wallets of any type afterwards.
+  // Gives every new user one wallet of each type denominated in the default
+  // currency (USD) as a starting set; they can create additional wallets —
+  // in any currency the admin has made available — afterwards. Adding a new
+  // currency's wallet types therefore never changes what existing or new
+  // users get by default.
   async createDefaultWalletsForUser(
     manager: EntityManager,
     userId: string,
   ): Promise<Wallet[]> {
-    const types = await manager.find(WalletType);
+    const types = await manager.find(WalletType, {
+      relations: { currency: true },
+      where: { currency: { isDefault: true } },
+    });
     const wallets = types.map((type) =>
       manager.create(Wallet, { userId, walletTypeId: type.id, balance: '0' }),
     );
@@ -44,7 +52,7 @@ export class WalletsService {
   async listForUser(userId: string): Promise<Wallet[]> {
     return this.walletsRepository.find({
       where: { userId },
-      relations: { walletType: true },
+      relations: WALLET_RELATIONS,
       order: { createdAt: 'ASC' },
     });
   }
@@ -52,7 +60,7 @@ export class WalletsService {
   async getById(userId: string, walletId: string): Promise<Wallet> {
     const wallet = await this.walletsRepository.findOne({
       where: { id: walletId },
-      relations: { walletType: true },
+      relations: WALLET_RELATIONS,
     });
     if (!wallet) {
       throw new NotFoundException('Wallet not found');
@@ -68,7 +76,7 @@ export class WalletsService {
   async getByIdUnscoped(walletId: string): Promise<Wallet> {
     const wallet = await this.walletsRepository.findOne({
       where: { id: walletId },
-      relations: { walletType: true },
+      relations: WALLET_RELATIONS,
     });
     if (!wallet) {
       throw new NotFoundException('Wallet not found');
@@ -76,18 +84,22 @@ export class WalletsService {
     return wallet;
   }
 
-  // Any wallet of the given type that is eligible to receive a peer-to-peer
-  // transfer, oldest first — the recipient's own choice of which specific
-  // wallet to expose is not something the sender gets to pick.
+  // Any wallet of the given currency that is eligible to receive a
+  // peer-to-peer transfer, oldest first — the recipient's own choice of
+  // which specific wallet to expose is not something the sender gets to
+  // pick. Scoping to the sender's currency keeps transfers same-currency
+  // only, since there's no exchange-rate conversion.
   async findEligibleP2pInWallet(
     manager: EntityManager,
     userId: string,
+    currencyId: string,
   ): Promise<Wallet | null> {
     return manager
       .createQueryBuilder(Wallet, 'wallet')
       .innerJoin('wallet.walletType', 'walletType')
       .where('wallet.userId = :userId', { userId })
       .andWhere('walletType.allowP2pIn = true')
+      .andWhere('walletType.currencyId = :currencyId', { currencyId })
       .orderBy('wallet.createdAt', 'ASC')
       .getOne();
   }

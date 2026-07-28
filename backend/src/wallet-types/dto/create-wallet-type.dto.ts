@@ -17,6 +17,9 @@ export class CreateWalletTypeDto {
   @IsString()
   name: string;
 
+  @IsString()
+  currencyCode: string;
+
   @IsBoolean()
   allowNegativeBalance: boolean;
 

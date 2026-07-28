@@ -1,9 +1,12 @@
 import { defineStore } from 'pinia';
 import { apiRequest } from '../api/client';
+import type { CurrencyInfo } from '../utils/currency';
 
 export interface WalletType {
+  id: string;
   code: string;
   name: string;
+  currency: CurrencyInfo;
   allowNegativeBalance: boolean;
   creditLimit: string | null;
   allowWithdraw: boolean;
@@ -43,10 +46,10 @@ export const useWalletStore = defineStore('wallet', {
     async fetchTransactions() {
       this.transactions = await apiRequest<Transaction[]>('/transactions');
     },
-    async createWallet(walletTypeCode: string) {
+    async createWallet(walletTypeId: string) {
       await apiRequest('/wallets', {
         method: 'POST',
-        body: { walletTypeCode },
+        body: { walletTypeId },
       });
       await this.fetchWallets();
     },

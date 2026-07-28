@@ -2,8 +2,9 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
-import { useWalletStore } from '../stores/wallet';
+import { useWalletStore, type Wallet } from '../stores/wallet';
 import { ApiError } from '../api/client';
+import { amountStep, formatAmount, toMinorUnits } from '../utils/currency';
 
 const auth = useAuthStore();
 const wallet = useWalletStore();
@@ -32,22 +33,33 @@ const walletsById = computed(() => {
   return map;
 });
 
-function formatCents(cents: string): string {
-  return (Number(cents) / 100).toFixed(2);
+function findWallet(id: string): Wallet | undefined {
+  return walletsById.value.get(id);
 }
 
-function toCents(amount: string): number {
-  return Math.round(parseFloat(amount) * 100);
+const depositStep = computed(() => {
+  const w = findWallet(depositWalletId.value);
+  return w ? amountStep(w.walletType.currency) : '0.01';
+});
+const withdrawStep = computed(() => {
+  const w = findWallet(withdrawWalletId.value);
+  return w ? amountStep(w.walletType.currency) : '0.01';
+});
+const transferStep = computed(() => {
+  const w = findWallet(transferFromWalletId.value);
+  return w ? amountStep(w.walletType.currency) : '0.01';
+});
+
+function walletLabel(w: Wallet): string {
+  return `${w.walletType.name} (${w.walletType.currency.code}) — ${formatAmount(w.balance, w.walletType.currency)}`;
 }
 
-function walletLabel(w: { balance: string; walletType: { name: string } }): string {
-  return `${w.walletType.name} — $${formatCents(w.balance)}`;
-}
-
-function badges(w: (typeof wallet.wallets)[number]): string[] {
+function badges(w: Wallet): string[] {
   const list: string[] = [];
   if (w.walletType.allowNegativeBalance) {
-    list.push(`Credit limit $${formatCents(w.walletType.creditLimit ?? '0')}`);
+    list.push(
+      `Credit limit ${formatAmount(w.walletType.creditLimit ?? '0', w.walletType.currency)}`,
+    );
   }
   if (!w.walletType.allowWithdraw) list.push('No cash-out');
   if (!w.walletType.allowP2pOut && !w.walletType.allowP2pIn) {
@@ -65,6 +77,13 @@ function describeTransaction(tx: (typeof wallet.transactions)[number]): string {
   if (fromMine) return `Sent from ${fromMine.walletType.name}`;
   if (toMine) return `Received into ${toMine.walletType.name}`;
   return 'Transfer';
+}
+
+function formatTransactionAmount(tx: (typeof wallet.transactions)[number]): string {
+  const w = (tx.fromWalletId && walletsById.value.get(tx.fromWalletId)) ||
+    (tx.toWalletId && walletsById.value.get(tx.toWalletId));
+  if (!w) return tx.amount;
+  return formatAmount(tx.amount, w.walletType.currency);
 }
 
 onMounted(async () => {
@@ -96,24 +115,30 @@ function onAddWallet() {
 
 function onDeposit() {
   runAction(async () => {
-    await wallet.deposit(depositWalletId.value, toCents(depositAmount.value));
+    const w = findWallet(depositWalletId.value);
+    if (!w) return;
+    await wallet.deposit(w.id, toMinorUnits(depositAmount.value, w.walletType.currency));
     depositAmount.value = '';
   });
 }
 
 function onWithdraw() {
   runAction(async () => {
-    await wallet.withdraw(withdrawWalletId.value, toCents(withdrawAmount.value));
+    const w = findWallet(withdrawWalletId.value);
+    if (!w) return;
+    await wallet.withdraw(w.id, toMinorUnits(withdrawAmount.value, w.walletType.currency));
     withdrawAmount.value = '';
   });
 }
 
 function onTransfer() {
   runAction(async () => {
+    const w = findWallet(transferFromWalletId.value);
+    if (!w) return;
     await wallet.transfer(
-      transferFromWalletId.value,
+      w.id,
       transferEmail.value,
-      toCents(transferAmount.value),
+      toMinorUnits(transferAmount.value, w.walletType.currency),
     );
     transferEmail.value = '';
     transferAmount.value = '';
@@ -141,8 +166,8 @@ function logout() {
 
     <section class="wallets">
       <article v-for="w in wallet.wallets" :key="w.id" class="wallet-card">
-        <span class="wallet-type">{{ w.walletType.name }}</span>
-        <span class="wallet-balance">${{ formatCents(w.balance) }}</span>
+        <span class="wallet-type">{{ w.walletType.name }} · {{ w.walletType.currency.code }}</span>
+        <span class="wallet-balance">{{ formatAmount(w.balance, w.walletType.currency) }}</span>
         <div class="badges">
           <span v-for="b in badges(w)" :key="b" class="badge">{{ b }}</span>
         </div>
@@ -152,8 +177,8 @@ function logout() {
     <form class="add-wallet" @submit.prevent="onAddWallet">
       <select v-model="newWalletType" required>
         <option value="" disabled>Add a wallet…</option>
-        <option v-for="t in wallet.walletTypes" :key="t.code" :value="t.code">
-          {{ t.name }}
+        <option v-for="t in wallet.walletTypes" :key="t.id" :value="t.id">
+          {{ t.name }} ({{ t.currency.code }})
         </option>
       </select>
       <button type="submit" :disabled="busy">Add</button>
@@ -168,7 +193,7 @@ function logout() {
             {{ walletLabel(w) }}
           </option>
         </select>
-        <input v-model="depositAmount" type="number" min="0.01" step="0.01" required />
+        <input v-model="depositAmount" type="number" min="0" :step="depositStep" required />
         <button type="submit" :disabled="busy">Deposit</button>
       </form>
 
@@ -180,7 +205,7 @@ function logout() {
             {{ walletLabel(w) }}
           </option>
         </select>
-        <input v-model="withdrawAmount" type="number" min="0.01" step="0.01" required />
+        <input v-model="withdrawAmount" type="number" min="0" :step="withdrawStep" required />
         <button type="submit" :disabled="busy">Withdraw</button>
       </form>
 
@@ -193,7 +218,7 @@ function logout() {
           </option>
         </select>
         <input v-model="transferEmail" type="email" placeholder="Recipient email" required />
-        <input v-model="transferAmount" type="number" min="0.01" step="0.01" required />
+        <input v-model="transferAmount" type="number" min="0" :step="transferStep" required />
         <button type="submit" :disabled="busy">Transfer</button>
       </form>
     </section>
@@ -203,7 +228,7 @@ function logout() {
       <ul>
         <li v-for="tx in wallet.transactions" :key="tx.id">
           <span>{{ describeTransaction(tx) }}</span>
-          <span>${{ formatCents(tx.amount) }}</span>
+          <span>{{ formatTransactionAmount(tx) }}</span>
           <span>{{ new Date(tx.createdAt).toLocaleString() }}</span>
         </li>
         <li v-if="!wallet.transactions.length">No transactions yet.</li>

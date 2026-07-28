@@ -14,8 +14,17 @@ A multi-wallet app.
   types: **Buy** (general spending, can send/receive peer-to-peer), **Sell** (earnings, no P2P),
   **Credit** (a real credit line — can go negative down to `-creditLimit`, e.g. a cash advance), and
   **Gift** (spend-only — no withdrawals, no P2P in or out).
-- **Multiple wallets per user**: a user can hold several wallets of the same type. Every new user gets one
-  wallet of each known type on signup and can create more of any type afterwards (`POST /wallets`).
+- **Currencies are data too, and a wallet type is denominated in exactly one**: the `currencies` table
+  holds each currency's `decimalPlaces` and display `symbol`/`symbolPosition` (USD: 2 places, `$` prefix;
+  IRR: 0 places, `IRR` suffix — Rial isn't shown with subdivisions the way dollars are). A wallet type is
+  paired with a currency (e.g. "Credit" has a separate USD row and a separate IRR row) rather than a wallet
+  carrying its own currency field, because `creditLimit` is a flat number that only means something in one
+  currency's scale. Seeded with USD (the default currency) and IRR, each with all four wallet types.
+  Transfers only work between wallets holding the *same* currency — there's no exchange-rate conversion.
+- **Multiple wallets per user**: a user can hold several wallets of the same type (and, since type is paired
+  with currency, of the same currency). Every new user gets one wallet of each type denominated in the
+  *default* currency on signup; adding a new currency later never expands what existing or new users get by
+  default. Users can create more wallets of any type/currency combination afterwards (`POST /wallets`).
 - **Balance model**: each wallet has a cached `balance` (bigint, minor units e.g. cents). The floor a
   balance can't go below (`0`, or `-creditLimit` for types that allow going negative) depends on the
   wallet's type, so it's enforced by a Postgres trigger that joins `wallet_types` — a plain `CHECK`
@@ -89,19 +98,20 @@ All endpoints are JSON. Authenticated endpoints require `Authorization: Bearer <
 
 | Method | Path                      | Auth | Notes                                                              |
 | ------ | ------------------------- | ---- | ------------------------------------------------------------------- |
-| POST   | `/auth/signup`            | —    | `{ email, password }` → creates user + one wallet of each type      |
+| POST   | `/auth/signup`            | —    | `{ email, password }` → creates user + one wallet of each type in the default currency |
 | POST   | `/auth/login`             | —    | `{ email, password }`                                                |
-| GET    | `/wallet-types`           | ✅   | list of wallet types and the rules ("laws") each one enforces        |
+| GET    | `/currencies`             | ✅   | list of currencies and their display/decimal rules                   |
+| GET    | `/wallet-types`           | ✅   | list of wallet types (each denominated in one currency) and the rules ("laws") each one enforces |
 | GET    | `/wallets`                | ✅   | list the current user's wallets                                     |
 | GET    | `/wallets/:id`            | ✅   | a specific wallet (must belong to the caller)                       |
-| POST   | `/wallets`                | ✅   | `{ walletTypeCode }` → create another wallet of that type            |
+| POST   | `/wallets`                | ✅   | `{ walletTypeId }` → create another wallet of that type/currency     |
 | POST   | `/transactions/deposit`   | ✅   | `{ walletId, amount }` (minor units) + `Idempotency-Key` header      |
 | POST   | `/transactions/withdraw`  | ✅   | `{ walletId, amount }` + `Idempotency-Key` header (blocked if the wallet type disallows withdrawals) |
 | POST   | `/transactions/transfer`  | ✅   | `{ fromWalletId, toEmail, amount }` + `Idempotency-Key` header (both wallets' types must allow peer-to-peer) |
 | GET    | `/transactions`           | ✅   | transaction history across all of the current user's wallets (optionally `?walletId=` to filter to one) |
 | GET    | `/users/me`               | ✅   | the current user's id, email, and role                              |
-| POST   | `/wallet-types`           | 🔒 admin | `{ code, name, allowNegativeBalance, creditLimit?, allowWithdraw, allowP2pOut, allowP2pIn }` → create a new wallet type |
-| PATCH  | `/wallet-types/:id`       | 🔒 admin | partial update of a wallet type's rules                              |
+| POST   | `/wallet-types`           | 🔒 admin | `{ code, name, currencyCode, allowNegativeBalance, creditLimit?, allowWithdraw, allowP2pOut, allowP2pIn }` → create a new wallet type |
+| PATCH  | `/wallet-types/:id`       | 🔒 admin | partial update of a wallet type's rules (currency can't be changed after creation) |
 | GET    | `/admin/users`            | 🔒 admin | list all users                                                       |
 | GET    | `/admin/users/:id`        | 🔒 admin | a user's profile + all of their wallets                              |
 | GET    | `/admin/users/:id/transactions` | 🔒 admin | that user's full transaction history                           |

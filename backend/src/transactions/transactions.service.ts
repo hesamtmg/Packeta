@@ -156,10 +156,11 @@ export class TransactionsService {
         const toWalletRef = await this.walletsService.findEligibleP2pInWallet(
           manager,
           recipient.id,
+          fromWalletRef.walletType.currencyId,
         );
         if (!toWalletRef) {
           throw new NotFoundException(
-            'Recipient has no wallet eligible to receive this transfer',
+            `Recipient has no ${fromWalletRef.walletType.currency.code} wallet eligible to receive this transfer`,
           );
         }
 

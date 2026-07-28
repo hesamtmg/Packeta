@@ -39,9 +39,7 @@ export class WalletsController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateWalletDto,
   ) {
-    const walletType = await this.walletTypesService.findByCode(
-      dto.walletTypeCode,
-    );
+    const walletType = await this.walletTypesService.findById(dto.walletTypeId);
     const wallet = await this.dataSource.transaction((manager) =>
       this.walletsService.createForUser(manager, user.userId, walletType.id),
     );

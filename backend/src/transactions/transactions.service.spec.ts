@@ -7,6 +7,8 @@ import { TransactionsService } from './transactions.service';
 
 interface WalletTypeFixture {
   name: string;
+  currency: { code: string };
+  currencyId: string;
   allowNegativeBalance: boolean;
   creditLimit: string | null;
   allowWithdraw: boolean;
@@ -45,7 +47,14 @@ function buildService(options: {
       if (!wallet) throw new NotFoundException('Wallet not found');
       return wallet;
     }),
-    findEligibleP2pInWallet: jest.fn(async () => recipientWallet ?? null),
+    findEligibleP2pInWallet: jest.fn(
+      async (_manager: unknown, _userId: string, currencyId: string) => {
+        if (!recipientWallet) return null;
+        return recipientWallet.walletType.currencyId === currencyId
+          ? recipientWallet
+          : null;
+      },
+    ),
     listForUser: jest.fn(),
     lockById: jest.fn(async (_manager: unknown, id: string) => {
       lockCalls.push(id);
@@ -90,6 +99,8 @@ function walletType(
 ): WalletTypeFixture {
   return {
     name: 'Buy',
+    currency: { code: 'USD' },
+    currencyId: 'usd-currency-id',
     allowNegativeBalance: false,
     creditLimit: null,
     allowWithdraw: true,
@@ -185,6 +196,36 @@ describe('TransactionsService.transfer', () => {
         'recipient@example.com',
         100,
         'idem-4',
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('rejects a transfer when the recipient only has a wallet in a different currency', async () => {
+    const senderWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '500',
+      walletType: walletType({
+        currency: { code: 'USD' },
+        currencyId: 'usd-currency-id',
+      }),
+    };
+    const recipientWallet: WalletFixture = {
+      id: 'wallet-b',
+      balance: '0',
+      walletType: walletType({
+        currency: { code: 'IRR' },
+        currencyId: 'irr-currency-id',
+      }),
+    };
+    const { service } = buildService({ senderWallet, recipientWallet });
+
+    await expect(
+      service.transfer(
+        'sender',
+        senderWallet.id,
+        'recipient@example.com',
+        100,
+        'idem-4b',
       ),
     ).rejects.toBeInstanceOf(NotFoundException);
   });

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { apiRequest, ApiError } from '../api/client';
+import { amountStep, formatAmount, toMinorUnits, type CurrencyInfo } from '../utils/currency';
 
 interface AdminUser {
   id: string;
@@ -10,8 +11,10 @@ interface AdminUser {
 }
 
 interface WalletType {
+  id: string;
   code: string;
   name: string;
+  currency: CurrencyInfo;
   allowNegativeBalance: boolean;
   creditLimit: string | null;
   allowWithdraw: boolean;
@@ -50,8 +53,10 @@ const busy = ref(false);
 const adjustAmount = ref<Record<string, string>>({});
 const adjustReason = ref<Record<string, string>>({});
 
-function formatCents(cents: string): string {
-  return (Number(cents) / 100).toFixed(2);
+function transactionCurrency(tx: AdminTransaction): CurrencyInfo | null {
+  const wallets = selected.value?.wallets ?? [];
+  const w = wallets.find((w) => w.id === tx.fromWalletId || w.id === tx.toWalletId);
+  return w?.walletType.currency ?? null;
 }
 
 async function loadUsers() {
@@ -78,19 +83,19 @@ async function selectUser(id: string) {
   }
 }
 
-async function adjust(walletId: string) {
+async function adjust(wallet: Wallet) {
   adjustError.value = '';
   busy.value = true;
   try {
-    const amount = Math.round(parseFloat(adjustAmount.value[walletId] ?? '0') * 100);
-    const reason = adjustReason.value[walletId] ?? '';
-    await apiRequest(`/admin/wallets/${walletId}/adjust`, {
+    const amount = toMinorUnits(adjustAmount.value[wallet.id] ?? '0', wallet.walletType.currency);
+    const reason = adjustReason.value[wallet.id] ?? '';
+    await apiRequest(`/admin/wallets/${wallet.id}/adjust`, {
       method: 'POST',
       body: { amount, reason },
       idempotent: true,
     });
-    adjustAmount.value[walletId] = '';
-    adjustReason.value[walletId] = '';
+    adjustAmount.value[wallet.id] = '';
+    adjustReason.value[wallet.id] = '';
     if (selected.value) await selectUser(selected.value.id);
   } catch (err) {
     adjustError.value = err instanceof ApiError ? err.message : 'Adjustment failed';
@@ -137,17 +142,17 @@ loadUsers();
 
       <div class="wallets">
         <article v-for="w in selected.wallets" :key="w.id" class="wallet-card">
-          <span class="wallet-type">{{ w.walletType.name }}</span>
-          <span class="wallet-balance">${{ formatCents(w.balance) }}</span>
+          <span class="wallet-type">{{ w.walletType.name }} · {{ w.walletType.currency.code }}</span>
+          <span class="wallet-balance">{{ formatAmount(w.balance, w.walletType.currency) }}</span>
           <div class="adjust-form">
             <input
               v-model="adjustAmount[w.id]"
               type="number"
-              step="0.01"
+              :step="amountStep(w.walletType.currency)"
               placeholder="+/- amount"
             />
             <input v-model="adjustReason[w.id]" type="text" placeholder="Reason" />
-            <button :disabled="busy" @click="adjust(w.id)">Adjust</button>
+            <button :disabled="busy" @click="adjust(w)">Adjust</button>
           </div>
         </article>
       </div>
@@ -156,7 +161,7 @@ loadUsers();
       <ul class="history">
         <li v-for="tx in transactions" :key="tx.id">
           <span>{{ tx.type }}</span>
-          <span>${{ formatCents(tx.amount) }}</span>
+          <span>{{ transactionCurrency(tx) ? formatAmount(tx.amount, transactionCurrency(tx)!) : tx.amount }}</span>
           <span>{{ tx.note ?? '' }}</span>
           <span>{{ new Date(tx.createdAt).toLocaleString() }}</span>
         </li>

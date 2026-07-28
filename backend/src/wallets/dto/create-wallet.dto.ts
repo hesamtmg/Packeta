@@ -1,6 +1,6 @@
-import { IsString } from 'class-validator';
+import { IsUUID } from 'class-validator';
 
 export class CreateWalletDto {
-  @IsString()
-  walletTypeCode: string;
+  @IsUUID()
+  walletTypeId: string;
 }
