@@ -1,7 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { Wallet } from './entities/wallet.entity';
+import { WalletType } from '../wallet-types/entities/wallet-type.entity';
+
+const WALLET_RELATIONS = { walletType: { currency: true } } as const;
 
 @Injectable()
 export class WalletsService {
@@ -10,33 +17,95 @@ export class WalletsService {
     private readonly walletsRepository: Repository<Wallet>,
   ) {}
 
-  async createForUser(manager: EntityManager, userId: string): Promise<Wallet> {
-    const wallet = manager.create(Wallet, { userId, balance: '0' });
+  async createForUser(
+    manager: EntityManager,
+    userId: string,
+    walletTypeId: string,
+  ): Promise<Wallet> {
+    const wallet = manager.create(Wallet, {
+      userId,
+      walletTypeId,
+      balance: '0',
+    });
     return manager.save(wallet);
   }
 
-  async getByUserId(userId: string): Promise<Wallet> {
-    const wallet = await this.walletsRepository.findOne({ where: { userId } });
+  // Gives every new user one wallet of each type denominated in the default
+  // currency (USD) as a starting set; they can create additional wallets —
+  // in any currency the admin has made available — afterwards. Adding a new
+  // currency's wallet types therefore never changes what existing or new
+  // users get by default.
+  async createDefaultWalletsForUser(
+    manager: EntityManager,
+    userId: string,
+  ): Promise<Wallet[]> {
+    const types = await manager.find(WalletType, {
+      relations: { currency: true },
+      where: { currency: { isDefault: true } },
+    });
+    const wallets = types.map((type) =>
+      manager.create(Wallet, { userId, walletTypeId: type.id, balance: '0' }),
+    );
+    return manager.save(wallets);
+  }
+
+  async listForUser(userId: string): Promise<Wallet[]> {
+    return this.walletsRepository.find({
+      where: { userId },
+      relations: WALLET_RELATIONS,
+      order: { createdAt: 'ASC' },
+    });
+  }
+
+  async getById(userId: string, walletId: string): Promise<Wallet> {
+    const wallet = await this.walletsRepository.findOne({
+      where: { id: walletId },
+      relations: WALLET_RELATIONS,
+    });
+    if (!wallet) {
+      throw new NotFoundException('Wallet not found');
+    }
+    if (wallet.userId !== userId) {
+      throw new ForbiddenException('This wallet does not belong to you');
+    }
+    return wallet;
+  }
+
+  // No ownership check — for admin use only, where the caller is explicitly
+  // allowed to act on any user's wallet.
+  async getByIdUnscoped(walletId: string): Promise<Wallet> {
+    const wallet = await this.walletsRepository.findOne({
+      where: { id: walletId },
+      relations: WALLET_RELATIONS,
+    });
     if (!wallet) {
       throw new NotFoundException('Wallet not found');
     }
     return wallet;
+  }
+
+  // Any wallet of the given currency that is eligible to receive a
+  // peer-to-peer transfer, oldest first — the recipient's own choice of
+  // which specific wallet to expose is not something the sender gets to
+  // pick. Scoping to the sender's currency keeps transfers same-currency
+  // only, since there's no exchange-rate conversion.
+  async findEligibleP2pInWallet(
+    manager: EntityManager,
+    userId: string,
+    currencyId: string,
+  ): Promise<Wallet | null> {
+    return manager
+      .createQueryBuilder(Wallet, 'wallet')
+      .innerJoin('wallet.walletType', 'walletType')
+      .where('wallet.userId = :userId', { userId })
+      .andWhere('walletType.allowP2pIn = true')
+      .andWhere('walletType.currencyId = :currencyId', { currencyId })
+      .orderBy('wallet.createdAt', 'ASC')
+      .getOne();
   }
 
   // Locks the wallet row for the duration of the caller's DB transaction.
   // Must only be called with a manager that is inside an active transaction.
-  async lockByUserId(manager: EntityManager, userId: string): Promise<Wallet> {
-    const wallet = await manager
-      .createQueryBuilder(Wallet, 'wallet')
-      .setLock('pessimistic_write')
-      .where('wallet.userId = :userId', { userId })
-      .getOne();
-    if (!wallet) {
-      throw new NotFoundException('Wallet not found');
-    }
-    return wallet;
-  }
-
   async lockById(manager: EntityManager, walletId: string): Promise<Wallet> {
     const wallet = await manager
       .createQueryBuilder(Wallet, 'wallet')

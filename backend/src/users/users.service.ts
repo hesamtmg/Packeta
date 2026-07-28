@@ -21,4 +21,8 @@ export class UsersService {
   findById(id: string): Promise<User | null> {
     return this.usersRepository.findOne({ where: { id } });
   }
+
+  findAll(): Promise<User[]> {
+    return this.usersRepository.find({ order: { createdAt: 'ASC' } });
+  }
 }

@@ -3,11 +3,14 @@ import {
   CreateDateColumn,
   Entity,
   Index,
-  OneToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { Wallet } from '../../wallets/entities/wallet.entity';
+
+export enum UserRole {
+  USER = 'USER',
+  ADMIN = 'ADMIN',
+}
 
 @Entity('users')
 export class User {
@@ -21,8 +24,8 @@ export class User {
   @Column({ type: 'varchar', length: 255, select: false })
   passwordHash: string;
 
-  @OneToOne(() => Wallet, (wallet) => wallet.user)
-  wallet: Wallet;
+  @Column({ type: 'enum', enum: UserRole, default: UserRole.USER })
+  role: UserRole;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

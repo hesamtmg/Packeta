@@ -3,7 +3,9 @@ import {
   Controller,
   Get,
   Headers,
+  Param,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -29,6 +31,7 @@ export class TransactionsController {
   ) {
     return this.transactionsService.deposit(
       user.userId,
+      dto.walletId,
       dto.amount,
       idempotencyKey,
     );
@@ -42,6 +45,7 @@ export class TransactionsController {
   ) {
     return this.transactionsService.withdraw(
       user.userId,
+      dto.walletId,
       dto.amount,
       idempotencyKey,
     );
@@ -55,6 +59,7 @@ export class TransactionsController {
   ) {
     return this.transactionsService.transfer(
       user.userId,
+      dto.fromWalletId,
       dto.toEmail,
       dto.amount,
       idempotencyKey,
@@ -62,7 +67,15 @@ export class TransactionsController {
   }
 
   @Get()
-  history(@CurrentUser() user: AuthenticatedUser) {
-    return this.transactionsService.getHistory(user.userId);
+  history(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('walletId') walletId?: string,
+  ) {
+    return this.transactionsService.getHistory(user.userId, walletId);
+  }
+
+  @Get(':id')
+  getOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.transactionsService.getById(user.userId, id);
   }
 }

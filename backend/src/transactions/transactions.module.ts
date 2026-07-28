@@ -16,5 +16,6 @@ import { LoggingModule } from '../logging/logging.module';
   ],
   controllers: [TransactionsController],
   providers: [TransactionsService],
+  exports: [TransactionsService],
 })
 export class TransactionsModule {}

@@ -10,6 +10,7 @@ export enum TransactionType {
   DEPOSIT = 'DEPOSIT',
   WITHDRAW = 'WITHDRAW',
   TRANSFER = 'TRANSFER',
+  ADJUSTMENT = 'ADJUSTMENT',
 }
 
 // Append-only ledger of completed money movements. Only successfully applied
@@ -37,6 +38,14 @@ export class Transaction {
   @Index({ unique: true })
   @Column({ type: 'varchar', length: 255 })
   idempotencyKey: string;
+
+  // Only set for ADJUSTMENT rows: the admin's explanation for the correction.
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  note: string | null;
+
+  // Only set for ADJUSTMENT rows: which admin performed it.
+  @Column({ type: 'uuid', nullable: true })
+  performedByUserId: string | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

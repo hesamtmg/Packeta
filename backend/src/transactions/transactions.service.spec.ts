@@ -1,21 +1,65 @@
-import { UnprocessableEntityException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { TransactionsService } from './transactions.service';
 
-function buildService(overrides: {
-  senderWallet: { id: string; balance: string };
-  recipientWallet: { id: string; balance: string };
+interface WalletTypeFixture {
+  name: string;
+  currency: { code: string };
+  currencyId: string;
+  allowNegativeBalance: boolean;
+  creditLimit: string | null;
+  allowWithdraw: boolean;
+  allowP2pOut: boolean;
+  allowP2pIn: boolean;
+}
+
+interface WalletFixture {
+  id: string;
+  balance: string;
+  walletType: WalletTypeFixture;
+}
+
+function buildService(options: {
+  senderWallet: WalletFixture;
+  recipientWallet?: WalletFixture | null;
 }) {
-  const { senderWallet, recipientWallet } = overrides;
+  const { senderWallet, recipientWallet } = options;
   const lockCalls: string[] = [];
 
+  const walletsById = new Map<string, WalletFixture>([
+    [senderWallet.id, senderWallet],
+    ...(recipientWallet
+      ? [[recipientWallet.id, recipientWallet] as const]
+      : []),
+  ]);
+
   const walletsService = {
-    getByUserId: jest.fn(async (userId: string) =>
-      userId === 'sender' ? senderWallet : recipientWallet,
+    getById: jest.fn(async (_userId: string, walletId: string) => {
+      const wallet = walletsById.get(walletId);
+      if (!wallet) throw new NotFoundException('Wallet not found');
+      return wallet;
+    }),
+    getByIdUnscoped: jest.fn(async (walletId: string) => {
+      const wallet = walletsById.get(walletId);
+      if (!wallet) throw new NotFoundException('Wallet not found');
+      return wallet;
+    }),
+    findEligibleP2pInWallet: jest.fn(
+      async (_manager: unknown, _userId: string, currencyId: string) => {
+        if (!recipientWallet) return null;
+        return recipientWallet.walletType.currencyId === currencyId
+          ? recipientWallet
+          : null;
+      },
     ),
-    lockByUserId: jest.fn(),
+    listForUser: jest.fn(),
     lockById: jest.fn(async (_manager: unknown, id: string) => {
       lockCalls.push(id);
-      return id === senderWallet.id ? senderWallet : recipientWallet;
+      const wallet = walletsById.get(id)!;
+      return wallet;
     }),
   };
 
@@ -50,27 +94,340 @@ function buildService(overrides: {
   return { service, lockCalls };
 }
 
+function walletType(
+  overrides: Partial<WalletTypeFixture> = {},
+): WalletTypeFixture {
+  return {
+    name: 'Buy',
+    currency: { code: 'USD' },
+    currencyId: 'usd-currency-id',
+    allowNegativeBalance: false,
+    creditLimit: null,
+    allowWithdraw: true,
+    allowP2pOut: true,
+    allowP2pIn: true,
+    ...overrides,
+  };
+}
+
 describe('TransactionsService.transfer', () => {
   it('locks wallets in ascending id order regardless of transfer direction', async () => {
-    const senderWallet = { id: 'wallet-b', balance: '500' };
-    const recipientWallet = { id: 'wallet-a', balance: '0' };
+    const senderWallet: WalletFixture = {
+      id: 'wallet-b',
+      balance: '500',
+      walletType: walletType(),
+    };
+    const recipientWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '0',
+      walletType: walletType(),
+    };
     const { service, lockCalls } = buildService({
       senderWallet,
       recipientWallet,
     });
 
-    await service.transfer('sender', 'recipient@example.com', 100, 'idem-1');
+    await service.transfer(
+      'sender',
+      senderWallet.id,
+      'recipient@example.com',
+      100,
+      'idem-1',
+    );
 
     expect(lockCalls).toEqual(['wallet-a', 'wallet-b']);
   });
 
   it('rejects a transfer that exceeds the sender balance', async () => {
-    const senderWallet = { id: 'wallet-a', balance: '50' };
-    const recipientWallet = { id: 'wallet-b', balance: '0' };
+    const senderWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '50',
+      walletType: walletType(),
+    };
+    const recipientWallet: WalletFixture = {
+      id: 'wallet-b',
+      balance: '0',
+      walletType: walletType(),
+    };
     const { service } = buildService({ senderWallet, recipientWallet });
 
     await expect(
-      service.transfer('sender', 'recipient@example.com', 100, 'idem-2'),
+      service.transfer(
+        'sender',
+        senderWallet.id,
+        'recipient@example.com',
+        100,
+        'idem-2',
+      ),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
+  });
+
+  it('rejects a transfer from a wallet type that cannot send peer-to-peer', async () => {
+    const senderWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '500',
+      walletType: walletType({ name: 'Sell', allowP2pOut: false }),
+    };
+    const { service } = buildService({ senderWallet, recipientWallet: null });
+
+    await expect(
+      service.transfer(
+        'sender',
+        senderWallet.id,
+        'recipient@example.com',
+        100,
+        'idem-3',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rejects a transfer when the recipient has no eligible wallet', async () => {
+    const senderWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '500',
+      walletType: walletType(),
+    };
+    const { service } = buildService({ senderWallet, recipientWallet: null });
+
+    await expect(
+      service.transfer(
+        'sender',
+        senderWallet.id,
+        'recipient@example.com',
+        100,
+        'idem-4',
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('rejects a transfer when the recipient only has a wallet in a different currency', async () => {
+    const senderWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '500',
+      walletType: walletType({
+        currency: { code: 'USD' },
+        currencyId: 'usd-currency-id',
+      }),
+    };
+    const recipientWallet: WalletFixture = {
+      id: 'wallet-b',
+      balance: '0',
+      walletType: walletType({
+        currency: { code: 'IRR' },
+        currencyId: 'irr-currency-id',
+      }),
+    };
+    const { service } = buildService({ senderWallet, recipientWallet });
+
+    await expect(
+      service.transfer(
+        'sender',
+        senderWallet.id,
+        'recipient@example.com',
+        100,
+        'idem-4b',
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('allows a credit wallet to go negative down to its credit limit', async () => {
+    const senderWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '0',
+      walletType: walletType({
+        name: 'Credit',
+        allowNegativeBalance: true,
+        creditLimit: '1000',
+        allowP2pOut: true,
+      }),
+    };
+    const recipientWallet: WalletFixture = {
+      id: 'wallet-b',
+      balance: '0',
+      walletType: walletType(),
+    };
+    const { service } = buildService({ senderWallet, recipientWallet });
+
+    const result = await service.transfer(
+      'sender',
+      senderWallet.id,
+      'recipient@example.com',
+      1000,
+      'idem-5',
+    );
+
+    expect(result.balance).toBe('-1000');
+  });
+
+  it('rejects a credit wallet transfer beyond its credit limit', async () => {
+    const senderWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '0',
+      walletType: walletType({
+        name: 'Credit',
+        allowNegativeBalance: true,
+        creditLimit: '1000',
+        allowP2pOut: true,
+      }),
+    };
+    const recipientWallet: WalletFixture = {
+      id: 'wallet-b',
+      balance: '0',
+      walletType: walletType(),
+    };
+    const { service } = buildService({ senderWallet, recipientWallet });
+
+    await expect(
+      service.transfer(
+        'sender',
+        senderWallet.id,
+        'recipient@example.com',
+        1001,
+        'idem-6',
+      ),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+  });
+});
+
+describe('TransactionsService.withdraw', () => {
+  it('rejects a withdrawal from a wallet type that disallows it', async () => {
+    const senderWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '500',
+      walletType: walletType({ name: 'Gift', allowWithdraw: false }),
+    };
+    const { service } = buildService({ senderWallet });
+
+    await expect(
+      service.withdraw('sender', senderWallet.id, 100, 'idem-7'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('allows withdrawing a credit wallet into its credit limit', async () => {
+    const senderWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '0',
+      walletType: walletType({
+        name: 'Credit',
+        allowNegativeBalance: true,
+        creditLimit: '500',
+      }),
+    };
+    const { service } = buildService({ senderWallet });
+
+    const result = await service.withdraw(
+      'sender',
+      senderWallet.id,
+      500,
+      'idem-8',
+    );
+    expect(result.balance).toBe('-500');
+  });
+
+  it('rejects withdrawing a credit wallet beyond its credit limit', async () => {
+    const senderWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '0',
+      walletType: walletType({
+        name: 'Credit',
+        allowNegativeBalance: true,
+        creditLimit: '500',
+      }),
+    };
+    const { service } = buildService({ senderWallet });
+
+    await expect(
+      service.withdraw('sender', senderWallet.id, 501, 'idem-9'),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+  });
+});
+
+describe('TransactionsService.adjust', () => {
+  it('credits a wallet and records the admin note', async () => {
+    const wallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '100',
+      walletType: walletType({ name: 'Gift', allowWithdraw: false }),
+    };
+    const { service } = buildService({ senderWallet: wallet });
+
+    const result = await service.adjust(
+      'admin-1',
+      wallet.id,
+      50,
+      'Promo credit',
+      'idem-10',
+    );
+
+    expect(result.balance).toBe('150');
+    expect(result.toWalletId).toBe(wallet.id);
+    expect(result.fromWalletId).toBeNull();
+  });
+
+  it('debits a wallet down to but not past its floor', async () => {
+    const wallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '100',
+      walletType: walletType({ name: 'Buy' }),
+    };
+    const { service } = buildService({ senderWallet: wallet });
+
+    const result = await service.adjust(
+      'admin-1',
+      wallet.id,
+      -100,
+      'Correcting duplicate deposit',
+      'idem-11',
+    );
+    expect(result.balance).toBe('0');
+    expect(result.fromWalletId).toBe(wallet.id);
+  });
+
+  it('rejects a debit that would take the wallet past its floor', async () => {
+    const wallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '100',
+      walletType: walletType({ name: 'Buy' }),
+    };
+    const { service } = buildService({ senderWallet: wallet });
+
+    await expect(
+      service.adjust('admin-1', wallet.id, -101, 'Oops', 'idem-12'),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+  });
+
+  it('allows a debit past zero on a wallet with a credit limit', async () => {
+    const wallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '0',
+      walletType: walletType({
+        name: 'Credit',
+        allowNegativeBalance: true,
+        creditLimit: '500',
+      }),
+    };
+    const { service } = buildService({ senderWallet: wallet });
+
+    const result = await service.adjust(
+      'admin-1',
+      wallet.id,
+      -500,
+      'Manual credit line correction',
+      'idem-13',
+    );
+    expect(result.balance).toBe('-500');
+  });
+
+  it('rejects a zero-amount adjustment', async () => {
+    const wallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '100',
+      walletType: walletType({ name: 'Buy' }),
+    };
+    const { service } = buildService({ senderWallet: wallet });
+
+    await expect(
+      service.adjust('admin-1', wallet.id, 0, 'No-op', 'idem-14'),
+    ).rejects.toThrow('amount must not be zero');
   });
 });
