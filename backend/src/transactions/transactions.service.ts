@@ -209,6 +209,65 @@ export class TransactionsService {
     );
   }
 
+  // Admin-only manual correction. amount is signed (positive credits,
+  // negative debits) and still bounded by the wallet's own floor (0, or
+  // -creditLimit) — admins can correct balances, not bypass the wallet
+  // type's fundamental rules.
+  async adjust(
+    adminUserId: string,
+    walletId: string,
+    amount: number,
+    reason: string,
+    idempotencyKey: string,
+  ): Promise<MoneyResult> {
+    if (amount === 0) {
+      throw new BadRequestException('amount must not be zero');
+    }
+
+    return this.run(
+      'adjustment',
+      adminUserId,
+      { walletId, amount, reason },
+      idempotencyKey,
+      async (manager) => {
+        const walletRef = await this.walletsService.getByIdUnscoped(walletId);
+        const floor = walletRef.walletType.allowNegativeBalance
+          ? -BigInt(walletRef.walletType.creditLimit ?? '0')
+          : 0n;
+
+        const wallet = await this.walletsService.lockById(manager, walletId);
+        const newBalance = BigInt(wallet.balance) + BigInt(amount);
+        if (newBalance < floor) {
+          throw new UnprocessableEntityException(
+            "Adjustment would take the wallet below its type's allowed balance floor",
+          );
+        }
+        await manager.update(Wallet, wallet.id, {
+          balance: newBalance.toString(),
+        });
+
+        const absAmount = BigInt(Math.abs(amount));
+        const transaction = manager.create(Transaction, {
+          type: TransactionType.ADJUSTMENT,
+          fromWalletId: amount < 0 ? wallet.id : null,
+          toWalletId: amount >= 0 ? wallet.id : null,
+          amount: absAmount.toString(),
+          idempotencyKey,
+          note: reason,
+          performedByUserId: adminUserId,
+        });
+        await manager.save(transaction);
+
+        return {
+          transactionId: transaction.id,
+          fromWalletId: transaction.fromWalletId,
+          toWalletId: transaction.toWalletId,
+          balance: newBalance.toString(),
+        };
+      },
+    );
+  }
+
   async getHistory(userId: string, walletId?: string): Promise<Transaction[]> {
     const wallets = walletId
       ? [await this.walletsService.getById(userId, walletId)]
@@ -224,7 +283,7 @@ export class TransactionsService {
   }
 
   private async run(
-    action: 'deposit' | 'withdraw' | 'transfer',
+    action: 'deposit' | 'withdraw' | 'transfer' | 'adjustment',
     userId: string,
     payload: Record<string, unknown>,
     idempotencyKey: string,

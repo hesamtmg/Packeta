@@ -8,24 +8,7 @@ import {
 import { WalletsService } from './wallets.service';
 import { WalletTypesService } from '../wallet-types/wallet-types.service';
 import { CreateWalletDto } from './dto/create-wallet.dto';
-import { Wallet } from './entities/wallet.entity';
-
-function serialize(wallet: Wallet) {
-  return {
-    id: wallet.id,
-    balance: wallet.balance,
-    walletType: {
-      code: wallet.walletType.code,
-      name: wallet.walletType.name,
-      allowNegativeBalance: wallet.walletType.allowNegativeBalance,
-      creditLimit: wallet.walletType.creditLimit,
-      allowWithdraw: wallet.walletType.allowWithdraw,
-      allowP2pOut: wallet.walletType.allowP2pOut,
-      allowP2pIn: wallet.walletType.allowP2pIn,
-    },
-    createdAt: wallet.createdAt,
-  };
-}
+import { serializeWallet } from './wallet.serializer';
 
 @Controller('wallets')
 @UseGuards(JwtAuthGuard)
@@ -39,7 +22,7 @@ export class WalletsController {
   @Get()
   async list(@CurrentUser() user: AuthenticatedUser) {
     const wallets = await this.walletsService.listForUser(user.userId);
-    return wallets.map(serialize);
+    return wallets.map(serializeWallet);
   }
 
   @Get(':id')
@@ -48,7 +31,7 @@ export class WalletsController {
     @Param('id') id: string,
   ) {
     const wallet = await this.walletsService.getById(user.userId, id);
-    return serialize(wallet);
+    return serializeWallet(wallet);
   }
 
   @Post()
@@ -62,6 +45,6 @@ export class WalletsController {
     const wallet = await this.dataSource.transaction((manager) =>
       this.walletsService.createForUser(manager, user.userId, walletType.id),
     );
-    return serialize({ ...wallet, walletType });
+    return serializeWallet({ ...wallet, walletType });
   }
 }

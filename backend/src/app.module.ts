@@ -15,6 +15,7 @@ import { WalletTypesModule } from './wallet-types/wallet-types.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { IdempotencyModule } from './idempotency/idempotency.module';
 import { LoggingModule } from './logging/logging.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { LoggingModule } from './logging/logging.module';
     TransactionsModule,
     IdempotencyModule,
     LoggingModule,
+    AdminModule,
   ],
 })
 export class AppModule {}

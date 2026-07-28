@@ -21,6 +21,8 @@ async function onSubmit() {
       { method: 'POST', body: { email: email.value, password: password.value } },
     );
     auth.setToken(accessToken);
+    const me = await apiRequest<{ role: string }>('/users/me');
+    auth.setRole(me.role);
     router.push({ name: 'dashboard' });
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : 'Signup failed';

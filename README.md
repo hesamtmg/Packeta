@@ -37,6 +37,14 @@ A multi-wallet app.
 - **Audit log**: every auth and transaction attempt (success or failure) is written to MongoDB. Mongo is
   never authoritative for financial state — a logging failure is caught and does not affect the
   already-committed Postgres transaction.
+- **Admin panel**: users have a `role` (`USER`/`ADMIN`). `AdminGuard` re-checks the caller's role against the
+  DB on every admin request (rather than trusting a claim baked into the JWT), so revoking admin access
+  takes effect immediately. Admins can manage the `wallet_types` table itself (create new types, edit an
+  existing type's rules), look up any user and their wallets/transaction history, and make manual balance
+  adjustments. An adjustment is its own ledger entry (`ADJUSTMENT`) recording the admin's reason and who
+  performed it, still bounded by the wallet's own balance floor — admins can correct balances, not bypass
+  the wallet type's fundamental rules. There's no UI for granting the *first* admin (that would be a
+  privilege-escalation hole); use the `promote-admin` script instead.
 
 ## Running locally
 
@@ -57,6 +65,12 @@ npm run start:dev
 ```
 
 API listens on `http://localhost:3000`.
+
+To make a user an admin (there's no self-service way to do this):
+
+```
+npm run promote-admin -- someone@example.com
+```
 
 ### 3. Frontend
 
@@ -85,6 +99,13 @@ All endpoints are JSON. Authenticated endpoints require `Authorization: Bearer <
 | POST   | `/transactions/withdraw`  | ✅   | `{ walletId, amount }` + `Idempotency-Key` header (blocked if the wallet type disallows withdrawals) |
 | POST   | `/transactions/transfer`  | ✅   | `{ fromWalletId, toEmail, amount }` + `Idempotency-Key` header (both wallets' types must allow peer-to-peer) |
 | GET    | `/transactions`           | ✅   | transaction history across all of the current user's wallets (optionally `?walletId=` to filter to one) |
+| GET    | `/users/me`               | ✅   | the current user's id, email, and role                              |
+| POST   | `/wallet-types`           | 🔒 admin | `{ code, name, allowNegativeBalance, creditLimit?, allowWithdraw, allowP2pOut, allowP2pIn }` → create a new wallet type |
+| PATCH  | `/wallet-types/:id`       | 🔒 admin | partial update of a wallet type's rules                              |
+| GET    | `/admin/users`            | 🔒 admin | list all users                                                       |
+| GET    | `/admin/users/:id`        | 🔒 admin | a user's profile + all of their wallets                              |
+| GET    | `/admin/users/:id/transactions` | 🔒 admin | that user's full transaction history                           |
+| POST   | `/admin/wallets/:id/adjust` | 🔒 admin | `{ amount, reason }` (signed minor units) + `Idempotency-Key` header → manual balance correction |
 
 ## Tests
 

@@ -63,6 +63,19 @@ export class WalletsService {
     return wallet;
   }
 
+  // No ownership check — for admin use only, where the caller is explicitly
+  // allowed to act on any user's wallet.
+  async getByIdUnscoped(walletId: string): Promise<Wallet> {
+    const wallet = await this.walletsRepository.findOne({
+      where: { id: walletId },
+      relations: { walletType: true },
+    });
+    if (!wallet) {
+      throw new NotFoundException('Wallet not found');
+    }
+    return wallet;
+  }
+
   // Any wallet of the given type that is eligible to receive a peer-to-peer
   // transfer, oldest first — the recipient's own choice of which specific
   // wallet to expose is not something the sender gets to pick.

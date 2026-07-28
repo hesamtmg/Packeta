@@ -130,6 +130,10 @@ function logout() {
   <div class="dashboard">
     <header>
       <h1>Packeta Wallet</h1>
+      <nav v-if="auth.isAdmin" class="admin-nav">
+        <router-link :to="{ name: 'admin-users' }">Admin: Users</router-link>
+        <router-link :to="{ name: 'admin-wallet-types' }">Admin: Wallet Types</router-link>
+      </nav>
       <button @click="logout">Log out</button>
     </header>
 
@@ -221,6 +225,12 @@ header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 1rem;
+}
+.admin-nav {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.85rem;
 }
 .wallets {
   display: grid;
