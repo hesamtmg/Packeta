@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
-import { useAuthStore } from '../stores/auth';
 import { useWalletStore, type Wallet } from '../stores/wallet';
 import { ApiError } from '../api/client';
 import { amountStep, formatAmount, toMinorUnits } from '../utils/currency';
+import AppLayout from '../components/AppLayout.vue';
+import MiniLineChart from '../components/admin/MiniLineChart.vue';
 
-const auth = useAuthStore();
 const wallet = useWalletStore();
-const router = useRouter();
 
 const newWalletType = ref('');
 const newWalletAutoWithdrawTimes = ref(['', '', '']);
@@ -96,6 +94,7 @@ function describeTransaction(tx: (typeof wallet.transactions)[number]): string {
 
   if (tx.type === 'DEPOSIT') return `Deposit to ${toMine?.walletType.name ?? 'wallet'}`;
   if (tx.type === 'WITHDRAW') return `Withdraw from ${fromMine?.walletType.name ?? 'wallet'}`;
+  if (tx.type === 'PURCHASE') return fromMine ? `Purchase paid to merchant` : `Purchase received`;
   if (fromMine) return `Sent from ${fromMine.walletType.name}`;
   if (toMine) return `Received into ${toMine.walletType.name}`;
   return 'Transfer';
@@ -107,6 +106,27 @@ function formatTransactionAmount(tx: (typeof wallet.transactions)[number]): stri
   if (!w) return tx.amount;
   return formatAmount(tx.amount, w.walletType.currency);
 }
+
+const currencyCount = computed(
+  () => new Set(wallet.wallets.map((w) => w.walletType.currency.code)).size,
+);
+const typeCount = computed(
+  () => new Set(wallet.wallets.map((w) => w.walletType.code)).size,
+);
+const latestTransaction = computed(() => wallet.transactions[0] ?? null);
+
+const transactionsPerDay = computed(() => {
+  const days = 14;
+  const buckets = new Array(days).fill(0);
+  const now = new Date();
+  const dayMs = 24 * 60 * 60 * 1000;
+  for (const tx of wallet.transactions) {
+    const diff = Math.floor((now.getTime() - new Date(tx.createdAt).getTime()) / dayMs);
+    const idx = days - 1 - diff;
+    if (idx >= 0 && idx < days) buckets[idx] += 1;
+  }
+  return buckets;
+});
 
 onMounted(async () => {
   await Promise.all([
@@ -190,248 +210,318 @@ function onPurchase() {
     window.location.href = result.redirectUrl;
   });
 }
-
-function logout() {
-  auth.logout();
-  router.push({ name: 'login' });
-}
 </script>
 
 <template>
-  <div class="dashboard">
-    <header>
-      <h1>Packeta Wallet</h1>
-      <nav v-if="auth.isAdmin" class="admin-nav">
-        <router-link :to="{ name: 'admin-dashboard' }">Admin Panel</router-link>
-      </nav>
-      <button @click="logout">Log out</button>
-    </header>
+  <AppLayout title="My Wallet">
+    <p v-if="actionError" class="admin-error">{{ actionError }}</p>
 
-    <p v-if="actionError" class="error">{{ actionError }}</p>
-
-    <section class="wallets">
-      <article v-for="w in wallet.wallets" :key="w.id" class="wallet-card">
-        <span class="wallet-type">{{ w.walletType.name }} · {{ w.walletType.currency.code }}</span>
-        <span class="wallet-balance">{{ formatAmount(w.balance, w.walletType.currency) }}</span>
-        <div class="badges">
-          <span v-for="b in badges(w)" :key="b" class="badge">{{ b }}</span>
+    <div class="admin-grid admin-grid-2">
+      <div class="hero-card">
+        <div class="hero-copy">
+          <span class="hero-eyebrow">Overview</span>
+          <h2>Every wallet and currency, in one place</h2>
+          <p>
+            You hold {{ wallet.wallets.length }} wallets across {{ currencyCount }}
+            currencies, with {{ wallet.transactions.length }} transactions on record.
+          </p>
         </div>
-      </article>
-    </section>
 
-    <form class="add-wallet" @submit.prevent="onAddWallet">
-      <select v-model="newWalletType" required>
-        <option value="" disabled>Add a wallet…</option>
-        <option v-for="t in wallet.walletTypes" :key="t.id" :value="t.id">
-          {{ t.name }} ({{ t.currency.code }})
-        </option>
-      </select>
+        <div class="hero-pills">
+          <div class="pill">
+            <span class="pill-value">{{ wallet.wallets.length }}</span>
+            <span class="pill-label"><i class="dot dot-orange" />Wallets</span>
+          </div>
+          <div class="pill">
+            <span class="pill-value">{{ currencyCount }}</span>
+            <span class="pill-label"><i class="dot dot-lime" />Currencies</span>
+          </div>
+          <div class="pill">
+            <span class="pill-value">{{ wallet.transactions.length }}</span>
+            <span class="pill-label"><i class="dot dot-blue" />Transactions</span>
+          </div>
+          <div class="pill">
+            <span class="pill-value">{{ typeCount }}</span>
+            <span class="pill-label"><i class="dot dot-red" />Types</span>
+          </div>
+        </div>
+      </div>
 
-      <template v-if="showAutoWithdrawFields">
-        <span class="hint">Auto-withdraw times (3):</span>
-        <input v-model="newWalletAutoWithdrawTimes[0]" type="time" required />
-        <input v-model="newWalletAutoWithdrawTimes[1]" type="time" required />
-        <input v-model="newWalletAutoWithdrawTimes[2]" type="time" required />
-      </template>
+      <div class="side-stack">
+        <div class="admin-card">
+          <h2>Activity (14d)</h2>
+          <MiniLineChart :data="transactionsPerDay" color="#d8ff5c" :height="70" />
+        </div>
+        <div class="admin-card" v-if="latestTransaction">
+          <h2>Latest transaction</h2>
+          <div class="latest-amount">{{ formatTransactionAmount(latestTransaction) }}</div>
+          <div class="latest-meta">{{ describeTransaction(latestTransaction) }}</div>
+          <div class="latest-meta">{{ new Date(latestTransaction.createdAt).toLocaleString() }}</div>
+        </div>
+      </div>
+    </div>
 
-      <template v-if="showPurchaseTimeoutField">
-        <span class="hint">Verify timeout (minutes):</span>
-        <input
-          v-model="newWalletPurchaseTimeoutMinutes"
-          type="number"
-          min="1"
-          placeholder="15"
-        />
-      </template>
+    <div class="admin-card">
+      <h2>Wallets</h2>
+      <div class="wallets">
+        <article v-for="w in wallet.wallets" :key="w.id" class="wallet-card">
+          <span class="wallet-type">{{ w.walletType.name }} · {{ w.walletType.currency.code }}</span>
+          <span class="wallet-balance">{{ formatAmount(w.balance, w.walletType.currency) }}</span>
+          <div class="badges">
+            <span v-for="b in badges(w)" :key="b" class="admin-badge">{{ b }}</span>
+          </div>
+        </article>
+      </div>
 
-      <button type="submit" :disabled="busy">Add</button>
-    </form>
+      <form class="add-wallet" @submit.prevent="onAddWallet">
+        <select v-model="newWalletType" class="admin-input" required>
+          <option value="" disabled>Add a wallet…</option>
+          <option v-for="t in wallet.walletTypes" :key="t.id" :value="t.id">
+            {{ t.name }} ({{ t.currency.code }})
+          </option>
+        </select>
 
-    <section class="actions">
-      <form @submit.prevent="onDeposit">
+        <template v-if="showAutoWithdrawFields">
+          <span class="hint">Auto-withdraw times (3):</span>
+          <input v-model="newWalletAutoWithdrawTimes[0]" type="time" class="admin-input" required />
+          <input v-model="newWalletAutoWithdrawTimes[1]" type="time" class="admin-input" required />
+          <input v-model="newWalletAutoWithdrawTimes[2]" type="time" class="admin-input" required />
+        </template>
+
+        <template v-if="showPurchaseTimeoutField">
+          <span class="hint">Verify timeout (minutes):</span>
+          <input
+            v-model="newWalletPurchaseTimeoutMinutes"
+            type="number"
+            min="1"
+            placeholder="15"
+            class="admin-input"
+          />
+        </template>
+
+        <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">Add</button>
+      </form>
+    </div>
+
+    <div class="admin-grid admin-grid-4 actions">
+      <form class="admin-card" @submit.prevent="onDeposit">
         <h2>Deposit</h2>
-        <select v-model="depositWalletId" required>
+        <select v-model="depositWalletId" class="admin-input" required>
           <option value="" disabled>Choose wallet</option>
           <option v-for="w in wallet.wallets" :key="w.id" :value="w.id">
             {{ walletLabel(w) }}
           </option>
         </select>
-        <input v-model="depositAmount" type="number" min="0" :step="depositStep" required />
-        <button type="submit" :disabled="busy">Deposit</button>
+        <input v-model="depositAmount" type="number" min="0" :step="depositStep" class="admin-input" required />
+        <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">Deposit</button>
       </form>
 
-      <form @submit.prevent="onWithdraw">
+      <form class="admin-card" @submit.prevent="onWithdraw">
         <h2>Withdraw</h2>
-        <select v-model="withdrawWalletId" required>
+        <select v-model="withdrawWalletId" class="admin-input" required>
           <option value="" disabled>Choose wallet</option>
           <option v-for="w in withdrawableWallets" :key="w.id" :value="w.id">
             {{ walletLabel(w) }}
           </option>
         </select>
-        <input v-model="withdrawAmount" type="number" min="0" :step="withdrawStep" required />
-        <button type="submit" :disabled="busy">Withdraw</button>
+        <input v-model="withdrawAmount" type="number" min="0" :step="withdrawStep" class="admin-input" required />
+        <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">Withdraw</button>
       </form>
 
-      <form @submit.prevent="onTransfer">
+      <form class="admin-card" @submit.prevent="onTransfer">
         <h2>Transfer</h2>
-        <select v-model="transferFromWalletId" required>
+        <select v-model="transferFromWalletId" class="admin-input" required>
           <option value="" disabled>From wallet</option>
           <option v-for="w in p2pWallets" :key="w.id" :value="w.id">
             {{ walletLabel(w) }}
           </option>
         </select>
-        <input v-model="transferEmail" type="email" placeholder="Recipient email" required />
-        <input v-model="transferAmount" type="number" min="0" :step="transferStep" required />
-        <button type="submit" :disabled="busy">Transfer</button>
+        <input v-model="transferEmail" type="email" placeholder="Recipient email" class="admin-input" required />
+        <input v-model="transferAmount" type="number" min="0" :step="transferStep" class="admin-input" required />
+        <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">Transfer</button>
       </form>
 
-      <form v-if="purchaseWallets.length" @submit.prevent="onPurchase">
+      <form v-if="purchaseWallets.length" class="admin-card" @submit.prevent="onPurchase">
         <h2>Purchase</h2>
-        <select v-model="purchaseFromWalletId" required>
+        <select v-model="purchaseFromWalletId" class="admin-input" required>
           <option value="" disabled>Pay from</option>
           <option v-for="w in purchaseWallets" :key="w.id" :value="w.id">
             {{ walletLabel(w) }}
           </option>
         </select>
-        <input v-model="purchaseEmail" type="email" placeholder="Merchant email" required />
-        <input v-model="purchaseAmount" type="number" min="0" :step="purchaseStep" required />
-        <button type="submit" :disabled="busy">Pay</button>
+        <input v-model="purchaseEmail" type="email" placeholder="Merchant email" class="admin-input" required />
+        <input v-model="purchaseAmount" type="number" min="0" :step="purchaseStep" class="admin-input" required />
+        <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">Pay</button>
       </form>
-    </section>
+    </div>
 
-    <section class="history">
+    <div class="admin-card">
       <h2>Transaction history</h2>
-      <ul>
-        <li v-for="tx in wallet.transactions" :key="tx.id">
-          <router-link :to="{ name: 'transaction-detail', params: { id: tx.id } }" class="tx-row">
-            <span>{{ describeTransaction(tx) }}</span>
-            <span>{{ formatTransactionAmount(tx) }}</span>
-            <span>{{ new Date(tx.createdAt).toLocaleString() }}</span>
-          </router-link>
-        </li>
-        <li v-if="!wallet.transactions.length">No transactions yet.</li>
-      </ul>
-    </section>
-  </div>
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Description</th>
+            <th>Amount</th>
+            <th>Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="tx in wallet.transactions" :key="tx.id" class="tx-row-clickable" @click="$router.push({ name: 'transaction-detail', params: { id: tx.id } })">
+            <td>{{ describeTransaction(tx) }}</td>
+            <td>{{ formatTransactionAmount(tx) }}</td>
+            <td>{{ new Date(tx.createdAt).toLocaleString() }}</td>
+          </tr>
+          <tr v-if="!wallet.transactions.length"><td colspan="3">No transactions yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </AppLayout>
 </template>
 
 <style scoped>
-.dashboard {
-  max-width: 820px;
-  margin: 0 auto;
-  padding: 2rem 1rem;
+.hero-card {
+  position: relative;
+  border-radius: var(--radius-md);
+  padding: 32px 28px 56px;
+  background: linear-gradient(135deg, #3a2418 0%, #1e1c25 65%);
+  overflow: visible;
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  justify-content: center;
+  min-height: 260px;
 }
-header {
+
+.hero-eyebrow {
+  font-size: 0.78rem;
+  color: var(--accent-orange-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+
+.hero-copy h2 {
+  font-size: 1.9rem;
+  line-height: 1.2;
+  margin: 10px 0 12px;
+  max-width: 420px;
+}
+
+.hero-copy p {
+  color: var(--text-dim);
+  max-width: 440px;
+  margin: 0 0 20px;
+}
+
+.hero-pills {
+  position: absolute;
+  left: 28px;
+  right: 28px;
+  bottom: -22px;
   display: flex;
-  justify-content: space-between;
+  background: rgba(15, 13, 18, 0.85);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+  gap: 28px;
+}
+
+.pill {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pill-value {
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.pill-label {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 6px;
 }
-.admin-nav {
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.dot-orange { background: var(--accent-orange); }
+.dot-lime { background: var(--accent-lime); }
+.dot-blue { background: var(--accent-blue); }
+.dot-red { background: var(--accent-red); }
+
+.side-stack {
   display: flex;
-  gap: 1rem;
-  font-size: 0.85rem;
+  flex-direction: column;
+  gap: 20px;
 }
+
+.latest-amount {
+  font-size: 1.8rem;
+  font-weight: 700;
+}
+
+.latest-meta {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  margin-top: 4px;
+}
+
 .wallets {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 1rem;
+  gap: 14px;
+  margin-bottom: 18px;
 }
 .wallet-card {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 1rem;
+  gap: 8px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
 }
 .wallet-type {
-  font-size: 0.85rem;
-  color: #666;
+  font-size: 0.72rem;
+  color: var(--text-dimmer);
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
 }
 .wallet-balance {
-  font-size: 1.6rem;
-  font-weight: 600;
+  font-size: 1.5rem;
+  font-weight: 700;
 }
 .badges {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.3rem;
-}
-.badge {
-  font-size: 0.7rem;
-  background: #f0f0f0;
-  border-radius: 4px;
-  padding: 0.15rem 0.4rem;
-  color: #444;
+  gap: 6px;
 }
 .add-wallet {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
+  gap: 10px;
 }
 .add-wallet select {
   flex: 1;
   min-width: 160px;
-  padding: 0.5rem;
-}
-.add-wallet input {
-  padding: 0.5rem;
 }
 .hint {
   font-size: 0.8rem;
-  color: #666;
-}
-.actions {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1rem;
+  color: var(--text-dim);
 }
 .actions form {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 1rem;
+  gap: 10px;
 }
-.actions input,
-.actions select {
-  padding: 0.5rem;
-}
-.actions button,
-.add-wallet button {
-  padding: 0.5rem;
+.tx-row-clickable {
   cursor: pointer;
-}
-.history ul {
-  list-style: none;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-.history li {
-  border-bottom: 1px solid #eee;
-}
-.tx-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 0.4rem 0;
-  color: inherit;
-  text-decoration: none;
-}
-.tx-row:hover {
-  text-decoration: underline;
-}
-.error {
-  color: #b00020;
-  font-size: 0.9rem;
 }
 </style>

@@ -3,6 +3,7 @@ import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { apiRequest, ApiError } from '../api/client';
+import '../styles/admin-theme.css';
 
 const email = ref('');
 const password = ref('');
@@ -34,25 +35,32 @@ async function onSubmit() {
 </script>
 
 <template>
-  <div class="auth-page">
-    <form class="auth-form" @submit.prevent="onSubmit">
-      <h1>Sign up</h1>
-      <label>
-        Email
-        <input v-model="email" type="email" required />
-      </label>
-      <label>
-        Password (min 8 characters)
-        <input v-model="password" type="password" minlength="8" required />
-      </label>
-      <p v-if="error" class="error">{{ error }}</p>
-      <button type="submit" :disabled="loading">Create account</button>
-      <router-link :to="{ name: 'login' }">Already have an account? Log in</router-link>
-    </form>
+  <div class="admin-theme auth-theme">
+    <div class="auth-page">
+      <form class="auth-form admin-card" @submit.prevent="onSubmit">
+        <div class="auth-logo">P</div>
+        <h1>Create your account</h1>
+        <p class="auth-sub">Start managing your wallets on Packeta</p>
+        <label>
+          Email
+          <input v-model="email" type="email" class="admin-input" required />
+        </label>
+        <label>
+          Password (min 8 characters)
+          <input v-model="password" type="password" class="admin-input" minlength="8" required />
+        </label>
+        <p v-if="error" class="admin-error">{{ error }}</p>
+        <button type="submit" class="admin-btn admin-btn-primary" :disabled="loading">Create account</button>
+        <router-link :to="{ name: 'login' }" class="auth-link">Already have an account? Log in</router-link>
+      </form>
+    </div>
   </div>
 </template>
 
 <style scoped>
+.auth-theme {
+  padding: 0;
+}
 .auth-page {
   display: flex;
   justify-content: center;
@@ -62,26 +70,52 @@ async function onSubmit() {
 .auth-form {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  width: 320px;
+  gap: 12px;
+  width: 340px;
+  padding: 32px 28px;
+}
+.auth-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  background: var(--text);
+  color: var(--shell-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.auth-form h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+.auth-sub {
+  margin: -6px 0 6px;
+  color: var(--text-dim);
+  font-size: 0.88rem;
 }
 label {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.9rem;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--text-dim);
 }
-input {
-  padding: 0.5rem;
-  font-size: 1rem;
+.admin-input {
+  width: 100%;
 }
 button {
-  padding: 0.6rem;
-  font-size: 1rem;
-  cursor: pointer;
+  margin-top: 6px;
+  width: 100%;
 }
-.error {
-  color: #b00020;
+.auth-link {
+  text-align: center;
+  color: var(--text-dim);
   font-size: 0.85rem;
+  text-decoration: none;
+}
+.auth-link:hover {
+  color: var(--text);
 }
 </style>

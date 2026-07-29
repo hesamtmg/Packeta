@@ -5,8 +5,10 @@
 <style>
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, sans-serif;
-  background: #0f1115;
-  color: #e6e8ec;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+  background: #0a0a0d;
+  color: #f5f4f7;
 }
 </style>
