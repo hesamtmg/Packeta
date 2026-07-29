@@ -14,19 +14,24 @@ interface WalletTypeFixture {
   allowWithdraw: boolean;
   allowP2pOut: boolean;
   allowP2pIn: boolean;
+  allowPurchaseOut?: boolean;
+  allowPurchaseIn?: boolean;
 }
 
 interface WalletFixture {
   id: string;
+  userId?: string;
   balance: string;
   walletType: WalletTypeFixture;
+  purchaseTimeoutSeconds?: number | null;
 }
 
 function buildService(options: {
   senderWallet: WalletFixture;
   recipientWallet?: WalletFixture | null;
+  ipgOverrides?: Record<string, jest.Mock>;
 }) {
-  const { senderWallet, recipientWallet } = options;
+  const { senderWallet, recipientWallet, ipgOverrides } = options;
   const lockCalls: string[] = [];
 
   const walletsById = new Map<string, WalletFixture>([
@@ -55,6 +60,14 @@ function buildService(options: {
           : null;
       },
     ),
+    findEligiblePurchaseInWallet: jest.fn(
+      async (_manager: unknown, _userId: string, currencyId: string) => {
+        if (!recipientWallet) return null;
+        return recipientWallet.walletType.currencyId === currencyId
+          ? recipientWallet
+          : null;
+      },
+    ),
     listForUser: jest.fn(),
     lockById: jest.fn(async (_manager: unknown, id: string) => {
       lockCalls.push(id);
@@ -70,11 +83,33 @@ function buildService(options: {
 
   const loggingService = { log: jest.fn().mockResolvedValue(undefined) };
 
+  const ipgClientService = {
+    createPayment: jest
+      .fn()
+      .mockResolvedValue({ authority: 'auth-1', paymentUrl: 'http://ipg/pay/auth-1' }),
+    verifyPayment: jest.fn().mockResolvedValue({ success: true, refId: 'auth-1' }),
+    ...ipgOverrides,
+  };
+
+  const configService = {
+    get: jest.fn(() => 'http://localhost:5173'),
+  };
+
   const manager = {
     findOne: jest.fn().mockResolvedValue({ id: 'recipient-user-id' }),
     update: jest.fn().mockResolvedValue(undefined),
     create: jest.fn((_entity: unknown, data: unknown) => data),
-    save: jest.fn(async (data: any) => ({ ...data, id: 'tx-1' })),
+    save: jest.fn(async (data: any) => ({ ...data, id: data.id ?? 'tx-1' })),
+    createQueryBuilder: jest.fn(() => {
+      const builder: any = {
+        setLock: () => builder,
+        where: () => builder,
+        andWhere: () => builder,
+        getOne: async () => builder.__txn,
+        __txn: undefined,
+      };
+      return builder;
+    }),
   };
 
   const dataSource = {
@@ -88,10 +123,12 @@ function buildService(options: {
     walletsService as any,
     idempotencyService as any,
     loggingService as any,
+    ipgClientService as any,
+    configService as any,
     {} as any,
   );
 
-  return { service, lockCalls };
+  return { service, lockCalls, manager, ipgClientService };
 }
 
 function walletType(
@@ -429,5 +466,82 @@ describe('TransactionsService.adjust', () => {
     await expect(
       service.adjust('admin-1', wallet.id, 0, 'No-op', 'idem-14'),
     ).rejects.toThrow('amount must not be zero');
+  });
+});
+
+describe('TransactionsService.initiatePurchase', () => {
+  it('rejects a purchase from a wallet type that cannot make purchases', async () => {
+    const customerWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '500',
+      walletType: walletType({ name: 'Gift', allowPurchaseOut: false }),
+    };
+    const { service } = buildService({
+      senderWallet: customerWallet,
+      recipientWallet: null,
+    });
+
+    await expect(
+      service.initiatePurchase(
+        'customer',
+        customerWallet.id,
+        'merchant@example.com',
+        100,
+        'idem-p1',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rejects a purchase when the merchant has no eligible wallet', async () => {
+    const customerWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '500',
+      walletType: walletType({ allowPurchaseOut: true }),
+    };
+    const { service } = buildService({
+      senderWallet: customerWallet,
+      recipientWallet: null,
+    });
+
+    await expect(
+      service.initiatePurchase(
+        'customer',
+        customerWallet.id,
+        'merchant@example.com',
+        100,
+        'idem-p2',
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('creates a PENDING purchase with no balance change and stores the IPG authority', async () => {
+    const customerWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '500',
+      walletType: walletType({ allowPurchaseOut: true }),
+    };
+    const merchantWallet: WalletFixture = {
+      id: 'wallet-b',
+      balance: '0',
+      purchaseTimeoutSeconds: 120,
+      walletType: walletType({ name: 'Merchant', allowPurchaseIn: true }),
+    };
+    const { service, ipgClientService } = buildService({
+      senderWallet: customerWallet,
+      recipientWallet: merchantWallet,
+    });
+
+    const result = await service.initiatePurchase(
+      'customer',
+      customerWallet.id,
+      'merchant@example.com',
+      250,
+      'idem-p3',
+    );
+
+    expect(result.redirectUrl).toBe('http://ipg/pay/auth-1');
+    expect(ipgClientService.createPayment).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: '250', timeoutSeconds: 120 }),
+    );
   });
 });

@@ -15,7 +15,7 @@ interface WalletSummary {
 
 interface TransactionDetail {
   id: string;
-  type: 'DEPOSIT' | 'WITHDRAW' | 'TRANSFER' | 'ADJUSTMENT';
+  type: 'DEPOSIT' | 'WITHDRAW' | 'TRANSFER' | 'ADJUSTMENT' | 'PURCHASE';
   amount: string;
   note: string | null;
   idempotencyKey: string;
@@ -23,11 +23,15 @@ interface TransactionDetail {
   fromWallet: WalletSummary | null;
   toWallet: WalletSummary | null;
   direction: 'IN' | 'OUT' | 'BOTH';
+  status: 'PENDING' | 'COMPLETED' | 'REVERSED';
+  expiresAt: string | null;
+  relatedTransactionId: string | null;
 }
 
 const route = useRoute();
 const transaction = ref<TransactionDetail | null>(null);
 const error = ref('');
+const busy = ref(false);
 
 const currency = computed(
   () => transaction.value?.fromWallet?.walletType.currency ?? transaction.value?.toWallet?.walletType.currency ?? null,
@@ -46,10 +50,18 @@ const directionLabel = computed(() => {
       if (transaction.value.direction === 'OUT') return `Sent from ${transaction.value.fromWallet?.walletType.name ?? 'wallet'}`;
       if (transaction.value.direction === 'IN') return `Received into ${transaction.value.toWallet?.walletType.name ?? 'wallet'}`;
       return 'Transfer';
+    case 'PURCHASE':
+      if (transaction.value.direction === 'OUT') return `Purchase paid to ${transaction.value.toWallet?.walletType.name ?? 'merchant'}`;
+      if (transaction.value.direction === 'IN') return `Purchase received into ${transaction.value.toWallet?.walletType.name ?? 'wallet'}`;
+      return 'Purchase';
     default:
       return transaction.value.type;
   }
 });
+
+const canRefund = computed(
+  () => transaction.value?.type === 'PURCHASE' && transaction.value?.status === 'COMPLETED',
+);
 
 async function load() {
   error.value = '';
@@ -57,6 +69,23 @@ async function load() {
     transaction.value = await apiRequest<TransactionDetail>(`/transactions/${route.params.id}`);
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : 'Failed to load transaction';
+  }
+}
+
+async function onRefund() {
+  error.value = '';
+  busy.value = true;
+  try {
+    await apiRequest(`/transactions/${route.params.id}/reverse`, {
+      method: 'POST',
+      body: { reason: 'Refunded from transaction detail page' },
+      idempotent: true,
+    });
+    await load();
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : 'Refund failed';
+  } finally {
+    busy.value = false;
   }
 }
 
@@ -76,6 +105,9 @@ onMounted(load);
       <span class="type-badge">{{ transaction.type }}</span>
       <span class="amount">{{ currency ? formatAmount(transaction.amount, currency) : transaction.amount }}</span>
       <span class="summary">{{ directionLabel }}</span>
+      <span v-if="transaction.type === 'PURCHASE'" class="status-badge" :class="transaction.status.toLowerCase()">
+        {{ transaction.status }}
+      </span>
 
       <dl>
         <template v-if="transaction.fromWallet">
@@ -85,6 +117,14 @@ onMounted(load);
         <template v-if="transaction.toWallet">
           <dt>To wallet</dt>
           <dd>{{ transaction.toWallet.walletType.name }} ({{ transaction.toWallet.walletType.currency.code }})</dd>
+        </template>
+        <template v-if="transaction.status === 'PENDING' && transaction.expiresAt">
+          <dt>Verify by</dt>
+          <dd>{{ new Date(transaction.expiresAt).toLocaleString() }}</dd>
+        </template>
+        <template v-if="transaction.relatedTransactionId">
+          <dt>Related transaction</dt>
+          <dd class="mono">{{ transaction.relatedTransactionId }}</dd>
         </template>
         <template v-if="transaction.note">
           <dt>Note</dt>
@@ -97,6 +137,8 @@ onMounted(load);
         <dt>Date</dt>
         <dd>{{ new Date(transaction.createdAt).toLocaleString() }}</dd>
       </dl>
+
+      <button v-if="canRefund" :disabled="busy" @click="onRefund">Refund this purchase</button>
     </section>
   </div>
 </template>
@@ -140,6 +182,27 @@ header {
 .summary {
   color: #666;
   margin-bottom: 0.5rem;
+}
+.status-badge {
+  align-self: flex-start;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-radius: 4px;
+  padding: 0.2rem 0.5rem;
+}
+.status-badge.pending {
+  background: #fff4d6;
+  color: #8a6300;
+}
+.status-badge.completed {
+  background: #e3f8ec;
+  color: #0f7a3f;
+}
+.status-badge.reversed {
+  background: #fde8e8;
+  color: #b00020;
 }
 dl {
   display: grid;

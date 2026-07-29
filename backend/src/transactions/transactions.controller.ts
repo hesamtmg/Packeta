@@ -17,6 +17,8 @@ import { TransactionsService } from './transactions.service';
 import { DepositDto } from './dto/deposit.dto';
 import { WithdrawDto } from './dto/withdraw.dto';
 import { TransferDto } from './dto/transfer.dto';
+import { InitiatePurchaseDto } from './dto/initiate-purchase.dto';
+import { ReverseTransactionDto } from './dto/reverse-transaction.dto';
 
 @Controller('transactions')
 @UseGuards(JwtAuthGuard)
@@ -66,6 +68,29 @@ export class TransactionsController {
     );
   }
 
+  @Post('purchase/initiate')
+  initiatePurchase(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: InitiatePurchaseDto,
+    @Headers('idempotency-key') idempotencyKey: string,
+  ) {
+    return this.transactionsService.initiatePurchase(
+      user.userId,
+      dto.fromWalletId,
+      dto.toEmail,
+      dto.amount,
+      idempotencyKey,
+    );
+  }
+
+  @Post('purchase/:id/verify')
+  verifyPurchase(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    return this.transactionsService.verifyPurchase(user.userId, id);
+  }
+
   @Get()
   history(
     @CurrentUser() user: AuthenticatedUser,
@@ -77,5 +102,20 @@ export class TransactionsController {
   @Get(':id')
   getOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.transactionsService.getById(user.userId, id);
+  }
+
+  @Post(':id/reverse')
+  reverse(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: ReverseTransactionDto,
+    @Headers('idempotency-key') idempotencyKey: string,
+  ) {
+    return this.transactionsService.reverseTransaction(
+      user.userId,
+      id,
+      dto.reason,
+      idempotencyKey,
+    );
   }
 }

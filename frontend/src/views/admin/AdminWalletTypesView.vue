@@ -14,6 +14,9 @@ interface WalletType {
   allowWithdraw: boolean;
   allowP2pOut: boolean;
   allowP2pIn: boolean;
+  supportsAutoWithdraw: boolean;
+  allowPurchaseOut: boolean;
+  allowPurchaseIn: boolean;
 }
 
 const types = ref<WalletType[]>([]);
@@ -30,6 +33,9 @@ const newType = reactive({
   allowWithdraw: true,
   allowP2pOut: false,
   allowP2pIn: false,
+  supportsAutoWithdraw: false,
+  allowPurchaseOut: false,
+  allowPurchaseIn: false,
 });
 
 const newTypeCurrency = computed(
@@ -75,6 +81,9 @@ async function save(type: WalletType) {
         allowWithdraw: type.allowWithdraw,
         allowP2pOut: type.allowP2pOut,
         allowP2pIn: type.allowP2pIn,
+        supportsAutoWithdraw: type.supportsAutoWithdraw,
+        allowPurchaseOut: type.allowPurchaseOut,
+        allowPurchaseIn: type.allowPurchaseIn,
       },
     });
     await loadTypes();
@@ -104,6 +113,9 @@ async function createType() {
         allowWithdraw: newType.allowWithdraw,
         allowP2pOut: newType.allowP2pOut,
         allowP2pIn: newType.allowP2pIn,
+        supportsAutoWithdraw: newType.supportsAutoWithdraw,
+        allowPurchaseOut: newType.allowPurchaseOut,
+        allowPurchaseIn: newType.allowPurchaseIn,
       },
     });
     newType.code = '';
@@ -114,6 +126,9 @@ async function createType() {
     newType.allowWithdraw = true;
     newType.allowP2pOut = false;
     newType.allowP2pIn = false;
+    newType.supportsAutoWithdraw = false;
+    newType.allowPurchaseOut = false;
+    newType.allowPurchaseIn = false;
     await loadTypes();
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : 'Create failed';
@@ -152,6 +167,9 @@ loadTypes();
           <label class="checkbox-label"><input v-model="t.allowWithdraw" type="checkbox" /> Allow withdrawals</label>
           <label class="checkbox-label"><input v-model="t.allowP2pOut" type="checkbox" /> Can send transfers</label>
           <label class="checkbox-label"><input v-model="t.allowP2pIn" type="checkbox" /> Can receive transfers</label>
+          <label class="checkbox-label"><input v-model="t.supportsAutoWithdraw" type="checkbox" /> Supports auto-withdraw schedule</label>
+          <label class="checkbox-label"><input v-model="t.allowPurchaseOut" type="checkbox" /> Can make purchases (customer)</label>
+          <label class="checkbox-label"><input v-model="t.allowPurchaseIn" type="checkbox" /> Can receive purchases (merchant)</label>
           <button class="admin-btn admin-btn-primary" :disabled="busy" @click="save(t)">Save</button>
         </article>
       </div>
@@ -187,6 +205,9 @@ loadTypes();
       <label class="checkbox-label"><input v-model="newType.allowWithdraw" type="checkbox" /> Allow withdrawals</label>
       <label class="checkbox-label"><input v-model="newType.allowP2pOut" type="checkbox" /> Can send transfers</label>
       <label class="checkbox-label"><input v-model="newType.allowP2pIn" type="checkbox" /> Can receive transfers</label>
+      <label class="checkbox-label"><input v-model="newType.supportsAutoWithdraw" type="checkbox" /> Supports auto-withdraw schedule</label>
+      <label class="checkbox-label"><input v-model="newType.allowPurchaseOut" type="checkbox" /> Can make purchases (customer)</label>
+      <label class="checkbox-label"><input v-model="newType.allowPurchaseIn" type="checkbox" /> Can receive purchases (merchant)</label>
       <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">Create</button>
     </form>
   </AdminLayout>

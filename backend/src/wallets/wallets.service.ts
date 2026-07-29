@@ -25,13 +25,32 @@ export class WalletsService {
     manager: EntityManager,
     userId: string,
     walletTypeId: string,
+    options?: {
+      autoWithdrawTimes?: string[];
+      purchaseTimeoutSeconds?: number;
+    },
   ): Promise<Wallet> {
     const wallet = manager.create(Wallet, {
       userId,
       walletTypeId,
       balance: '0',
+      autoWithdrawTimes: options?.autoWithdrawTimes ?? null,
+      purchaseTimeoutSeconds: options?.purchaseTimeoutSeconds ?? null,
     });
     return manager.save(wallet);
+  }
+
+  // Merchant wallets whose type supports the auto-withdraw sweep and have a
+  // schedule configured. Used by the scheduler to find sweep candidates.
+  async listWithAutoWithdrawDue(): Promise<Wallet[]> {
+    return this.walletsRepository
+      .createQueryBuilder('wallet')
+      .innerJoinAndSelect('wallet.walletType', 'walletType')
+      .innerJoinAndSelect('walletType.currency', 'currency')
+      .where('walletType.supportsAutoWithdraw = true')
+      .andWhere('wallet.autoWithdrawTimes IS NOT NULL')
+      .andWhere('wallet.balance <> 0')
+      .getMany();
   }
 
   // Gives every new user one wallet of each type denominated in the default
@@ -45,7 +64,7 @@ export class WalletsService {
   ): Promise<Wallet[]> {
     const types = await manager.find(WalletType, {
       relations: { currency: true },
-      where: { currency: { isDefault: true } },
+      where: { currency: { isDefault: true }, isStarterType: true },
     });
     const wallets = types.map((type) =>
       manager.create(Wallet, { userId, walletTypeId: type.id, balance: '0' }),
@@ -111,6 +130,25 @@ export class WalletsService {
       .innerJoin('wallet.walletType', 'walletType')
       .where('wallet.userId = :userId', { userId })
       .andWhere('walletType.allowP2pIn = true')
+      .andWhere('walletType.currencyId = :currencyId', { currencyId })
+      .orderBy('wallet.createdAt', 'ASC')
+      .getOne();
+  }
+
+  // Same idea as findEligibleP2pInWallet, but for PURCHASE: resolves the
+  // merchant's oldest wallet whose type accepts purchases, in the payer's
+  // currency. The customer never sees or picks a merchant's specific wallet
+  // id directly.
+  async findEligiblePurchaseInWallet(
+    manager: EntityManager,
+    merchantUserId: string,
+    currencyId: string,
+  ): Promise<Wallet | null> {
+    return manager
+      .createQueryBuilder(Wallet, 'wallet')
+      .innerJoin('wallet.walletType', 'walletType')
+      .where('wallet.userId = :merchantUserId', { merchantUserId })
+      .andWhere('walletType.allowPurchaseIn = true')
       .andWhere('walletType.currencyId = :currencyId', { currencyId })
       .orderBy('wallet.createdAt', 'ASC')
       .getOne();

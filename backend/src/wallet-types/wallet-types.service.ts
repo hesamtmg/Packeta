@@ -63,6 +63,9 @@ export class WalletTypesService {
       allowWithdraw: dto.allowWithdraw,
       allowP2pOut: dto.allowP2pOut,
       allowP2pIn: dto.allowP2pIn,
+      supportsAutoWithdraw: dto.supportsAutoWithdraw ?? false,
+      allowPurchaseOut: dto.allowPurchaseOut ?? false,
+      allowPurchaseIn: dto.allowPurchaseIn ?? false,
     });
     const saved = await this.walletTypesRepository.save(type);
     saved.currency = currency;
@@ -88,6 +91,15 @@ export class WalletTypesService {
     if (dto.allowWithdraw !== undefined) type.allowWithdraw = dto.allowWithdraw;
     if (dto.allowP2pOut !== undefined) type.allowP2pOut = dto.allowP2pOut;
     if (dto.allowP2pIn !== undefined) type.allowP2pIn = dto.allowP2pIn;
+    if (dto.supportsAutoWithdraw !== undefined) {
+      type.supportsAutoWithdraw = dto.supportsAutoWithdraw;
+    }
+    if (dto.allowPurchaseOut !== undefined) {
+      type.allowPurchaseOut = dto.allowPurchaseOut;
+    }
+    if (dto.allowPurchaseIn !== undefined) {
+      type.allowPurchaseIn = dto.allowPurchaseIn;
+    }
     type.allowNegativeBalance = allowNegativeBalance;
     if (!allowNegativeBalance) {
       type.creditLimit = null;

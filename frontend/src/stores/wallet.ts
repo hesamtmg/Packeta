@@ -12,18 +12,23 @@ export interface WalletType {
   allowWithdraw: boolean;
   allowP2pOut: boolean;
   allowP2pIn: boolean;
+  supportsAutoWithdraw: boolean;
+  allowPurchaseOut: boolean;
+  allowPurchaseIn: boolean;
 }
 
 export interface Wallet {
   id: string;
   balance: string;
+  autoWithdrawTimes: string[] | null;
+  purchaseTimeoutSeconds: number | null;
   walletType: WalletType;
   createdAt: string;
 }
 
 interface Transaction {
   id: string;
-  type: 'DEPOSIT' | 'WITHDRAW' | 'TRANSFER';
+  type: 'DEPOSIT' | 'WITHDRAW' | 'TRANSFER' | 'ADJUSTMENT' | 'PURCHASE';
   fromWalletId: string | null;
   toWalletId: string | null;
   amount: string;
@@ -46,10 +51,13 @@ export const useWalletStore = defineStore('wallet', {
     async fetchTransactions() {
       this.transactions = await apiRequest<Transaction[]>('/transactions');
     },
-    async createWallet(walletTypeId: string) {
+    async createWallet(
+      walletTypeId: string,
+      options?: { autoWithdrawTimes?: string[]; purchaseTimeoutSeconds?: number },
+    ) {
       await apiRequest('/wallets', {
         method: 'POST',
-        body: { walletTypeId },
+        body: { walletTypeId, ...options },
       });
       await this.fetchWallets();
     },
@@ -76,6 +84,16 @@ export const useWalletStore = defineStore('wallet', {
         idempotent: true,
       });
       await Promise.all([this.fetchWallets(), this.fetchTransactions()]);
+    },
+    async initiatePurchase(fromWalletId: string, toEmail: string, amount: number) {
+      return apiRequest<{ transactionId: string; redirectUrl: string; expiresAt: string }>(
+        '/transactions/purchase/initiate',
+        {
+          method: 'POST',
+          body: { fromWalletId, toEmail, amount },
+          idempotent: true,
+        },
+      );
     },
   },
 });
