@@ -341,7 +341,7 @@ function onPurchase() {
         <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">Transfer</button>
       </form>
 
-      <form v-if="purchaseWallets.length" class="admin-card" @submit.prevent="onPurchase">
+      <form class="admin-card" @submit.prevent="onPurchase">
         <h2>Purchase</h2>
         <select v-model="purchaseFromWalletId" class="admin-input" required>
           <option value="" disabled>Pay from</option>
