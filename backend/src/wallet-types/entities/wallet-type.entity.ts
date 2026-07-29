@@ -18,6 +18,7 @@ export enum WalletTypeCode {
   SELL = 'SELL',
   CREDIT = 'CREDIT',
   GIFT = 'GIFT',
+  MERCHANT = 'MERCHANT',
 }
 
 // Each row is the "law" governing a wallet type: whether it can go negative
@@ -66,6 +67,24 @@ export class WalletType {
 
   @Column({ type: 'boolean', default: false })
   allowP2pIn: boolean;
+
+  // Merchant-style types: eligible for the per-wallet auto-withdraw sweep
+  // schedule, and/or able to send/receive a PURCHASE (customer -> merchant
+  // only, never the reverse).
+  @Column({ type: 'boolean', default: false })
+  supportsAutoWithdraw: boolean;
+
+  @Column({ type: 'boolean', default: false })
+  allowPurchaseOut: boolean;
+
+  @Column({ type: 'boolean', default: false })
+  allowPurchaseIn: boolean;
+
+  // Whether every new signup gets a starter wallet of this type (in the
+  // default currency). Only the four original built-ins are starter types;
+  // custom types (including Merchant) are opt-in via POST /wallets.
+  @Column({ type: 'boolean', default: false })
+  isStarterType: boolean;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

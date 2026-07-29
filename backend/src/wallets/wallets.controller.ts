@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import {
@@ -40,8 +48,23 @@ export class WalletsController {
     @Body() dto: CreateWalletDto,
   ) {
     const walletType = await this.walletTypesService.findById(dto.walletTypeId);
+
+    if (dto.autoWithdrawTimes && !walletType.supportsAutoWithdraw) {
+      throw new BadRequestException(
+        'This wallet type does not support auto-withdraw scheduling',
+      );
+    }
+    if (dto.purchaseTimeoutSeconds && !walletType.allowPurchaseIn) {
+      throw new BadRequestException(
+        'This wallet type does not accept purchases, so a verification timeout is not applicable',
+      );
+    }
+
     const wallet = await this.dataSource.transaction((manager) =>
-      this.walletsService.createForUser(manager, user.userId, walletType.id),
+      this.walletsService.createForUser(manager, user.userId, walletType.id, {
+        autoWithdrawTimes: dto.autoWithdrawTimes,
+        purchaseTimeoutSeconds: dto.purchaseTimeoutSeconds,
+      }),
     );
     return serializeWallet({ ...wallet, walletType });
   }

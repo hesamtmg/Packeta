@@ -4,6 +4,7 @@ import LoginView from '../views/LoginView.vue';
 import SignupView from '../views/SignupView.vue';
 import DashboardView from '../views/DashboardView.vue';
 import TransactionDetailView from '../views/TransactionDetailView.vue';
+import PurchaseCallbackView from '../views/PurchaseCallbackView.vue';
 import AdminDashboardView from '../views/admin/AdminDashboardView.vue';
 import AdminTransactionsView from '../views/admin/AdminTransactionsView.vue';
 import AdminWalletsView from '../views/admin/AdminWalletsView.vue';
@@ -27,6 +28,12 @@ const router = createRouter({
       path: '/transactions/:id',
       name: 'transaction-detail',
       component: TransactionDetailView,
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/purchase/:id/callback',
+      name: 'purchase-callback',
+      component: PurchaseCallbackView,
       meta: { requiresAuth: true },
     },
     {

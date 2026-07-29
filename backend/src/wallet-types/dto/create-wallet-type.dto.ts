@@ -38,4 +38,16 @@ export class CreateWalletTypeDto {
 
   @IsBoolean()
   allowP2pIn: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  supportsAutoWithdraw?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  allowPurchaseOut?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  allowPurchaseIn?: boolean;
 }

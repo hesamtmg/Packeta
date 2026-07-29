@@ -14,4 +14,11 @@ export default () => ({
     secret: process.env.JWT_SECRET ?? 'change-me-in-production',
     expiresIn: process.env.JWT_EXPIRES_IN ?? '1h',
   },
+  ipg: {
+    baseUrl: process.env.IPG_BASE_URL ?? 'http://localhost:4000',
+    apiKey: process.env.IPG_API_KEY ?? 'sandbox-ipg-key',
+  },
+  // Where the customer's browser lands after the IPG redirects back — used
+  // to build each purchase's callbackUrl.
+  frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:5173',
 });

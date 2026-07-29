@@ -11,6 +11,8 @@ const wallet = useWalletStore();
 const router = useRouter();
 
 const newWalletType = ref('');
+const newWalletAutoWithdrawTimes = ref(['', '', '']);
+const newWalletPurchaseTimeoutMinutes = ref('');
 const depositWalletId = ref('');
 const depositAmount = ref('');
 const withdrawWalletId = ref('');
@@ -18,6 +20,9 @@ const withdrawAmount = ref('');
 const transferFromWalletId = ref('');
 const transferEmail = ref('');
 const transferAmount = ref('');
+const purchaseFromWalletId = ref('');
+const purchaseEmail = ref('');
+const purchaseAmount = ref('');
 const actionError = ref('');
 const busy = ref(false);
 
@@ -26,6 +31,19 @@ const withdrawableWallets = computed(() =>
 );
 const p2pWallets = computed(() =>
   wallet.wallets.filter((w) => w.walletType.allowP2pOut),
+);
+const purchaseWallets = computed(() =>
+  wallet.wallets.filter((w) => w.walletType.allowPurchaseOut),
+);
+
+const selectedNewWalletType = computed(() =>
+  wallet.walletTypes.find((t) => t.id === newWalletType.value),
+);
+const showAutoWithdrawFields = computed(
+  () => selectedNewWalletType.value?.supportsAutoWithdraw ?? false,
+);
+const showPurchaseTimeoutField = computed(
+  () => selectedNewWalletType.value?.allowPurchaseIn ?? false,
 );
 
 const walletsById = computed(() => {
@@ -43,6 +61,10 @@ const depositStep = computed(() => {
 });
 const withdrawStep = computed(() => {
   const w = findWallet(withdrawWalletId.value);
+  return w ? amountStep(w.walletType.currency) : '0.01';
+});
+const purchaseStep = computed(() => {
+  const w = findWallet(purchaseFromWalletId.value);
   return w ? amountStep(w.walletType.currency) : '0.01';
 });
 const transferStep = computed(() => {
@@ -108,8 +130,19 @@ async function runAction(fn: () => Promise<void>) {
 
 function onAddWallet() {
   runAction(async () => {
-    await wallet.createWallet(newWalletType.value);
+    const options: { autoWithdrawTimes?: string[]; purchaseTimeoutSeconds?: number } = {};
+    if (showAutoWithdrawFields.value) {
+      options.autoWithdrawTimes = newWalletAutoWithdrawTimes.value;
+    }
+    if (showPurchaseTimeoutField.value && newWalletPurchaseTimeoutMinutes.value) {
+      options.purchaseTimeoutSeconds = Math.round(
+        Number(newWalletPurchaseTimeoutMinutes.value) * 60,
+      );
+    }
+    await wallet.createWallet(newWalletType.value, options);
     newWalletType.value = '';
+    newWalletAutoWithdrawTimes.value = ['', '', ''];
+    newWalletPurchaseTimeoutMinutes.value = '';
   });
 }
 
@@ -142,6 +175,19 @@ function onTransfer() {
     );
     transferEmail.value = '';
     transferAmount.value = '';
+  });
+}
+
+function onPurchase() {
+  runAction(async () => {
+    const w = findWallet(purchaseFromWalletId.value);
+    if (!w) return;
+    const result = await wallet.initiatePurchase(
+      w.id,
+      purchaseEmail.value,
+      toMinorUnits(purchaseAmount.value, w.walletType.currency),
+    );
+    window.location.href = result.redirectUrl;
   });
 }
 
@@ -180,6 +226,24 @@ function logout() {
           {{ t.name }} ({{ t.currency.code }})
         </option>
       </select>
+
+      <template v-if="showAutoWithdrawFields">
+        <span class="hint">Auto-withdraw times (3):</span>
+        <input v-model="newWalletAutoWithdrawTimes[0]" type="time" required />
+        <input v-model="newWalletAutoWithdrawTimes[1]" type="time" required />
+        <input v-model="newWalletAutoWithdrawTimes[2]" type="time" required />
+      </template>
+
+      <template v-if="showPurchaseTimeoutField">
+        <span class="hint">Verify timeout (minutes):</span>
+        <input
+          v-model="newWalletPurchaseTimeoutMinutes"
+          type="number"
+          min="1"
+          placeholder="15"
+        />
+      </template>
+
       <button type="submit" :disabled="busy">Add</button>
     </form>
 
@@ -219,6 +283,19 @@ function logout() {
         <input v-model="transferEmail" type="email" placeholder="Recipient email" required />
         <input v-model="transferAmount" type="number" min="0" :step="transferStep" required />
         <button type="submit" :disabled="busy">Transfer</button>
+      </form>
+
+      <form v-if="purchaseWallets.length" @submit.prevent="onPurchase">
+        <h2>Purchase</h2>
+        <select v-model="purchaseFromWalletId" required>
+          <option value="" disabled>Pay from</option>
+          <option v-for="w in purchaseWallets" :key="w.id" :value="w.id">
+            {{ walletLabel(w) }}
+          </option>
+        </select>
+        <input v-model="purchaseEmail" type="email" placeholder="Merchant email" required />
+        <input v-model="purchaseAmount" type="number" min="0" :step="purchaseStep" required />
+        <button type="submit" :disabled="busy">Pay</button>
       </form>
     </section>
 
@@ -295,11 +372,21 @@ header {
 }
 .add-wallet {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 0.5rem;
 }
 .add-wallet select {
   flex: 1;
+  min-width: 160px;
   padding: 0.5rem;
+}
+.add-wallet input {
+  padding: 0.5rem;
+}
+.hint {
+  font-size: 0.8rem;
+  color: #666;
 }
 .actions {
   display: grid;

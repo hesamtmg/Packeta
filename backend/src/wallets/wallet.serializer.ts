@@ -4,6 +4,8 @@ export function serializeWallet(wallet: Wallet) {
   return {
     id: wallet.id,
     balance: wallet.balance,
+    autoWithdrawTimes: wallet.autoWithdrawTimes,
+    purchaseTimeoutSeconds: wallet.purchaseTimeoutSeconds,
     walletType: {
       id: wallet.walletType.id,
       code: wallet.walletType.code,
@@ -13,6 +15,9 @@ export function serializeWallet(wallet: Wallet) {
       allowWithdraw: wallet.walletType.allowWithdraw,
       allowP2pOut: wallet.walletType.allowP2pOut,
       allowP2pIn: wallet.walletType.allowP2pIn,
+      supportsAutoWithdraw: wallet.walletType.supportsAutoWithdraw,
+      allowPurchaseOut: wallet.walletType.allowPurchaseOut,
+      allowPurchaseIn: wallet.walletType.allowPurchaseIn,
       currency: {
         code: wallet.walletType.currency.code,
         symbol: wallet.walletType.currency.symbol,
