@@ -1,12 +1,25 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useWalletStore, type Wallet } from '../stores/wallet';
-import { ApiError } from '../api/client';
-import { amountStep, formatAmount, toMinorUnits } from '../utils/currency';
+import { apiRequest, ApiError } from '../api/client';
+import { amountStep, formatAmount, toMinorUnits, type CurrencyInfo } from '../utils/currency';
 import AppLayout from '../components/AppLayout.vue';
 import MiniLineChart from '../components/admin/MiniLineChart.vue';
 
 const wallet = useWalletStore();
+
+const phoneNumber = ref('');
+const phoneNumberSaved = ref<string | null>(null);
+const phoneBusy = ref(false);
+const phoneError = ref('');
+const phoneSuccess = ref('');
+
+const chargeAmount = ref('');
+const chargeCurrencyCode = ref('');
+const chargeBusy = ref(false);
+const chargeError = ref('');
+const chargeResult = ref<{ redirectUrl: string; expiresAt: string } | null>(null);
+const chargeLinkCopied = ref(false);
 
 const newWalletType = ref('');
 const newWalletAutoWithdrawTimes = ref(['', '', '']);
@@ -32,6 +45,24 @@ const p2pWallets = computed(() =>
 );
 const purchaseWallets = computed(() =>
   wallet.wallets.filter((w) => w.walletType.allowPurchaseOut),
+);
+
+// Currencies the user could charge a customer in (i.e. they hold at least
+// one wallet whose type can receive purchases), deduped by currency code.
+const purchaseInCurrencies = computed(() => {
+  const map = new Map<string, CurrencyInfo>();
+  for (const w of wallet.wallets) {
+    if (w.walletType.allowPurchaseIn) {
+      map.set(w.walletType.currency.code, w.walletType.currency);
+    }
+  }
+  return [...map.values()];
+});
+const chargeCurrency = computed(() =>
+  purchaseInCurrencies.value.find((c) => c.code === chargeCurrencyCode.value),
+);
+const chargeStep = computed(() =>
+  chargeCurrency.value ? amountStep(chargeCurrency.value) : '0.01',
 );
 
 const selectedNewWalletType = computed(() =>
@@ -134,7 +165,63 @@ onMounted(async () => {
     wallet.fetchWalletTypes(),
     wallet.fetchTransactions(),
   ]);
+  try {
+    const me = await apiRequest<{ phoneNumber: string | null }>('/users/me');
+    phoneNumberSaved.value = me.phoneNumber;
+    phoneNumber.value = me.phoneNumber ?? '';
+  } catch {
+    // Non-critical — the phone number card just stays blank.
+  }
 });
+
+async function onSavePhoneNumber() {
+  phoneError.value = '';
+  phoneSuccess.value = '';
+  phoneBusy.value = true;
+  try {
+    const result = await apiRequest<{ phoneNumber: string }>('/users/me/phone-number', {
+      method: 'PATCH',
+      body: { phoneNumber: phoneNumber.value },
+    });
+    phoneNumberSaved.value = result.phoneNumber;
+    phoneSuccess.value = 'Saved.';
+  } catch (err) {
+    phoneError.value = err instanceof ApiError ? err.message : 'Failed to save phone number';
+  } finally {
+    phoneBusy.value = false;
+  }
+}
+
+async function onCreateCharge() {
+  chargeError.value = '';
+  chargeResult.value = null;
+  chargeLinkCopied.value = false;
+  chargeBusy.value = true;
+  try {
+    const currency = chargeCurrency.value;
+    if (!currency) return;
+    const result = await wallet.createCharge(
+      toMinorUnits(chargeAmount.value, currency),
+      currency.code,
+    );
+    chargeResult.value = result;
+    chargeAmount.value = '';
+  } catch (err) {
+    chargeError.value = err instanceof ApiError ? err.message : 'Failed to create charge';
+  } finally {
+    chargeBusy.value = false;
+  }
+}
+
+async function onCopyChargeLink() {
+  if (!chargeResult.value) return;
+  try {
+    await navigator.clipboard.writeText(chargeResult.value.redirectUrl);
+    chargeLinkCopied.value = true;
+  } catch {
+    // Clipboard API unavailable — the link is still visible to copy manually.
+  }
+}
 
 async function runAction(fn: () => Promise<void>) {
   actionError.value = '';
@@ -257,6 +344,60 @@ function onPurchase() {
           <div class="latest-amount">{{ formatTransactionAmount(latestTransaction) }}</div>
           <div class="latest-meta">{{ describeTransaction(latestTransaction) }}</div>
           <div class="latest-meta">{{ new Date(latestTransaction.createdAt).toLocaleString() }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="admin-grid admin-grid-2">
+      <div class="admin-card">
+        <h2>Phone number</h2>
+        <p class="hint">
+          Used so customers can identify themselves by phone + code at the payment page when you charge them.
+        </p>
+        <form class="phone-form" @submit.prevent="onSavePhoneNumber">
+          <input
+            v-model="phoneNumber"
+            type="tel"
+            placeholder="+15551234567"
+            class="admin-input"
+            required
+          />
+          <button type="submit" class="admin-btn admin-btn-primary" :disabled="phoneBusy">Save</button>
+        </form>
+        <p v-if="phoneNumberSaved" class="hint">Current: {{ phoneNumberSaved }}</p>
+        <p v-if="phoneError" class="admin-error">{{ phoneError }}</p>
+        <p v-if="phoneSuccess" class="phone-success">{{ phoneSuccess }}</p>
+      </div>
+
+      <div v-if="purchaseInCurrencies.length" class="admin-card">
+        <h2>Create a charge</h2>
+        <p class="hint">
+          Generates a payment link for a customer — they identify themselves by phone + code at the link, no Packeta account needed.
+        </p>
+        <form class="charge-form" @submit.prevent="onCreateCharge">
+          <select v-model="chargeCurrencyCode" class="admin-input" required>
+            <option value="" disabled>Currency</option>
+            <option v-for="c in purchaseInCurrencies" :key="c.code" :value="c.code">{{ c.code }}</option>
+          </select>
+          <input
+            v-model="chargeAmount"
+            type="number"
+            min="0"
+            :step="chargeStep"
+            placeholder="Amount"
+            class="admin-input"
+            required
+          />
+          <button type="submit" class="admin-btn admin-btn-primary" :disabled="chargeBusy">
+            Create link
+          </button>
+        </form>
+        <p v-if="chargeError" class="admin-error">{{ chargeError }}</p>
+        <div v-if="chargeResult" class="charge-result">
+          <input readonly class="admin-input mono" :value="chargeResult.redirectUrl" />
+          <button class="admin-btn admin-btn-ghost" @click="onCopyChargeLink">
+            {{ chargeLinkCopied ? 'Copied' : 'Copy' }}
+          </button>
         </div>
       </div>
     </div>
@@ -523,5 +664,36 @@ function onPurchase() {
 }
 .tx-row-clickable {
   cursor: pointer;
+}
+.phone-form,
+.charge-form {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0;
+}
+.phone-form input {
+  flex: 1;
+}
+.charge-form select {
+  flex: 0 0 90px;
+}
+.charge-form input {
+  flex: 1;
+}
+.phone-success {
+  color: var(--accent-lime);
+  font-size: 0.85rem;
+}
+.charge-result {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.charge-result input {
+  flex: 1;
+}
+.mono {
+  font-family: monospace;
+  font-size: 0.8rem;
 }
 </style>

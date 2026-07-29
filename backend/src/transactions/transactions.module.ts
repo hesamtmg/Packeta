@@ -7,6 +7,7 @@ import { WalletsModule } from '../wallets/wallets.module';
 import { IdempotencyModule } from '../idempotency/idempotency.module';
 import { LoggingModule } from '../logging/logging.module';
 import { IpgModule } from '../ipg/ipg.module';
+import { CurrenciesModule } from '../currencies/currencies.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { IpgModule } from '../ipg/ipg.module';
     IdempotencyModule,
     LoggingModule,
     IpgModule,
+    CurrenciesModule,
   ],
   controllers: [TransactionsController],
   providers: [TransactionsService],

@@ -22,6 +22,7 @@ import { IdempotencyService } from '../idempotency/idempotency.service';
 import { LoggingService } from '../logging/logging.service';
 import { serializeWallet } from '../wallets/wallet.serializer';
 import { IpgClientService } from '../ipg/ipg-client.service';
+import { CurrenciesService } from '../currencies/currencies.service';
 import { formatAmount } from '../common/format-amount';
 
 export interface MoneyResult {
@@ -54,6 +55,7 @@ export class TransactionsService {
     private readonly loggingService: LoggingService,
     private readonly ipgClientService: IpgClientService,
     private readonly configService: ConfigService,
+    private readonly currenciesService: CurrenciesService,
     @InjectRepository(Transaction)
     private readonly transactionsRepository: Repository<Transaction>,
   ) {}
@@ -386,14 +388,131 @@ export class TransactionsService {
     );
   }
 
+  // Merchant-initiated checkout: unlike initiatePurchase (the customer picks
+  // their own wallet up front), here the merchant only names an amount and
+  // currency — no customer or wallet is known yet. The resulting pay link is
+  // meant to be handed to a customer who isn't logged into Packeta at all;
+  // they identify themselves at the IPG via phone + OTP and pick one of
+  // their own eligible wallets there (see PurchaseGatewayService), which
+  // calls attachPurchaseWallet to fill in fromWalletId before verify can run.
+  async initiateCharge(
+    merchantUserId: string,
+    amount: number,
+    currencyCode: string,
+    idempotencyKey: string,
+  ): Promise<PurchaseInitiateResult> {
+    return this.run(
+      'purchase_charge',
+      merchantUserId,
+      { amount, currencyCode },
+      idempotencyKey,
+      async (manager) => {
+        const currency = await this.currenciesService.findByCode(currencyCode);
+        const toWalletRef =
+          await this.walletsService.findEligiblePurchaseInWallet(
+            manager,
+            merchantUserId,
+            currency.id,
+          );
+        if (!toWalletRef) {
+          throw new NotFoundException(
+            `You have no ${currency.code} wallet eligible to receive purchases`,
+          );
+        }
+
+        const timeoutSeconds =
+          toWalletRef.purchaseTimeoutSeconds ??
+          DEFAULT_PURCHASE_TIMEOUT_SECONDS;
+        const expiresAt = new Date(Date.now() + timeoutSeconds * 1000);
+
+        const transaction = manager.create(Transaction, {
+          type: TransactionType.PURCHASE,
+          status: TransactionStatus.PENDING,
+          fromWalletId: null,
+          toWalletId: toWalletRef.id,
+          amount: amount.toString(),
+          idempotencyKey,
+          expiresAt,
+        });
+        await manager.save(transaction);
+
+        const merchant = await manager.findOne(User, {
+          where: { id: merchantUserId },
+        });
+        const frontendUrl = this.configService.get<string>('frontendUrl');
+        const { authority, paymentUrl } =
+          await this.ipgClientService.createPayment({
+            merchantName: merchant!.email,
+            amount: transaction.amount,
+            displayAmount: formatAmount(amount, currency),
+            callbackUrl: `${frontendUrl}/purchase/${transaction.id}/callback`,
+            timeoutSeconds,
+          });
+
+        transaction.ipgAuthority = authority;
+        transaction.ipgPaymentUrl = paymentUrl;
+        await manager.save(transaction);
+
+        return {
+          transactionId: transaction.id,
+          redirectUrl: paymentUrl,
+          expiresAt,
+        };
+      },
+    );
+  }
+
+  // Called by PurchaseGatewayService once the customer has proven who they
+  // are (phone + OTP) and picked which of their own wallets to pay with.
+  // Only fills in a still-empty fromWalletId on a PENDING charge — can't be
+  // used to reassign an already-identified purchase.
+  async attachPurchaseWallet(
+    ipgAuthority: string,
+    fromWalletId: string,
+  ): Promise<void> {
+    await this.transactionsRepository
+      .createQueryBuilder()
+      .update(Transaction)
+      .set({ fromWalletId })
+      .where('"ipgAuthority" = :ipgAuthority', { ipgAuthority })
+      .andWhere('status = :pending', { pending: TransactionStatus.PENDING })
+      .andWhere('"fromWalletId" IS NULL')
+      .execute();
+  }
+
+  // Used by the purchase gateway to look up a charge's currency/merchant
+  // before showing the customer their eligible wallets.
+  async findPendingChargeByAuthority(
+    ipgAuthority: string,
+  ): Promise<Transaction | null> {
+    return this.transactionsRepository.findOne({
+      where: {
+        ipgAuthority,
+        status: TransactionStatus.PENDING,
+        type: TransactionType.PURCHASE,
+      },
+    });
+  }
+
+  // Used by the IPG pay page to decide, before showing anything else,
+  // whether this authority still needs phone+OTP identification and a
+  // wallet pick (a charge with no fromWalletId yet) or can go straight to
+  // the confirm/cancel screen (a customer-initiated purchase that already
+  // had its wallet chosen on Packeta before redirecting).
+  async findByIpgAuthority(ipgAuthority: string): Promise<Transaction | null> {
+    return this.transactionsRepository.findOne({ where: { ipgAuthority } });
+  }
+
   // Step 2: called once the customer's browser lands back on the callback
   // URL with a successful IPG confirmation. Server-to-server verifies with
   // the IPG (one-time, so a duplicate call is harmless) and only then moves
   // real money — debiting the customer and crediting the merchant.
-  async verifyPurchase(
-    userId: string,
-    transactionId: string,
-  ): Promise<PurchaseVerifyResult> {
+  // Public/unauthenticated by design: a charge-based purchase's customer
+  // never has a Packeta session to present, and there's nothing unsafe about
+  // that — this only ever moves money into the wallet that was already fixed
+  // at attach-wallet time (itself gated by phone+OTP), and the IPG's own
+  // verify call is one-time-use, so an early or duplicate call is harmless.
+  async verifyPurchase(transactionId: string): Promise<PurchaseVerifyResult> {
     return this.dataSource.transaction(async (manager) => {
       const transaction = await manager
         .createQueryBuilder(Transaction, 't')
@@ -405,7 +524,11 @@ export class TransactionsService {
         throw new NotFoundException('Purchase not found');
       }
 
-      await this.assertOwnsEitherSide(userId, transaction);
+      if (!transaction.fromWalletId) {
+        throw new UnprocessableEntityException(
+          'This purchase has no customer wallet assigned yet — the customer must identify themselves and pick a wallet at the payment page first',
+        );
+      }
 
       if (transaction.status === TransactionStatus.COMPLETED) {
         return { transactionId: transaction.id, status: transaction.status };
@@ -482,7 +605,6 @@ export class TransactionsService {
         category: 'TRANSACTION',
         action: 'PURCHASE_VERIFY',
         success: true,
-        userId,
         metadata: { transactionId: transaction.id },
       });
 
@@ -621,6 +743,27 @@ export class TransactionsService {
       .execute();
   }
 
+  // Public/unauthenticated, same reasoning as verifyPurchase: the customer
+  // clicking Cancel on the IPG page may have no Packeta session at all.
+  // Scoped strictly to still-PENDING purchases, so it can never touch a
+  // COMPLETED one — refunding those still requires reverseTransaction's
+  // authenticated ownership check.
+  async cancelPendingPurchase(transactionId: string): Promise<void> {
+    const result = await this.transactionsRepository
+      .createQueryBuilder()
+      .update(Transaction)
+      .set({ status: TransactionStatus.REVERSED })
+      .where('id = :transactionId', { transactionId })
+      .andWhere('type = :type', { type: TransactionType.PURCHASE })
+      .andWhere('status = :pending', { pending: TransactionStatus.PENDING })
+      .execute();
+    if (!result.affected) {
+      throw new NotFoundException(
+        'No pending purchase found with that id — it may already be resolved',
+      );
+    }
+  }
+
   // Merchant wallet auto-withdraw sweep: takes the full positive balance out
   // as a plain WITHDRAW ledger row. System-triggered (the scheduler), so
   // there's no caller to check ownership against and no Idempotency-Key
@@ -735,6 +878,7 @@ export class TransactionsService {
       | 'transfer'
       | 'adjustment'
       | 'purchase_initiate'
+      | 'purchase_charge'
       | 'purchase_reverse',
     userId: string,
     payload: Record<string, unknown>,

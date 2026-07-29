@@ -13,11 +13,13 @@ import {
   CurrentUser,
   AuthenticatedUser,
 } from '../common/decorators/current-user.decorator';
+import { Public } from '../common/decorators/public.decorator';
 import { TransactionsService } from './transactions.service';
 import { DepositDto } from './dto/deposit.dto';
 import { WithdrawDto } from './dto/withdraw.dto';
 import { TransferDto } from './dto/transfer.dto';
 import { InitiatePurchaseDto } from './dto/initiate-purchase.dto';
+import { InitiateChargeDto } from './dto/initiate-charge.dto';
 import { ReverseTransactionDto } from './dto/reverse-transaction.dto';
 
 @Controller('transactions')
@@ -83,12 +85,35 @@ export class TransactionsController {
     );
   }
 
-  @Post('purchase/:id/verify')
-  verifyPurchase(
+  @Post('purchase/charge')
+  initiateCharge(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
+    @Body() dto: InitiateChargeDto,
+    @Headers('idempotency-key') idempotencyKey: string,
   ) {
-    return this.transactionsService.verifyPurchase(user.userId, id);
+    return this.transactionsService.initiateCharge(
+      user.userId,
+      dto.amount,
+      dto.currencyCode,
+      idempotencyKey,
+    );
+  }
+
+  // Public: the customer landing on the callback page may have no Packeta
+  // session at all (charge-based purchases identify them by phone+OTP at
+  // the IPG instead) — see verifyPurchase's own comment for why that's safe.
+  @Public()
+  @Post('purchase/:id/verify')
+  verifyPurchase(@Param('id') id: string) {
+    return this.transactionsService.verifyPurchase(id);
+  }
+
+  // Public, same reasoning — and scoped server-side to PENDING purchases
+  // only, so it can never be used to undo a completed one.
+  @Public()
+  @Post('purchase/:id/cancel')
+  cancelPendingPurchase(@Param('id') id: string) {
+    return this.transactionsService.cancelPendingPurchase(id);
   }
 
   @Get()

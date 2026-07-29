@@ -31,10 +31,13 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      // No requiresAuth: a merchant-initiated charge's customer never has a
+      // Packeta session (they identify by phone+OTP at the IPG instead), so
+      // this page must be reachable without one. verify/cancel are public
+      // backend endpoints for the same reason.
       path: '/purchase/:id/callback',
       name: 'purchase-callback',
       component: PurchaseCallbackView,
-      meta: { requiresAuth: true },
     },
     {
       path: '/admin',

@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User, UserRole } from './entities/user.entity';
@@ -20,6 +24,30 @@ export class UsersService {
 
   findById(id: string): Promise<User | null> {
     return this.usersRepository.findOne({ where: { id } });
+  }
+
+  // Used by the IPG's phone+OTP step to find which account a phone number
+  // belongs to. Only ever matches accounts that have set one.
+  findByPhoneNumber(phoneNumber: string): Promise<User | null> {
+    return this.usersRepository.findOne({ where: { phoneNumber } });
+  }
+
+  async setPhoneNumber(id: string, phoneNumber: string): Promise<User> {
+    const user = await this.findById(id);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    user.phoneNumber = phoneNumber;
+    try {
+      return await this.usersRepository.save(user);
+    } catch (error) {
+      if ((error as { code?: string }).code === '23505') {
+        throw new ConflictException(
+          'This phone number is already registered to another account',
+        );
+      }
+      throw error;
+    }
   }
 
   findAll(): Promise<User[]> {
