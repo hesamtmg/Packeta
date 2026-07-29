@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { apiRequest, ApiError } from '../api/client';
+import '../styles/admin-theme.css';
 
 const route = useRoute();
 const router = useRouter();
@@ -48,20 +49,27 @@ function goToTransaction() {
 </script>
 
 <template>
-  <div class="callback-page">
-    <div class="card">
-      <span class="icon" :class="status">{{
-        status === 'completed' ? '✓' : status === 'working' ? '…' : '✕'
-      }}</span>
-      <p>{{ message }}</p>
-      <button v-if="status !== 'working'" @click="goToTransaction">View transaction</button>
+  <div class="admin-theme callback-theme">
+    <div class="callback-page">
+      <div class="admin-card card">
+        <span class="icon" :class="status">{{
+          status === 'completed' ? '✓' : status === 'working' ? '…' : '✕'
+        }}</span>
+        <p>{{ message }}</p>
+        <button v-if="status !== 'working'" class="admin-btn admin-btn-primary" @click="goToTransaction">
+          View transaction
+        </button>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
+.callback-theme {
+  padding: 0;
+}
 .callback-page {
-  min-height: 60vh;
+  min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -74,26 +82,24 @@ function goToTransaction() {
   flex-direction: column;
   align-items: center;
   gap: 1rem;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 2rem;
+  padding: 2.5rem 2rem;
+}
+.card p {
+  color: var(--text-dim);
+  margin: 0;
 }
 .icon {
   font-size: 2.5rem;
   font-weight: 700;
 }
 .icon.completed {
-  color: #0f7a3f;
+  color: var(--accent-lime);
 }
 .icon.canceled,
 .icon.failed {
-  color: #b00020;
+  color: var(--accent-red);
 }
 .icon.working {
-  color: #666;
-}
-button {
-  padding: 0.5rem 1rem;
-  cursor: pointer;
+  color: var(--text-dim);
 }
 </style>

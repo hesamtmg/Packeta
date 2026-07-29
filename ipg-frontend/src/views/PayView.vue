@@ -123,9 +123,9 @@ onUnmounted(() => clock && clearInterval(clock));
 .card {
   width: 100%;
   max-width: 360px;
-  background: #171a21;
-  border: 1px solid #262a33;
-  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
   padding: 2rem;
   text-align: center;
   display: flex;
@@ -136,26 +136,27 @@ onUnmounted(() => clock && clearInterval(clock));
   font-size: 0.75rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #8b93a7;
+  color: #9d99aa;
 }
 .merchant {
   font-size: 1rem;
-  color: #b8bfcc;
+  color: #9d99aa;
 }
 .amount {
   font-size: 2.25rem;
   font-weight: 700;
+  color: #f5f4f7;
 }
 .timer {
   font-size: 0.8rem;
-  color: #8b93a7;
+  color: #716d7d;
 }
 .status {
-  color: #b8bfcc;
+  color: #9d99aa;
   font-size: 0.9rem;
 }
 .error {
-  color: #f2545b;
+  color: #ff6b6b;
   font-size: 0.9rem;
 }
 .actions {
@@ -166,20 +167,20 @@ onUnmounted(() => clock && clearInterval(clock));
 }
 .actions button {
   padding: 0.75rem;
-  border-radius: 10px;
+  border-radius: 999px;
   border: none;
   font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
 }
 .confirm {
-  background: #3ecf8e;
-  color: #08130e;
+  background: #d8ff5c;
+  color: #18171e;
 }
 .cancel {
-  background: transparent;
-  color: #8b93a7;
-  border: 1px solid #262a33 !important;
+  background: rgba(255, 255, 255, 0.07);
+  color: #f5f4f7;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
 }
 .actions button:disabled {
   opacity: 0.6;

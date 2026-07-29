@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { apiRequest, ApiError } from '../api/client';
 import { formatAmount, type CurrencyInfo } from '../utils/currency';
+import AppLayout from '../components/AppLayout.vue';
 
 interface WalletSummary {
   id: string;
@@ -93,16 +94,11 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="detail-page">
-    <header>
-      <h1>Transaction</h1>
-      <router-link :to="{ name: 'dashboard' }">Back to wallet</router-link>
-    </header>
+  <AppLayout title="Transaction">
+    <p v-if="error" class="admin-error">{{ error }}</p>
 
-    <p v-if="error" class="error">{{ error }}</p>
-
-    <section v-if="transaction" class="card">
-      <span class="type-badge">{{ transaction.type }}</span>
+    <section v-if="transaction" class="admin-card detail-card">
+      <span class="admin-badge">{{ transaction.type }}</span>
       <span class="amount">{{ currency ? formatAmount(transaction.amount, currency) : transaction.amount }}</span>
       <span class="summary">{{ directionLabel }}</span>
       <span v-if="transaction.type === 'PURCHASE'" class="status-badge" :class="transaction.status.toLowerCase()">
@@ -138,92 +134,70 @@ onMounted(load);
         <dd>{{ new Date(transaction.createdAt).toLocaleString() }}</dd>
       </dl>
 
-      <button v-if="canRefund" :disabled="busy" @click="onRefund">Refund this purchase</button>
+      <button v-if="canRefund" class="admin-btn admin-btn-danger" :disabled="busy" @click="onRefund">
+        Refund this purchase
+      </button>
     </section>
-  </div>
+  </AppLayout>
 </template>
 
 <style scoped>
-.detail-page {
+.detail-card {
   max-width: 560px;
-  margin: 0 auto;
-  padding: 2rem 1rem;
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
-}
-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 1.5rem;
-}
-.type-badge {
-  align-self: flex-start;
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  background: #f0f0f0;
-  border-radius: 4px;
-  padding: 0.2rem 0.5rem;
-  color: #444;
+  gap: 10px;
 }
 .amount {
   font-size: 2rem;
-  font-weight: 600;
+  font-weight: 700;
 }
 .summary {
-  color: #666;
+  color: var(--text-dim);
   margin-bottom: 0.5rem;
 }
 .status-badge {
   align-self: flex-start;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  border-radius: 4px;
-  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  padding: 3px 10px;
 }
 .status-badge.pending {
-  background: #fff4d6;
-  color: #8a6300;
+  background: rgba(216, 255, 92, 0.15);
+  color: var(--accent-lime);
 }
 .status-badge.completed {
-  background: #e3f8ec;
-  color: #0f7a3f;
+  background: rgba(122, 162, 255, 0.15);
+  color: var(--accent-blue);
 }
 .status-badge.reversed {
-  background: #fde8e8;
-  color: #b00020;
+  background: rgba(255, 107, 107, 0.15);
+  color: var(--accent-red);
 }
 dl {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 0.4rem 1rem;
-  margin: 0;
+  margin: 4px 0 0;
 }
 dt {
-  color: #666;
-  font-size: 0.85rem;
+  color: var(--text-dimmer);
+  font-size: 0.82rem;
 }
 dd {
   margin: 0;
 }
 .mono {
   font-family: monospace;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   word-break: break-all;
+  color: var(--text-dim);
 }
-.error {
-  color: #b00020;
-  font-size: 0.9rem;
+.detail-card button {
+  align-self: flex-start;
+  margin-top: 10px;
 }
 </style>
