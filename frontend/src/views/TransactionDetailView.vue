@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import { apiRequest, ApiError } from '../api/client';
 import { formatAmount, type CurrencyInfo } from '../utils/currency';
 import AppLayout from '../components/AppLayout.vue';
+
+const { t } = useI18n();
 
 interface WalletSummary {
   id: string;
@@ -40,23 +43,24 @@ const currency = computed(
 
 const directionLabel = computed(() => {
   if (!transaction.value) return '';
-  switch (transaction.value.type) {
+  const d = transaction.value;
+  switch (d.type) {
     case 'DEPOSIT':
-      return `Deposit to ${transaction.value.toWallet?.walletType.name ?? 'wallet'}`;
+      return t('transaction.direction.depositTo', { wallet: d.toWallet?.walletType.name ?? t('transaction.direction.wallet') });
     case 'WITHDRAW':
-      return `Withdraw from ${transaction.value.fromWallet?.walletType.name ?? 'wallet'}`;
+      return t('transaction.direction.withdrawFrom', { wallet: d.fromWallet?.walletType.name ?? t('transaction.direction.wallet') });
     case 'ADJUSTMENT':
-      return transaction.value.direction === 'OUT' ? 'Admin debit adjustment' : 'Admin credit adjustment';
+      return d.direction === 'OUT' ? t('transaction.direction.adminDebit') : t('transaction.direction.adminCredit');
     case 'TRANSFER':
-      if (transaction.value.direction === 'OUT') return `Sent from ${transaction.value.fromWallet?.walletType.name ?? 'wallet'}`;
-      if (transaction.value.direction === 'IN') return `Received into ${transaction.value.toWallet?.walletType.name ?? 'wallet'}`;
-      return 'Transfer';
+      if (d.direction === 'OUT') return t('transaction.direction.sentFrom', { wallet: d.fromWallet?.walletType.name ?? t('transaction.direction.wallet') });
+      if (d.direction === 'IN') return t('transaction.direction.receivedInto', { wallet: d.toWallet?.walletType.name ?? t('transaction.direction.wallet') });
+      return t('transaction.direction.transfer');
     case 'PURCHASE':
-      if (transaction.value.direction === 'OUT') return `Purchase paid to ${transaction.value.toWallet?.walletType.name ?? 'merchant'}`;
-      if (transaction.value.direction === 'IN') return `Purchase received into ${transaction.value.toWallet?.walletType.name ?? 'wallet'}`;
-      return 'Purchase';
+      if (d.direction === 'OUT') return t('transaction.direction.purchasePaidTo', { wallet: d.toWallet?.walletType.name ?? t('transaction.direction.merchant') });
+      if (d.direction === 'IN') return t('transaction.direction.purchaseReceivedInto', { wallet: d.toWallet?.walletType.name ?? t('transaction.direction.wallet') });
+      return t('transaction.direction.purchase');
     default:
-      return transaction.value.type;
+      return d.type;
   }
 });
 
@@ -69,7 +73,7 @@ async function load() {
   try {
     transaction.value = await apiRequest<TransactionDetail>(`/transactions/${route.params.id}`);
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : 'Failed to load transaction';
+    error.value = err instanceof ApiError ? err.message : t('transaction.loadFailed');
   }
 }
 
@@ -84,7 +88,7 @@ async function onRefund() {
     });
     await load();
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : 'Refund failed';
+    error.value = err instanceof ApiError ? err.message : t('transaction.refundFailed');
   } finally {
     busy.value = false;
   }
@@ -94,7 +98,7 @@ onMounted(load);
 </script>
 
 <template>
-  <AppLayout title="Transaction">
+  <AppLayout :title="t('transaction.title')">
     <p v-if="error" class="admin-error">{{ error }}</p>
 
     <section v-if="transaction" class="admin-card detail-card">
@@ -107,35 +111,35 @@ onMounted(load);
 
       <dl>
         <template v-if="transaction.fromWallet">
-          <dt>From wallet</dt>
+          <dt>{{ t('transaction.fromWallet') }}</dt>
           <dd>{{ transaction.fromWallet.walletType.name }} ({{ transaction.fromWallet.walletType.currency.code }})</dd>
         </template>
         <template v-if="transaction.toWallet">
-          <dt>To wallet</dt>
+          <dt>{{ t('transaction.toWallet') }}</dt>
           <dd>{{ transaction.toWallet.walletType.name }} ({{ transaction.toWallet.walletType.currency.code }})</dd>
         </template>
         <template v-if="transaction.status === 'PENDING' && transaction.expiresAt">
-          <dt>Verify by</dt>
+          <dt>{{ t('transaction.verifyBy') }}</dt>
           <dd>{{ new Date(transaction.expiresAt).toLocaleString() }}</dd>
         </template>
         <template v-if="transaction.relatedTransactionId">
-          <dt>Related transaction</dt>
+          <dt>{{ t('transaction.relatedTransaction') }}</dt>
           <dd class="mono">{{ transaction.relatedTransactionId }}</dd>
         </template>
         <template v-if="transaction.note">
-          <dt>Note</dt>
+          <dt>{{ t('transaction.note') }}</dt>
           <dd>{{ transaction.note }}</dd>
         </template>
-        <dt>Idempotency key</dt>
+        <dt>{{ t('transaction.idempotencyKey') }}</dt>
         <dd class="mono">{{ transaction.idempotencyKey }}</dd>
-        <dt>Transaction ID</dt>
+        <dt>{{ t('transaction.transactionId') }}</dt>
         <dd class="mono">{{ transaction.id }}</dd>
-        <dt>Date</dt>
+        <dt>{{ t('transaction.date') }}</dt>
         <dd>{{ new Date(transaction.createdAt).toLocaleString() }}</dd>
       </dl>
 
       <button v-if="canRefund" class="admin-btn admin-btn-danger" :disabled="busy" @click="onRefund">
-        Refund this purchase
+        {{ t('transaction.refund') }}
       </button>
     </section>
   </AppLayout>

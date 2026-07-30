@@ -8,6 +8,7 @@ import { IdempotencyModule } from '../idempotency/idempotency.module';
 import { LoggingModule } from '../logging/logging.module';
 import { IpgModule } from '../ipg/ipg.module';
 import { CurrenciesModule } from '../currencies/currencies.module';
+import { SettlementModule } from '../settlement/settlement.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { CurrenciesModule } from '../currencies/currencies.module';
     LoggingModule,
     IpgModule,
     CurrenciesModule,
+    SettlementModule,
   ],
   controllers: [TransactionsController],
   providers: [TransactionsService],

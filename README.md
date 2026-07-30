@@ -66,6 +66,28 @@ A multi-wallet app, plus a standalone sandbox payment gateway (IPG) it settles m
   `isStarterType` on `wallet_types` controls whether a type is part of every new signup's default set (only
   the original four are); this also fixed a latent bug where any custom type created in the default currency
   was silently being granted to every new signup.
+- **Split settlement (payout IBANs)**: a merchant's auto-withdraw sweep can pay out to more than one bank
+  account instead of one lump `WITHDRAW`, in two layers — a `SettlementSplit` row belongs to exactly one of
+  them (DB `CHECK`), never both:
+  1. **Wallet default** (`POST /wallets`, `settlementAccounts: [{ iban, label?, percent }]`) — configured once
+     at wallet creation, always percentage-based, and must add up to exactly 100.
+  2. **Per-charge override** (`POST /transactions/purchase/charge`, `settlementSplits: [{ iban, label?, type:
+     'PERCENT' | 'FIXED', value }]`) — a one-off split for that specific charge only (e.g. a 1000 purchase
+     split 60/40 to two different accounts than usual), taking priority over the wallet default for that
+     purchase. `PERCENT` must add up to exactly 100; `FIXED` (minor units) must add up to exactly the
+     charge's own amount — mixing the two types within one split set isn't allowed, since "percent of what's
+     left after fixed deductions" is ambiguous.
+
+  Settlement isn't instant — it's still driven by the same `autoWithdrawTimes` schedule described above, but
+  a wallet with any settlement config switches from one aggregate sweep to processing each unsettled
+  `COMPLETED` purchase individually: its own override if the charge supplied one, else the wallet's default,
+  else (an older purchase with neither) a single plain `WITHDRAW` for just that purchase — so a per-charge
+  split is never diluted by being lumped in with other purchases' money. Each purchase is marked with a
+  `settledAt` timestamp once processed, and each generated `WITHDRAW` row records which `destinationIban` it
+  went to and which purchase (`relatedTransactionId`) it settles. Splitting a percentage always floors every
+  item but the last, which absorbs the rounding remainder, so the pieces reliably sum to the exact original
+  amount. Wallets with no settlement config at all are unaffected — the sweep still does the original
+  single-`WITHDRAW`-for-the-full-balance behavior.
 - **Merchant-initiated checkout (phone + OTP, no Packeta session required)**: `POST /transactions/purchase/charge`
   lets a merchant create a payment link naming only an amount and currency — no customer or wallet is chosen
   yet, unlike `purchase/initiate`. The merchant hands that link to a customer who may have no Packeta account
@@ -87,6 +109,28 @@ A multi-wallet app, plus a standalone sandbox payment gateway (IPG) it settles m
   comes from each step's own scoping: OTPs are one-time-use and tied to one specific charge, `attach-wallet`
   requires a session token that only exists after a successful OTP check, `verify` only ever moves money into
   the wallet that step already fixed, and `cancel` only ever touches a still-`PENDING` purchase.
+- **IPG pay page UX**: `GET /purchase-gateway/charge/:authority/status` returns everything the pay page's
+  header needs (`merchantName`, `displayAmount`, `expiresAt`), so a merchant-info banner with a live countdown
+  renders identically across every step — phone, OTP, wallet selection, and the final confirm screen — not
+  just at the end. The countdown reflects the merchant wallet's own configured `purchaseTimeoutSeconds`, so a
+  shorter or longer timeout set at wallet creation is immediately visible to the customer, and turns red under
+  a minute left. The phone-number step is guarded by a self-hosted math CAPTCHA (`GET /purchase-gateway/captcha`,
+  answer required by `otp/request`) — an in-memory, one-time-use challenge with no external provider, meant as
+  a lightweight deterrent against scripted OTP-request abuse rather than a hardened bot defense. Once OTP
+  verification returns the customer's eligible wallets, they're presented as a horizontally-swipeable card
+  carousel instead of a plain list. After confirming or canceling on the IPG, the customer no longer jumps
+  straight to the merchant's callback URL — they land on a redirect-confirmation interstitial showing the
+  destination and a short countdown, with a "Continue now" button to skip the wait, so the handoff can
+  actually be inspected instead of happening instantly.
+- **Localization (English + Farsi)**: both `frontend` and `ipg-frontend` are localized with `vue-i18n`, each
+  with its own `en`/`fa` message files under `src/i18n/`. A language switcher (persisted to `localStorage`)
+  is available on every customer and admin page; switching to Farsi flips `<html dir>` to `rtl` as well as
+  swapping text, since Persian reads right-to-left — Vue's flex-based layouts mirror automatically. The IPG
+  pay page doesn't have its own login/session to remember a preference from, so it's driven differently: a
+  merchant creating a charge (`POST /transactions/purchase/charge`) can pass an optional `language: 'en' | 'fa'`
+  field, stored on the `PURCHASE` transaction and returned by the enriched
+  `GET /purchase-gateway/charge/:authority/status` endpoint, so the pay page auto-selects the right language
+  and direction before the customer sees anything — with a manual toggle in its nav bar as a fallback/override.
 - **Idempotency**: every deposit/withdraw/transfer call requires an `Idempotency-Key` header. The key is
   claimed (inserted `IN_PROGRESS`) in the same DB transaction as the wallet mutation, using the key's unique
   constraint (and a savepoint, so a conflicting insert doesn't abort the rest of the transaction) to
@@ -96,21 +140,37 @@ A multi-wallet app, plus a standalone sandbox payment gateway (IPG) it settles m
 - **Audit log**: every auth and transaction attempt (success or failure) is written to MongoDB. Mongo is
   never authoritative for financial state — a logging failure is caught and does not affect the
   already-committed Postgres transaction.
-- **Admin panel**: users have a `role` (`USER`/`ADMIN`). `AdminGuard` re-checks the caller's role against the
-  DB on every admin request (rather than trusting a claim baked into the JWT), so revoking admin access
-  takes effect immediately. There's no UI for granting the *first* admin (that would be a
-  privilege-escalation hole); use the `promote-admin` script instead — after that, admins can promote/demote
-  other users from the panel itself. Balance adjustments are their own ledger entry (`ADJUSTMENT`) recording
-  the admin's reason and who performed it, still bounded by the wallet's own balance floor — admins can
-  correct balances, not bypass a wallet type's fundamental rules.
+- **Admin panel**: users have a `role` (`USER`/`ADMIN`/`SUPER_ADMIN`). `AdminGuard` re-checks the caller's
+  role against the DB on every admin request (rather than trusting a claim baked into the JWT), so revoking
+  admin access takes effect immediately. `SUPER_ADMIN` sits above `ADMIN`: it can do everything a regular
+  admin can, plus the two things a regular admin can't — promote/demote other admins, and create/edit/delete
+  wallet types (the "laws" every wallet is bound by). There's no UI for granting the *first* admin (that
+  would be a privilege-escalation hole); use the `promote-admin` script instead (`npm run promote-admin --
+  <email> [ADMIN|SUPER_ADMIN]`) — after that, super-admins can promote/demote other users from the panel
+  itself. Balance adjustments are their own ledger entry (`ADJUSTMENT`) recording the admin's reason and who
+  performed it, still bounded by the wallet's own balance floor — admins can correct balances, not bypass a
+  wallet type's fundamental rules.
 
   The panel (`/admin`) is a dark dashboard-style UI with a sidebar: **Dashboard** (KPI tiles, a signups
   chart, latest transaction, recent activity table), **Transactions** (every transaction system-wide,
   filterable by type), **Wallets** (every wallet system-wide, searchable, with inline balance adjustment),
   **Customers** (`role: USER` accounts — drill into one to see its wallets, adjust balances, and view its
-  history), **Admins** (promote a customer / demote an admin — you can't demote yourself), **Wallet Types**
-  (the existing type/currency rule editor), and **Reports** (30-day activity chart, breakdowns by
-  transaction type and wallet type, most-active customers).
+  history), **Admins** (promote a customer to admin or super admin / demote an admin — you can't demote
+  yourself; regular admins get a read-only view), **Wallet Types** (the type/currency rule editor —
+  create/edit/delete is super-admin-only, regular admins get a read-only view), and **Reports** (30-day
+  activity chart, breakdowns by transaction type and wallet type, most-active customers).
+- **Market restrictions ("closed marketplace")**: any wallet can optionally carry a
+  `restrictedCounterparties` list of emails. If set, that wallet may only send/receive transfers and
+  purchases with those counterparties — unless the *other* wallet's own list allows the pairing back
+  (`WalletsService.isCounterpartyAllowed`: either side's own list is enough, so setting a restriction never
+  blocks a pairing the other side already opted into). An unrestricted wallet imposes no restriction of its
+  own. Enforced at every money-movement entry point that resolves a counterparty: `transfer`,
+  `initiatePurchase`, and the purchase gateway's `attach-wallet` step.
+- **Wallet edit/close**: `PATCH /wallets/:id` updates a wallet's auto-withdraw schedule, purchase timeout,
+  settlement accounts, and market restriction in place. `DELETE /wallets/:id` soft-closes a wallet (sets
+  `closedAt`) rather than deleting the row — a wallet with any transaction history can't be hard-deleted
+  (transactions reference it by a permanent FK), and closing is only allowed at a zero balance. A closed
+  wallet stays visible for its history but is excluded from every deposit/withdraw/transfer/purchase path.
 
 ## Running locally
 
@@ -185,7 +245,9 @@ All endpoints are JSON. Authenticated endpoints require `Authorization: Bearer <
 | GET    | `/wallet-types`           | ✅   | list of wallet types (each denominated in one currency) and the rules ("laws") each one enforces |
 | GET    | `/wallets`                | ✅   | list the current user's wallets                                     |
 | GET    | `/wallets/:id`            | ✅   | a specific wallet (must belong to the caller)                       |
-| POST   | `/wallets`                | ✅   | `{ walletTypeId, autoWithdrawTimes?, purchaseTimeoutSeconds? }` → create another wallet of that type/currency (the last two only apply to types that support them) |
+| POST   | `/wallets`                | ✅   | `{ walletTypeId, autoWithdrawTimes?, purchaseTimeoutSeconds?, settlementAccounts?, restrictedCounterparties? }` → create another wallet of that type/currency (auto-withdraw/purchase-timeout/settlement fields only apply to types that support them) |
+| PATCH  | `/wallets/:id`            | ✅   | partial update of a wallet's `autoWithdrawTimes`, `purchaseTimeoutSeconds`, `settlementAccounts`, and `restrictedCounterparties` (a "closed marketplace" list — see below) |
+| DELETE | `/wallets/:id`            | ✅   | soft-closes a wallet (sets `closedAt`); only allowed at a zero balance — a wallet with transaction history can never be hard-deleted |
 | POST   | `/transactions/deposit`   | ✅   | `{ walletId, amount }` (minor units) + `Idempotency-Key` header      |
 | POST   | `/transactions/withdraw`  | ✅   | `{ walletId, amount }` + `Idempotency-Key` header (blocked if the wallet type disallows withdrawals) |
 | POST   | `/transactions/transfer`  | ✅   | `{ fromWalletId, toEmail, amount }` + `Idempotency-Key` header (both wallets' types must allow peer-to-peer) |
@@ -198,11 +260,12 @@ All endpoints are JSON. Authenticated endpoints require `Authorization: Bearer <
 | GET    | `/transactions/:id`       | ✅   | full detail for one transaction (type, amount, from/to wallet + currency, note, idempotency key, purchase `status`/`expiresAt`) — must touch one of the caller's own wallets |
 | GET    | `/users/me`               | ✅   | the current user's id, email, role, and phone number                |
 | PATCH  | `/users/me/phone-number`  | ✅   | `{ phoneNumber }` → set/update the phone number used for the purchase gateway's OTP step |
-| POST   | `/wallet-types`           | 🔒 admin | `{ code, name, currencyCode, allowNegativeBalance, creditLimit?, allowWithdraw, allowP2pOut, allowP2pIn, supportsAutoWithdraw?, allowPurchaseOut?, allowPurchaseIn? }` → create a new wallet type |
-| PATCH  | `/wallet-types/:id`       | 🔒 admin | partial update of a wallet type's rules (currency can't be changed after creation) |
+| POST   | `/wallet-types`           | 🔒 super admin | `{ code, name, currencyCode, allowNegativeBalance, creditLimit?, allowWithdraw, allowP2pOut, allowP2pIn, supportsAutoWithdraw?, allowPurchaseOut?, allowPurchaseIn? }` → create a new wallet type |
+| PATCH  | `/wallet-types/:id`       | 🔒 super admin | partial update of a wallet type's rules (currency can't be changed after creation) |
+| DELETE | `/wallet-types/:id`       | 🔒 super admin | delete a wallet type — rejected with 409 if any wallet still uses it |
 | GET    | `/admin/users`            | 🔒 admin | list all users                                                       |
 | GET    | `/admin/users/:id`        | 🔒 admin | a user's profile + all of their wallets                              |
-| PATCH  | `/admin/users/:id/role`   | 🔒 admin | `{ role: "USER" \| "ADMIN" }` → promote/demote (can't target yourself) |
+| PATCH  | `/admin/users/:id/role`   | 🔒 super admin | `{ role: "USER" \| "ADMIN" \| "SUPER_ADMIN" }` → promote/demote (can't target yourself) |
 | GET    | `/admin/users/:id/transactions` | 🔒 admin | that user's full transaction history                           |
 | GET    | `/admin/wallets`          | 🔒 admin | every wallet system-wide, each with its owner's email                |
 | GET    | `/admin/transactions`     | 🔒 admin | every transaction system-wide, most recent first (`?limit=`)         |

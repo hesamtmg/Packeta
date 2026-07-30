@@ -1,14 +1,31 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import { apiRequest, ApiError } from '../api/client';
 import '../styles/admin-theme.css';
 
 const route = useRoute();
 const router = useRouter();
+const { t } = useI18n();
 
 const status = ref<'working' | 'completed' | 'canceled' | 'failed'>('working');
-const message = ref('Finalizing your payment…');
+const message = ref('');
+const messageOverride = ref('');
+
+const displayMessage = computed(() => {
+  if (messageOverride.value) return messageOverride.value;
+  switch (status.value) {
+    case 'canceled':
+      return t('callback.canceled');
+    case 'completed':
+      return t('callback.completed');
+    case 'failed':
+      return message.value || t('callback.verificationFailed');
+    default:
+      return t('callback.finalizing');
+  }
+});
 
 onMounted(async () => {
   const transactionId = route.params.id as string;
@@ -20,7 +37,6 @@ onMounted(async () => {
         method: 'POST',
       });
       status.value = 'canceled';
-      message.value = 'Payment was canceled.';
       return;
     }
 
@@ -30,14 +46,13 @@ onMounted(async () => {
     );
     if (result.status === 'COMPLETED') {
       status.value = 'completed';
-      message.value = 'Payment completed successfully.';
     } else {
       status.value = 'failed';
-      message.value = result.reason ?? 'Payment could not be verified yet.';
+      messageOverride.value = result.reason ?? t('callback.couldNotVerify');
     }
   } catch (err) {
     status.value = 'failed';
-    message.value = err instanceof ApiError ? err.message : 'Verification failed';
+    messageOverride.value = err instanceof ApiError ? err.message : t('callback.verificationFailed');
   }
 });
 
@@ -53,9 +68,9 @@ function goToTransaction() {
         <span class="icon" :class="status">{{
           status === 'completed' ? '✓' : status === 'working' ? '…' : '✕'
         }}</span>
-        <p>{{ message }}</p>
+        <p>{{ displayMessage }}</p>
         <button v-if="status !== 'working'" class="admin-btn admin-btn-primary" @click="goToTransaction">
-          View transaction
+          {{ t('callback.viewTransaction') }}
         </button>
       </div>
     </div>

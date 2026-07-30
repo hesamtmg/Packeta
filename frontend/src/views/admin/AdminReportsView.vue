@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../../api/client';
 import { walletLookup, type AdminWallet, type AdminTransaction } from '../../types/admin';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
 import MiniLineChart from '../../components/admin/MiniLineChart.vue';
+
+const { t } = useI18n();
 
 const wallets = ref<AdminWallet[]>([]);
 const transactions = ref<AdminTransaction[]>([]);
@@ -71,7 +74,7 @@ async function load() {
       apiRequest<AdminTransaction[]>('/admin/transactions?limit=1000'),
     ]);
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : 'Failed to load reports';
+    error.value = err instanceof ApiError ? err.message : t('admin.reports.loadFailed');
   }
 }
 
@@ -79,47 +82,47 @@ onMounted(load);
 </script>
 
 <template>
-  <AdminLayout title="Reports">
+  <AdminLayout :title="t('admin.reports.title')">
     <p v-if="error" class="admin-error">{{ error }}</p>
 
     <div class="admin-card">
-      <h2>Transaction activity (30 days)</h2>
+      <h2>{{ t('admin.reports.activityHeading') }}</h2>
       <MiniLineChart :data="transactionsPerDay" color="#ff7a45" :height="120" />
     </div>
 
     <div class="admin-grid admin-grid-2">
       <div class="admin-card">
-        <h2>By transaction type</h2>
+        <h2>{{ t('admin.reports.byTypeHeading') }}</h2>
         <div class="bar-list">
           <div v-for="row in byType" :key="row.type" class="bar-row">
             <span class="bar-label">{{ row.type }}</span>
             <div class="bar-track"><div class="bar-fill" :style="{ width: row.pct + '%' }" /></div>
             <span class="bar-count">{{ row.count }}</span>
           </div>
-          <p v-if="!byType.length" class="empty">No data yet.</p>
+          <p v-if="!byType.length" class="empty">{{ t('admin.reports.noData') }}</p>
         </div>
       </div>
 
       <div class="admin-card">
-        <h2>By wallet type</h2>
+        <h2>{{ t('admin.reports.byWalletTypeHeading') }}</h2>
         <div class="bar-list">
           <div v-for="row in byWalletType" :key="row.label" class="bar-row">
             <span class="bar-label">{{ row.label }}</span>
             <div class="bar-track"><div class="bar-fill bar-fill-lime" :style="{ width: row.pct + '%' }" /></div>
             <span class="bar-count">{{ row.count }}</span>
           </div>
-          <p v-if="!byWalletType.length" class="empty">No data yet.</p>
+          <p v-if="!byWalletType.length" class="empty">{{ t('admin.reports.noData') }}</p>
         </div>
       </div>
     </div>
 
     <div class="admin-card">
-      <h2>Most active customers</h2>
+      <h2>{{ t('admin.reports.topCustomersHeading') }}</h2>
       <table class="admin-table">
         <thead>
           <tr>
-            <th>Customer</th>
-            <th>Transactions touched</th>
+            <th>{{ t('admin.reports.tableCustomer') }}</th>
+            <th>{{ t('admin.reports.tableTransactionsTouched') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -127,7 +130,7 @@ onMounted(load);
             <td>{{ row.email }}</td>
             <td>{{ row.count }}</td>
           </tr>
-          <tr v-if="!topCustomers.length"><td colspan="2">No activity yet.</td></tr>
+          <tr v-if="!topCustomers.length"><td colspan="2">{{ t('admin.reports.noActivity') }}</td></tr>
         </tbody>
       </table>
     </div>

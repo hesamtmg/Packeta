@@ -96,6 +96,8 @@ export class TransactionsController {
       dto.amount,
       dto.currencyCode,
       idempotencyKey,
+      dto.language,
+      dto.settlementSplits,
     );
   }
 

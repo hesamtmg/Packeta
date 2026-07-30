@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
+import { SuperAdminGuard } from '../auth/guards/super-admin.guard';
 import {
   AuthenticatedUser,
   CurrentUser,
@@ -56,11 +57,14 @@ export class AdminController {
       email: user.email,
       role: user.role,
       createdAt: user.createdAt,
-      wallets: wallets.map(serializeWallet),
+      wallets: wallets.map((wallet) => serializeWallet(wallet)),
     };
   }
 
+  // Only super-admins can promote/demote — a regular admin can view and
+  // manage everything else on this controller but not change anyone's role.
   @Patch('users/:id/role')
+  @UseGuards(SuperAdminGuard)
   async updateUserRole(
     @CurrentUser() admin: AuthenticatedUser,
     @Param('id') id: string,

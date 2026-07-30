@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../../api/client';
 import { formatAmount } from '../../utils/currency';
 import {
@@ -10,6 +11,7 @@ import {
 } from '../../types/admin';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
 
+const { t } = useI18n();
 const wallets = ref<AdminWallet[]>([]);
 const transactions = ref<AdminTransaction[]>([]);
 const error = ref('');
@@ -27,14 +29,14 @@ function formatTxAmount(tx: AdminTransaction): string {
 }
 
 function walletLabel(walletId: string | null): string {
-  if (!walletId) return '—';
+  if (!walletId) return t('common.none');
   const w = walletsById.value.get(walletId);
-  return w ? `${w.walletType.name} (${w.walletType.currency.code})` : 'Unknown';
+  return w ? `${w.walletType.name} (${w.walletType.currency.code})` : t('common.unknown');
 }
 
 function ownerEmail(walletId: string | null): string {
-  if (!walletId) return '—';
-  return walletsById.value.get(walletId)?.ownerEmail ?? '—';
+  if (!walletId) return t('common.none');
+  return walletsById.value.get(walletId)?.ownerEmail ?? t('common.none');
 }
 
 async function load() {
@@ -45,7 +47,7 @@ async function load() {
       apiRequest<AdminTransaction[]>('/admin/transactions?limit=500'),
     ]);
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : 'Failed to load transactions';
+    error.value = err instanceof ApiError ? err.message : t('admin.transactions.loadFailed');
   }
 }
 
@@ -53,29 +55,29 @@ onMounted(load);
 </script>
 
 <template>
-  <AdminLayout title="Transactions">
+  <AdminLayout :title="t('admin.transactions.title')">
     <p v-if="error" class="admin-error">{{ error }}</p>
 
     <div class="admin-card">
       <div class="filter-row">
-        <h2>All transactions ({{ filtered.length }})</h2>
+        <h2>{{ t('admin.transactions.allTransactions', { count: filtered.length }) }}</h2>
         <select v-model="typeFilter" class="admin-input">
-          <option value="">All types</option>
-          <option value="DEPOSIT">Deposit</option>
-          <option value="WITHDRAW">Withdraw</option>
-          <option value="TRANSFER">Transfer</option>
-          <option value="ADJUSTMENT">Adjustment</option>
+          <option value="">{{ t('admin.transactions.allTypes') }}</option>
+          <option value="DEPOSIT">{{ t('admin.transactions.deposit') }}</option>
+          <option value="WITHDRAW">{{ t('admin.transactions.withdraw') }}</option>
+          <option value="TRANSFER">{{ t('admin.transactions.transfer') }}</option>
+          <option value="ADJUSTMENT">{{ t('admin.transactions.adjustment') }}</option>
         </select>
       </div>
       <table class="admin-table">
         <thead>
           <tr>
-            <th>Type</th>
-            <th>Amount</th>
-            <th>From</th>
-            <th>To</th>
-            <th>Note</th>
-            <th>Date</th>
+            <th>{{ t('admin.transactions.tableType') }}</th>
+            <th>{{ t('admin.transactions.tableAmount') }}</th>
+            <th>{{ t('admin.transactions.tableFrom') }}</th>
+            <th>{{ t('admin.transactions.tableTo') }}</th>
+            <th>{{ t('admin.transactions.tableNote') }}</th>
+            <th>{{ t('admin.transactions.tableDate') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -84,16 +86,16 @@ onMounted(load);
             <td>{{ formatTxAmount(tx) }}</td>
             <td>
               <span v-if="tx.fromWalletId">{{ walletLabel(tx.fromWalletId) }} · {{ ownerEmail(tx.fromWalletId) }}</span>
-              <span v-else>—</span>
+              <span v-else>{{ t('common.none') }}</span>
             </td>
             <td>
               <span v-if="tx.toWalletId">{{ walletLabel(tx.toWalletId) }} · {{ ownerEmail(tx.toWalletId) }}</span>
-              <span v-else>—</span>
+              <span v-else>{{ t('common.none') }}</span>
             </td>
-            <td>{{ tx.note ?? '—' }}</td>
+            <td>{{ tx.note ?? t('common.none') }}</td>
             <td>{{ new Date(tx.createdAt).toLocaleString() }}</td>
           </tr>
-          <tr v-if="!filtered.length"><td colspan="6">No transactions found.</td></tr>
+          <tr v-if="!filtered.length"><td colspan="6">{{ t('admin.transactions.noTransactions') }}</td></tr>
         </tbody>
       </table>
     </div>

@@ -3,7 +3,7 @@ import type { CurrencyInfo } from '../utils/currency';
 export interface AdminUser {
   id: string;
   email: string;
-  role: 'USER' | 'ADMIN';
+  role: 'USER' | 'ADMIN' | 'SUPER_ADMIN';
   createdAt: string;
 }
 

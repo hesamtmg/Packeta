@@ -2,12 +2,15 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
+  IsEmail,
   IsInt,
   IsOptional,
   IsUUID,
   Matches,
   Min,
+  ValidateNested,
 } from 'class-validator';
+import { SettlementAccountDto } from '../../settlement/dto/settlement-account.dto';
 
 export class CreateWalletDto {
   @IsUUID()
@@ -29,4 +32,24 @@ export class CreateWalletDto {
   @IsInt()
   @Min(30)
   purchaseTimeoutSeconds?: number;
+
+  // Only meaningful when the wallet type's supportsAutoWithdraw is true:
+  // the default IBAN split the auto-withdraw sweep pays this wallet's
+  // purchases out to when a specific charge doesn't supply its own
+  // override (see InitiateChargeDto.settlementSplits). Percentages across
+  // the whole array must add up to exactly 100.
+  @IsOptional()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => SettlementAccountDto)
+  settlementAccounts?: SettlementAccountDto[];
+
+  // A closed marketplace: if set, this wallet may only transfer to, or
+  // purchase from/be purchased from, a counterparty whose email is in this
+  // list (see WalletsService.isCounterpartyAllowed). Omit or leave empty for
+  // the default, unrestricted behavior.
+  @IsOptional()
+  @ArrayMinSize(1)
+  @IsEmail({}, { each: true })
+  restrictedCounterparties?: string[];
 }

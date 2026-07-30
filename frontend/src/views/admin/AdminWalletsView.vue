@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../../api/client';
 import { amountStep, formatAmount, toMinorUnits } from '../../utils/currency';
 import type { AdminWallet } from '../../types/admin';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
 
+const { t } = useI18n();
 const wallets = ref<AdminWallet[]>([]);
 const error = ref('');
 const search = ref('');
@@ -27,7 +29,7 @@ async function load() {
   try {
     wallets.value = await apiRequest<AdminWallet[]>('/admin/wallets');
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : 'Failed to load wallets';
+    error.value = err instanceof ApiError ? err.message : t('admin.wallets.loadFailed');
   }
 }
 
@@ -51,7 +53,7 @@ async function adjust(wallet: AdminWallet) {
     openAdjustId.value = null;
     await load();
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : 'Adjustment failed';
+    error.value = err instanceof ApiError ? err.message : t('admin.wallets.adjustFailed');
   } finally {
     busy.value = false;
   }
@@ -61,22 +63,22 @@ onMounted(load);
 </script>
 
 <template>
-  <AdminLayout title="Wallets">
+  <AdminLayout :title="t('admin.wallets.title')">
     <p v-if="error" class="admin-error">{{ error }}</p>
 
     <div class="admin-card">
       <div class="filter-row">
-        <h2>All wallets ({{ filtered.length }})</h2>
-        <input v-model="search" class="admin-input" placeholder="Search by owner or wallet type…" />
+        <h2>{{ t('admin.wallets.allWallets', { count: filtered.length }) }}</h2>
+        <input v-model="search" class="admin-input" :placeholder="t('admin.wallets.searchPlaceholder')" />
       </div>
       <table class="admin-table">
         <thead>
           <tr>
-            <th>Owner</th>
-            <th>Type</th>
-            <th>Currency</th>
-            <th>Balance</th>
-            <th>Created</th>
+            <th>{{ t('admin.wallets.tableOwner') }}</th>
+            <th>{{ t('admin.wallets.tableType') }}</th>
+            <th>{{ t('admin.wallets.tableCurrency') }}</th>
+            <th>{{ t('admin.wallets.tableBalance') }}</th>
+            <th>{{ t('admin.wallets.tableCreated') }}</th>
             <th></th>
           </tr>
         </thead>
@@ -88,7 +90,7 @@ onMounted(load);
               <td>{{ w.walletType.currency.code }}</td>
               <td>{{ formatAmount(w.balance, w.walletType.currency) }}</td>
               <td>{{ new Date(w.createdAt).toLocaleDateString() }}</td>
-              <td><button class="admin-btn admin-btn-ghost" @click="toggleAdjust(w.id)">Adjust</button></td>
+              <td><button class="admin-btn admin-btn-ghost" @click="toggleAdjust(w.id)">{{ t('admin.wallets.adjust') }}</button></td>
             </tr>
             <tr v-if="openAdjustId === w.id">
               <td colspan="6">
@@ -98,15 +100,15 @@ onMounted(load);
                     type="number"
                     :step="amountStep(w.walletType.currency)"
                     class="admin-input"
-                    placeholder="+/- amount"
+                    :placeholder="t('admin.wallets.amountPlaceholder')"
                   />
-                  <input v-model="adjustReason[w.id]" type="text" class="admin-input" placeholder="Reason" />
-                  <button class="admin-btn admin-btn-primary" :disabled="busy" @click="adjust(w)">Save</button>
+                  <input v-model="adjustReason[w.id]" type="text" class="admin-input" :placeholder="t('admin.wallets.reasonPlaceholder')" />
+                  <button class="admin-btn admin-btn-primary" :disabled="busy" @click="adjust(w)">{{ t('admin.wallets.save') }}</button>
                 </div>
               </td>
             </tr>
           </template>
-          <tr v-if="!filtered.length"><td colspan="6">No wallets found.</td></tr>
+          <tr v-if="!filtered.length"><td colspan="6">{{ t('admin.wallets.noWallets') }}</td></tr>
         </tbody>
       </table>
     </div>

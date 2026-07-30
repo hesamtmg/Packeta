@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../../api/client';
 import { amountStep, toMinorUnits, type CurrencyInfo } from '../../utils/currency';
+import { useAuthStore } from '../../stores/auth';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
+
+const { t } = useI18n();
+const auth = useAuthStore();
 
 interface WalletType {
   id: string;
@@ -62,7 +67,7 @@ async function loadTypes() {
       apiRequest<CurrencyInfo[]>('/currencies'),
     ]);
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : 'Failed to load wallet types';
+    error.value = err instanceof ApiError ? err.message : t('admin.walletTypes.loadFailed');
   }
 }
 
@@ -88,7 +93,20 @@ async function save(type: WalletType) {
     });
     await loadTypes();
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : 'Save failed';
+    error.value = err instanceof ApiError ? err.message : t('admin.walletTypes.saveFailed');
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function remove(type: WalletType) {
+  error.value = '';
+  busy.value = true;
+  try {
+    await apiRequest(`/wallet-types/${type.id}`, { method: 'DELETE' });
+    await loadTypes();
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : t('admin.walletTypes.deleteFailed');
   } finally {
     busy.value = false;
   }
@@ -131,7 +149,7 @@ async function createType() {
     newType.allowPurchaseIn = false;
     await loadTypes();
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : 'Create failed';
+    error.value = err instanceof ApiError ? err.message : t('admin.walletTypes.createFailed');
   } finally {
     busy.value = false;
   }
@@ -141,48 +159,53 @@ loadTypes();
 </script>
 
 <template>
-  <AdminLayout title="Wallet Types">
+  <AdminLayout :title="t('admin.walletTypes.title')">
     <p v-if="error" class="admin-error">{{ error }}</p>
+    <p v-if="!auth.isSuperAdmin" class="hint">{{ t('admin.walletTypes.readOnlyHint') }}</p>
 
     <div class="admin-card">
-      <h2>Types ({{ types.length }})</h2>
+      <h2>{{ t('admin.walletTypes.typesHeading', { count: types.length }) }}</h2>
       <div class="types">
-        <article v-for="t in types" :key="t.id" class="type-card">
-          <span class="code">{{ t.code }} · {{ t.currency.code }}</span>
-          <label>Name <input v-model="t.name" type="text" class="admin-input" /></label>
+        <article v-for="wt in types" :key="wt.id" class="type-card">
+          <span class="code">{{ wt.code }} · {{ wt.currency.code }}</span>
+          <label>{{ t('admin.walletTypes.nameLabel') }} <input v-model="wt.name" type="text" class="admin-input" :disabled="!auth.isSuperAdmin" /></label>
           <label class="checkbox-label">
-            <input v-model="t.allowNegativeBalance" type="checkbox" />
-            Allow negative balance (credit line)
+            <input v-model="wt.allowNegativeBalance" type="checkbox" :disabled="!auth.isSuperAdmin" />
+            {{ t('admin.walletTypes.allowNegativeLabel') }}
           </label>
-          <label v-if="t.allowNegativeBalance">
-            Credit limit ({{ t.currency.code }})
+          <label v-if="wt.allowNegativeBalance">
+            {{ t('admin.walletTypes.creditLimitLabel', { code: wt.currency.code }) }}
             <input
-              :value="creditLimitDisplay(t)"
+              :value="creditLimitDisplay(wt)"
               type="number"
-              :step="amountStep(t.currency)"
+              :step="amountStep(wt.currency)"
               class="admin-input"
-              @input="onCreditLimitInput(t, $event)"
+              :disabled="!auth.isSuperAdmin"
+              @input="onCreditLimitInput(wt, $event)"
             />
           </label>
-          <label class="checkbox-label"><input v-model="t.allowWithdraw" type="checkbox" /> Allow withdrawals</label>
-          <label class="checkbox-label"><input v-model="t.allowP2pOut" type="checkbox" /> Can send transfers</label>
-          <label class="checkbox-label"><input v-model="t.allowP2pIn" type="checkbox" /> Can receive transfers</label>
-          <label class="checkbox-label"><input v-model="t.supportsAutoWithdraw" type="checkbox" /> Supports auto-withdraw schedule</label>
-          <label class="checkbox-label"><input v-model="t.allowPurchaseOut" type="checkbox" /> Can make purchases (customer)</label>
-          <label class="checkbox-label"><input v-model="t.allowPurchaseIn" type="checkbox" /> Can receive purchases (merchant)</label>
-          <button class="admin-btn admin-btn-primary" :disabled="busy" @click="save(t)">Save</button>
+          <label class="checkbox-label"><input v-model="wt.allowWithdraw" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.allowWithdrawLabel') }}</label>
+          <label class="checkbox-label"><input v-model="wt.allowP2pOut" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.canSendLabel') }}</label>
+          <label class="checkbox-label"><input v-model="wt.allowP2pIn" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.canReceiveLabel') }}</label>
+          <label class="checkbox-label"><input v-model="wt.supportsAutoWithdraw" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.autoWithdrawLabel') }}</label>
+          <label class="checkbox-label"><input v-model="wt.allowPurchaseOut" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.canPurchaseLabel') }}</label>
+          <label class="checkbox-label"><input v-model="wt.allowPurchaseIn" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.canReceivePurchaseLabel') }}</label>
+          <div v-if="auth.isSuperAdmin" class="type-card-actions">
+            <button class="admin-btn admin-btn-primary" :disabled="busy" @click="save(wt)">{{ t('admin.walletTypes.save') }}</button>
+            <button class="admin-btn admin-btn-danger" :disabled="busy" @click="remove(wt)">{{ t('admin.walletTypes.delete') }}</button>
+          </div>
         </article>
       </div>
     </div>
 
-    <form class="admin-card new-type" @submit.prevent="createType">
-      <h2>Add wallet type</h2>
-      <label>Code <input v-model="newType.code" type="text" class="admin-input" required placeholder="e.g. REWARDS" /></label>
-      <label>Name <input v-model="newType.name" type="text" class="admin-input" required /></label>
+    <form v-if="auth.isSuperAdmin" class="admin-card new-type" @submit.prevent="createType">
+      <h2>{{ t('admin.walletTypes.addHeading') }}</h2>
+      <label>{{ t('admin.walletTypes.codeLabel') }} <input v-model="newType.code" type="text" class="admin-input" required :placeholder="t('admin.walletTypes.codePlaceholder')" /></label>
+      <label>{{ t('admin.walletTypes.nameLabel') }} <input v-model="newType.name" type="text" class="admin-input" required /></label>
       <label>
-        Currency
+        {{ t('admin.walletTypes.currencyLabel') }}
         <select v-model="newType.currencyCode" class="admin-input" required>
-          <option value="" disabled>Choose currency</option>
+          <option value="" disabled>{{ t('admin.walletTypes.chooseCurrency') }}</option>
           <option v-for="c in currencies" :key="c.code" :value="c.code">
             {{ c.code }}
           </option>
@@ -190,10 +213,10 @@ loadTypes();
       </label>
       <label class="checkbox-label">
         <input v-model="newType.allowNegativeBalance" type="checkbox" />
-        Allow negative balance (credit line)
+        {{ t('admin.walletTypes.allowNegativeLabel') }}
       </label>
       <label v-if="newType.allowNegativeBalance">
-        Credit limit ({{ newType.currencyCode || '…' }})
+        {{ t('admin.walletTypes.creditLimitLabel', { code: newType.currencyCode || '…' }) }}
         <input
           v-model="newType.creditLimit"
           type="number"
@@ -202,13 +225,13 @@ loadTypes();
           required
         />
       </label>
-      <label class="checkbox-label"><input v-model="newType.allowWithdraw" type="checkbox" /> Allow withdrawals</label>
-      <label class="checkbox-label"><input v-model="newType.allowP2pOut" type="checkbox" /> Can send transfers</label>
-      <label class="checkbox-label"><input v-model="newType.allowP2pIn" type="checkbox" /> Can receive transfers</label>
-      <label class="checkbox-label"><input v-model="newType.supportsAutoWithdraw" type="checkbox" /> Supports auto-withdraw schedule</label>
-      <label class="checkbox-label"><input v-model="newType.allowPurchaseOut" type="checkbox" /> Can make purchases (customer)</label>
-      <label class="checkbox-label"><input v-model="newType.allowPurchaseIn" type="checkbox" /> Can receive purchases (merchant)</label>
-      <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">Create</button>
+      <label class="checkbox-label"><input v-model="newType.allowWithdraw" type="checkbox" /> {{ t('admin.walletTypes.allowWithdrawLabel') }}</label>
+      <label class="checkbox-label"><input v-model="newType.allowP2pOut" type="checkbox" /> {{ t('admin.walletTypes.canSendLabel') }}</label>
+      <label class="checkbox-label"><input v-model="newType.allowP2pIn" type="checkbox" /> {{ t('admin.walletTypes.canReceiveLabel') }}</label>
+      <label class="checkbox-label"><input v-model="newType.supportsAutoWithdraw" type="checkbox" /> {{ t('admin.walletTypes.autoWithdrawLabel') }}</label>
+      <label class="checkbox-label"><input v-model="newType.allowPurchaseOut" type="checkbox" /> {{ t('admin.walletTypes.canPurchaseLabel') }}</label>
+      <label class="checkbox-label"><input v-model="newType.allowPurchaseIn" type="checkbox" /> {{ t('admin.walletTypes.canReceivePurchaseLabel') }}</label>
+      <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('admin.walletTypes.create') }}</button>
     </form>
   </AdminLayout>
 </template>
@@ -244,6 +267,10 @@ loadTypes();
   flex-direction: row !important;
   align-items: center;
   gap: 8px !important;
+}
+.type-card-actions {
+  display: flex;
+  gap: 8px;
 }
 .new-type {
   max-width: 320px;

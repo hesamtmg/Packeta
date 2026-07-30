@@ -24,6 +24,8 @@ import { serializeWallet } from '../wallets/wallet.serializer';
 import { IpgClientService } from '../ipg/ipg-client.service';
 import { CurrenciesService } from '../currencies/currencies.service';
 import { formatAmount } from '../common/format-amount';
+import { SettlementService } from '../settlement/settlement.service';
+import { SettlementSplitDto } from '../settlement/dto/settlement-split.dto';
 
 export interface MoneyResult {
   transactionId: string;
@@ -56,6 +58,7 @@ export class TransactionsService {
     private readonly ipgClientService: IpgClientService,
     private readonly configService: ConfigService,
     private readonly currenciesService: CurrenciesService,
+    private readonly settlementService: SettlementService,
     @InjectRepository(Transaction)
     private readonly transactionsRepository: Repository<Transaction>,
   ) {}
@@ -73,7 +76,10 @@ export class TransactionsService {
       idempotencyKey,
       async (manager) => {
         // Ownership check; deposits are allowed on every wallet type.
-        await this.walletsService.getById(userId, walletId);
+        const walletRef = await this.walletsService.getById(userId, walletId);
+        if (walletRef.closedAt) {
+          throw new BadRequestException('This wallet is closed');
+        }
 
         const wallet = await this.walletsService.lockById(manager, walletId);
         const newBalance = (BigInt(wallet.balance) + BigInt(amount)).toString();
@@ -111,6 +117,9 @@ export class TransactionsService {
       idempotencyKey,
       async (manager) => {
         const walletRef = await this.walletsService.getById(userId, walletId);
+        if (walletRef.closedAt) {
+          throw new BadRequestException('This wallet is closed');
+        }
         if (!walletRef.walletType.allowWithdraw) {
           throw new ForbiddenException(
             `${walletRef.walletType.name} wallets do not support withdrawals`,
@@ -165,12 +174,16 @@ export class TransactionsService {
           userId,
           fromWalletId,
         );
+        if (fromWalletRef.closedAt) {
+          throw new BadRequestException('This wallet is closed');
+        }
         if (!fromWalletRef.walletType.allowP2pOut) {
           throw new ForbiddenException(
             `${fromWalletRef.walletType.name} wallets cannot send transfers`,
           );
         }
 
+        const sender = await manager.findOne(User, { where: { id: userId } });
         const recipient = await manager.findOne(User, {
           where: { email: toEmail },
         });
@@ -189,6 +202,18 @@ export class TransactionsService {
         if (!toWalletRef) {
           throw new NotFoundException(
             `Recipient has no ${fromWalletRef.walletType.currency.code} wallet eligible to receive this transfer`,
+          );
+        }
+        if (
+          !this.walletsService.isCounterpartyAllowed(
+            fromWalletRef.restrictedCounterparties,
+            toEmail,
+            toWalletRef.restrictedCounterparties,
+            sender!.email,
+          )
+        ) {
+          throw new ForbiddenException(
+            'This transfer is not allowed between these two wallets',
           );
         }
 
@@ -260,6 +285,9 @@ export class TransactionsService {
       idempotencyKey,
       async (manager) => {
         const walletRef = await this.walletsService.getByIdUnscoped(walletId);
+        if (walletRef.closedAt) {
+          throw new BadRequestException('This wallet is closed');
+        }
         const floor = walletRef.walletType.allowNegativeBalance
           ? -BigInt(walletRef.walletType.creditLimit ?? '0')
           : 0n;
@@ -318,12 +346,18 @@ export class TransactionsService {
           userId,
           fromWalletId,
         );
+        if (fromWalletRef.closedAt) {
+          throw new BadRequestException('This wallet is closed');
+        }
         if (!fromWalletRef.walletType.allowPurchaseOut) {
           throw new ForbiddenException(
             `${fromWalletRef.walletType.name} wallets cannot make purchases`,
           );
         }
 
+        const customer = await manager.findOne(User, {
+          where: { id: userId },
+        });
         const merchant = await manager.findOne(User, {
           where: { email: toEmail },
         });
@@ -343,6 +377,18 @@ export class TransactionsService {
         if (!toWalletRef) {
           throw new NotFoundException(
             `Merchant has no ${fromWalletRef.walletType.currency.code} wallet eligible to receive purchases`,
+          );
+        }
+        if (
+          !this.walletsService.isCounterpartyAllowed(
+            fromWalletRef.restrictedCounterparties,
+            toEmail,
+            toWalletRef.restrictedCounterparties,
+            customer!.email,
+          )
+        ) {
+          throw new ForbiddenException(
+            'This purchase is not allowed between these two wallets',
           );
         }
 
@@ -400,11 +446,17 @@ export class TransactionsService {
     amount: number,
     currencyCode: string,
     idempotencyKey: string,
+    language?: string,
+    settlementSplits?: SettlementSplitDto[],
   ): Promise<PurchaseInitiateResult> {
+    if (settlementSplits) {
+      this.settlementService.validateChargeOverrides(settlementSplits, amount);
+    }
+
     return this.run(
       'purchase_charge',
       merchantUserId,
-      { amount, currencyCode },
+      { amount, currencyCode, language, settlementSplits },
       idempotencyKey,
       async (manager) => {
         const currency = await this.currenciesService.findByCode(currencyCode);
@@ -433,8 +485,17 @@ export class TransactionsService {
           amount: amount.toString(),
           idempotencyKey,
           expiresAt,
+          language: language ?? 'en',
         });
         await manager.save(transaction);
+
+        if (settlementSplits) {
+          await this.settlementService.createForTransaction(
+            manager,
+            transaction.id,
+            settlementSplits,
+          );
+        }
 
         const merchant = await manager.findOne(User, {
           where: { id: merchantUserId },
@@ -575,6 +636,14 @@ export class TransactionsService {
       }
       const fromWallet = locked.get(transaction.fromWalletId!)!;
       const toWallet = locked.get(transaction.toWalletId!)!;
+
+      if (fromWallet.closedAt || toWallet.closedAt) {
+        transaction.status = TransactionStatus.REVERSED;
+        await manager.save(transaction);
+        throw new UnprocessableEntityException(
+          'One of the wallets for this purchase was closed before it could be verified',
+        );
+      }
 
       const floor = fromWalletRef.walletType.allowNegativeBalance
         ? -BigInt(fromWalletRef.walletType.creditLimit ?? '0')
@@ -764,11 +833,24 @@ export class TransactionsService {
     }
   }
 
-  // Merchant wallet auto-withdraw sweep: takes the full positive balance out
-  // as a plain WITHDRAW ledger row. System-triggered (the scheduler), so
-  // there's no caller to check ownership against and no Idempotency-Key
-  // header — the key is derived from the wallet + minute so a scheduler
-  // that somehow fires twice in the same minute doesn't double-withdraw.
+  // Merchant wallet auto-withdraw sweep. System-triggered (the scheduler),
+  // so there's no caller to check ownership against and no Idempotency-Key
+  // header — each generated WITHDRAW's key is derived from wallet + purchase
+  // (+ split index) + minute, so a scheduler tick that somehow fires twice
+  // in the same minute doesn't double-withdraw.
+  //
+  // Two modes, decided per wallet:
+  //   - No settlement split configured anywhere for this wallet (no default
+  //     accounts, and none of its unsettled purchases carry their own
+  //     override): legacy behavior, unchanged — the full balance goes out as
+  //     one plain WITHDRAW.
+  //   - Otherwise: split-settlement mode. Each still-unsettled COMPLETED
+  //     PURCHASE credited to this wallet is paid out individually — using
+  //     its own settlementSplits override if the charge supplied one, else
+  //     falling back to the wallet's default settlementAccounts, else (an
+  //     older purchase with neither) a single plain WITHDRAW for just that
+  //     purchase's amount — so a per-charge split can never be diluted by
+  //     being aggregated together with other purchases' money.
   async sweepAutoWithdraw(walletId: string): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
       const wallet = await this.walletsService.lockById(manager, walletId);
@@ -776,15 +858,83 @@ export class TransactionsService {
         return;
       }
 
-      await manager.update(Wallet, wallet.id, { balance: '0' });
-      const transaction = manager.create(Transaction, {
-        type: TransactionType.WITHDRAW,
-        fromWalletId: wallet.id,
-        toWalletId: null,
-        amount: wallet.balance,
-        idempotencyKey: `auto-withdraw:${wallet.id}:${new Date().toISOString().slice(0, 16)}`,
+      const minuteKey = new Date().toISOString().slice(0, 16);
+      const walletDefaults = await this.settlementService.findForWallet(
+        manager,
+        wallet.id,
+      );
+
+      const unsettledPurchases = await manager
+        .createQueryBuilder(Transaction, 't')
+        .setLock('pessimistic_write')
+        .where('t."toWalletId" = :walletId', { walletId: wallet.id })
+        .andWhere('t.type = :type', { type: TransactionType.PURCHASE })
+        .andWhere('t.status = :status', {
+          status: TransactionStatus.COMPLETED,
+        })
+        .andWhere('t."settledAt" IS NULL')
+        .getMany();
+
+      const overridesByPurchase =
+        await this.settlementService.findForTransactions(
+          manager,
+          unsettledPurchases.map((purchase) => purchase.id),
+        );
+      const splitModeActive =
+        walletDefaults.length > 0 || overridesByPurchase.size > 0;
+
+      if (!splitModeActive) {
+        await manager.update(Wallet, wallet.id, { balance: '0' });
+        const transaction = manager.create(Transaction, {
+          type: TransactionType.WITHDRAW,
+          fromWalletId: wallet.id,
+          toWalletId: null,
+          amount: wallet.balance,
+          idempotencyKey: `auto-withdraw:${wallet.id}:${minuteKey}`,
+        });
+        await manager.save(transaction);
+        return;
+      }
+
+      let remainingBalance = BigInt(wallet.balance);
+
+      for (const purchase of unsettledPurchases) {
+        const splitRows =
+          overridesByPurchase.get(purchase.id) ?? walletDefaults;
+
+        const amounts = splitRows.length
+          ? this.settlementService.computeAmounts(splitRows, purchase.amount)
+          : [{ iban: null, label: null, amount: BigInt(purchase.amount) }];
+
+        const total = amounts.reduce((sum, item) => sum + item.amount, 0n);
+        // Defensive only — every purchase's amount was already added to this
+        // wallet's balance at verify time, so this should never trip.
+        if (total > remainingBalance) {
+          continue;
+        }
+        remainingBalance -= total;
+
+        for (const [index, item] of amounts.entries()) {
+          const withdrawal = manager.create(Transaction, {
+            type: TransactionType.WITHDRAW,
+            fromWalletId: wallet.id,
+            toWalletId: null,
+            amount: item.amount.toString(),
+            idempotencyKey: `auto-withdraw:${wallet.id}:${purchase.id}:${index}:${minuteKey}`,
+            relatedTransactionId: purchase.id,
+            destinationIban: item.iban,
+            note: item.label,
+          });
+          await manager.save(withdrawal);
+        }
+
+        purchase.settledAt = new Date();
+        await manager.save(purchase);
+      }
+
+      await manager.update(Wallet, wallet.id, {
+        balance: remainingBalance.toString(),
       });
-      await manager.save(transaction);
     });
   }
 
@@ -868,6 +1018,8 @@ export class TransactionsService {
       status: transaction.status,
       expiresAt: transaction.expiresAt,
       relatedTransactionId: transaction.relatedTransactionId,
+      settledAt: transaction.settledAt,
+      destinationIban: transaction.destinationIban,
     };
   }
 

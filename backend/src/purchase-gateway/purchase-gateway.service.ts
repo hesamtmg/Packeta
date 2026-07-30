@@ -8,7 +8,9 @@ import { TransactionsService } from '../transactions/transactions.service';
 import { UsersService } from '../users/users.service';
 import { WalletsService } from '../wallets/wallets.service';
 import { OtpService } from './otp.service';
+import { CaptchaService } from './captcha.service';
 import { serializeWallet } from '../wallets/wallet.serializer';
+import { formatAmount } from '../common/format-amount';
 
 // Backs the IPG's "identify yourself" step for merchant-initiated charges:
 // the customer proves who they are with phone + OTP (no Packeta session
@@ -21,24 +23,58 @@ export class PurchaseGatewayService {
     private readonly usersService: UsersService,
     private readonly walletsService: WalletsService,
     private readonly otpService: OtpService,
+    private readonly captchaService: CaptchaService,
   ) {}
 
-  async getStatus(
-    authority: string,
-  ): Promise<{ needsWalletSelection: boolean }> {
+  // Also backs the persistent merchant-info + countdown header the pay page
+  // shows across every step (phone/OTP/wallet-select), not just the final
+  // confirm screen — the timeout is the same one configured on the
+  // merchant's wallet at creation (purchaseTimeoutSeconds).
+  async getStatus(authority: string): Promise<{
+    needsWalletSelection: boolean;
+    merchantName: string;
+    displayAmount: string;
+    expiresAt: Date | null;
+    language: string;
+  }> {
     const transaction =
       await this.transactionsService.findByIpgAuthority(authority);
     if (!transaction) {
       throw new NotFoundException('Payment not found');
     }
-    return { needsWalletSelection: !transaction.fromWalletId };
+
+    const toWallet = await this.walletsService.getByIdUnscoped(
+      transaction.toWalletId!,
+    );
+    const merchant = await this.usersService.findById(toWallet.userId);
+
+    return {
+      needsWalletSelection: !transaction.fromWalletId,
+      merchantName: merchant?.email ?? 'Merchant',
+      displayAmount: formatAmount(
+        transaction.amount,
+        toWallet.walletType.currency,
+      ),
+      expiresAt: transaction.expiresAt,
+      language: transaction.language ?? 'en',
+    };
+  }
+
+  async requestCaptcha(): Promise<{ captchaId: string; question: string }> {
+    return this.captchaService.generate();
   }
 
   async requestOtp(
     authority: string,
     phoneNumber: string,
+    captchaId: string,
+    captchaAnswer: string,
   ): Promise<{ devCode: string }> {
     await this.getPendingCharge(authority);
+
+    if (!this.captchaService.verify(captchaId, captchaAnswer)) {
+      throw new UnauthorizedException('Incorrect or expired captcha answer');
+    }
 
     const user = await this.usersService.findByPhoneNumber(phoneNumber);
     if (!user) {
@@ -73,7 +109,10 @@ export class PurchaseGatewayService {
     );
 
     const sessionToken = this.otpService.createSession(authority, userId);
-    return { sessionToken, wallets: wallets.map(serializeWallet) };
+    return {
+      sessionToken,
+      wallets: wallets.map((wallet) => serializeWallet(wallet)),
+    };
   }
 
   async attachWallet(
@@ -96,11 +135,30 @@ export class PurchaseGatewayService {
       charge.toWalletId!,
     );
     if (
+      wallet.closedAt ||
+      toWallet.closedAt ||
       !wallet.walletType.allowPurchaseOut ||
       wallet.walletType.currencyId !== toWallet.walletType.currencyId
     ) {
       throw new BadRequestException(
         'That wallet cannot be used for this purchase',
+      );
+    }
+
+    const [customer, merchant] = await Promise.all([
+      this.usersService.findById(userId),
+      this.usersService.findById(toWallet.userId),
+    ]);
+    if (
+      !this.walletsService.isCounterpartyAllowed(
+        wallet.restrictedCounterparties,
+        merchant!.email,
+        toWallet.restrictedCounterparties,
+        customer!.email,
+      )
+    ) {
+      throw new BadRequestException(
+        'This purchase is not allowed between these two wallets',
       );
     }
 

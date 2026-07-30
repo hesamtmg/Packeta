@@ -18,7 +18,9 @@ export class AdminGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
     const user = await this.usersService.findById(request.user.userId);
-    if (!user || user.role !== UserRole.ADMIN) {
+    const isAdmin =
+      user?.role === UserRole.ADMIN || user?.role === UserRole.SUPER_ADMIN;
+    if (!isAdmin) {
       throw new ForbiddenException('Admin access required');
     }
     return true;

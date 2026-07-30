@@ -17,13 +17,36 @@ export interface WalletType {
   allowPurchaseIn: boolean;
 }
 
+export interface SettlementAccount {
+  id: string;
+  iban: string;
+  label: string | null;
+  percent: string;
+}
+
 export interface Wallet {
   id: string;
   balance: string;
   autoWithdrawTimes: string[] | null;
   purchaseTimeoutSeconds: number | null;
+  restrictedCounterparties: string[] | null;
+  closedAt: string | null;
+  settlementAccounts?: SettlementAccount[];
   walletType: WalletType;
   createdAt: string;
+}
+
+export interface SettlementAccountInput {
+  iban: string;
+  label?: string;
+  percent: number;
+}
+
+export interface SettlementSplitInput {
+  iban: string;
+  label?: string;
+  type: 'PERCENT' | 'FIXED';
+  value: number;
 }
 
 interface Transaction {
@@ -53,12 +76,36 @@ export const useWalletStore = defineStore('wallet', {
     },
     async createWallet(
       walletTypeId: string,
-      options?: { autoWithdrawTimes?: string[]; purchaseTimeoutSeconds?: number },
+      options?: {
+        autoWithdrawTimes?: string[];
+        purchaseTimeoutSeconds?: number;
+        settlementAccounts?: SettlementAccountInput[];
+        restrictedCounterparties?: string[];
+      },
     ) {
       await apiRequest('/wallets', {
         method: 'POST',
         body: { walletTypeId, ...options },
       });
+      await this.fetchWallets();
+    },
+    async updateWallet(
+      walletId: string,
+      options: {
+        autoWithdrawTimes?: string[];
+        purchaseTimeoutSeconds?: number;
+        settlementAccounts?: SettlementAccountInput[];
+        restrictedCounterparties?: string[];
+      },
+    ) {
+      await apiRequest(`/wallets/${walletId}`, {
+        method: 'PATCH',
+        body: options,
+      });
+      await this.fetchWallets();
+    },
+    async closeWallet(walletId: string) {
+      await apiRequest(`/wallets/${walletId}`, { method: 'DELETE' });
       await this.fetchWallets();
     },
     async deposit(walletId: string, amount: number) {
@@ -95,12 +142,17 @@ export const useWalletStore = defineStore('wallet', {
         },
       );
     },
-    async createCharge(amount: number, currencyCode: string) {
+    async createCharge(
+      amount: number,
+      currencyCode: string,
+      language: string,
+      settlementSplits?: SettlementSplitInput[],
+    ) {
       return apiRequest<{ transactionId: string; redirectUrl: string; expiresAt: string }>(
         '/transactions/purchase/charge',
         {
           method: 'POST',
-          body: { amount, currencyCode },
+          body: { amount, currencyCode, language, settlementSplits },
           idempotent: true,
         },
       );
