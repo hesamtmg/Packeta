@@ -7,6 +7,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { Wallet } from './entities/wallet.entity';
 import { WalletType } from '../wallet-types/entities/wallet-type.entity';
+import { SettlementService } from '../settlement/settlement.service';
+import { SettlementAccountDto } from '../settlement/dto/settlement-account.dto';
 
 const WALLET_RELATIONS = { walletType: { currency: true } } as const;
 const WALLET_RELATIONS_WITH_OWNER = {
@@ -19,6 +21,7 @@ export class WalletsService {
   constructor(
     @InjectRepository(Wallet)
     private readonly walletsRepository: Repository<Wallet>,
+    private readonly settlementService: SettlementService,
   ) {}
 
   async createForUser(
@@ -28,6 +31,7 @@ export class WalletsService {
     options?: {
       autoWithdrawTimes?: string[];
       purchaseTimeoutSeconds?: number;
+      settlementAccounts?: SettlementAccountDto[];
     },
   ): Promise<Wallet> {
     const wallet = manager.create(Wallet, {
@@ -37,7 +41,17 @@ export class WalletsService {
       autoWithdrawTimes: options?.autoWithdrawTimes ?? null,
       purchaseTimeoutSeconds: options?.purchaseTimeoutSeconds ?? null,
     });
-    return manager.save(wallet);
+    await manager.save(wallet);
+
+    if (options?.settlementAccounts?.length) {
+      await this.settlementService.createForWallet(
+        manager,
+        wallet.id,
+        options.settlementAccounts,
+      );
+    }
+
+    return wallet;
   }
 
   // Merchant wallets whose type supports the auto-withdraw sweep and have a

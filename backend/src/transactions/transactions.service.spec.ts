@@ -4,6 +4,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { TransactionsService } from './transactions.service';
+import { TransactionType } from './entities/transaction.entity';
 
 interface WalletTypeFixture {
   name: string;
@@ -121,6 +122,14 @@ function buildService(options: {
     ),
   };
 
+  const settlementService = {
+    validateChargeOverrides: jest.fn(),
+    findForWallet: jest.fn().mockResolvedValue([]),
+    findForTransactions: jest.fn().mockResolvedValue(new Map()),
+    createForTransaction: jest.fn().mockResolvedValue(undefined),
+    computeAmounts: jest.fn(),
+  };
+
   const service = new TransactionsService(
     dataSource as any,
     walletsService as any,
@@ -129,6 +138,7 @@ function buildService(options: {
     ipgClientService as any,
     configService as any,
     {} as any,
+    settlementService as any,
     {} as any,
   );
 
@@ -547,5 +557,164 @@ describe('TransactionsService.initiatePurchase', () => {
     expect(ipgClientService.createPayment).toHaveBeenCalledWith(
       expect.objectContaining({ amount: '250', timeoutSeconds: 120 }),
     );
+  });
+});
+
+function buildSweepService(options: {
+  walletBalance: string;
+  walletDefaults: any[];
+  unsettledPurchases: any[];
+  overridesByPurchase: Map<string, any[]>;
+  computeAmountsImpl?: (rows: any[], amount: string) => any[];
+}) {
+  const wallet = { id: 'wallet-1', balance: options.walletBalance };
+  const savedTransactions: any[] = [];
+  const savedPurchases: any[] = [];
+  const updatedBalances: string[] = [];
+
+  const walletsService = { lockById: jest.fn(async () => wallet) };
+
+  const manager = {
+    update: jest.fn(async (_entity: unknown, _id: string, patch: any) => {
+      if (patch.balance !== undefined) updatedBalances.push(patch.balance);
+    }),
+    create: jest.fn((_entity: unknown, data: unknown) => data),
+    save: jest.fn(async (data: any) => {
+      if (data.type === TransactionType.WITHDRAW) {
+        savedTransactions.push(data);
+      } else {
+        savedPurchases.push(data);
+      }
+      return data;
+    }),
+    createQueryBuilder: jest.fn(() => {
+      const builder: any = {
+        setLock: () => builder,
+        where: () => builder,
+        andWhere: () => builder,
+        getMany: async () => options.unsettledPurchases,
+      };
+      return builder;
+    }),
+  };
+
+  const dataSource = {
+    transaction: jest.fn(async (work: (manager: unknown) => Promise<unknown>) =>
+      work(manager),
+    ),
+  };
+
+  const settlementService = {
+    findForWallet: jest.fn().mockResolvedValue(options.walletDefaults),
+    findForTransactions: jest
+      .fn()
+      .mockResolvedValue(options.overridesByPurchase),
+    computeAmounts: jest.fn(
+      options.computeAmountsImpl ??
+        ((rows: any[], amount: string) => [
+          { iban: rows[0]?.iban ?? null, label: null, amount: BigInt(amount) },
+        ]),
+    ),
+  };
+
+  const service = new TransactionsService(
+    dataSource as any,
+    walletsService as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    settlementService as any,
+    {} as any,
+  );
+
+  return { service, savedTransactions, savedPurchases, updatedBalances };
+}
+
+describe('TransactionsService.sweepAutoWithdraw', () => {
+  it('falls back to a single full-balance WITHDRAW when no settlement split is configured (legacy behavior)', async () => {
+    const { service, savedTransactions, updatedBalances } = buildSweepService({
+      walletBalance: '5000',
+      walletDefaults: [],
+      unsettledPurchases: [],
+      overridesByPurchase: new Map(),
+    });
+
+    await service.sweepAutoWithdraw('wallet-1');
+
+    expect(savedTransactions).toHaveLength(1);
+    expect(savedTransactions[0]).toMatchObject({
+      type: TransactionType.WITHDRAW,
+      fromWalletId: 'wallet-1',
+      amount: '5000',
+    });
+    expect(updatedBalances).toEqual(['0']);
+  });
+
+  it('splits each unsettled purchase individually — its own override if it has one, else the wallet default', async () => {
+    const purchaseWithOverride = {
+      id: 'purchase-1',
+      amount: '1000',
+      settledAt: null,
+    };
+    const purchaseWithDefault = {
+      id: 'purchase-2',
+      amount: '2000',
+      settledAt: null,
+    };
+    const overrideRows = [{ iban: 'override-iban', label: null }];
+    const defaultRows = [{ iban: 'default-iban', label: null }];
+
+    const { service, savedTransactions, savedPurchases, updatedBalances } =
+      buildSweepService({
+        walletBalance: '3000',
+        walletDefaults: defaultRows,
+        unsettledPurchases: [purchaseWithOverride, purchaseWithDefault],
+        overridesByPurchase: new Map([['purchase-1', overrideRows]]),
+      });
+
+    await service.sweepAutoWithdraw('wallet-1');
+
+    expect(savedTransactions).toHaveLength(2);
+    expect(savedTransactions[0]).toMatchObject({
+      destinationIban: 'override-iban',
+      relatedTransactionId: 'purchase-1',
+      amount: '1000',
+    });
+    expect(savedTransactions[1]).toMatchObject({
+      destinationIban: 'default-iban',
+      relatedTransactionId: 'purchase-2',
+      amount: '2000',
+    });
+    expect(savedPurchases.every((p) => p.settledAt instanceof Date)).toBe(true);
+    expect(updatedBalances).toEqual(['0']);
+  });
+
+  it('falls back to a single plain WITHDRAW for a purchase with neither override nor wallet default, while split mode is active for the wallet', async () => {
+    const purchaseNoConfig = {
+      id: 'purchase-3',
+      amount: '500',
+      settledAt: null,
+    };
+    const { service, savedTransactions } = buildSweepService({
+      walletBalance: '500',
+      walletDefaults: [],
+      unsettledPurchases: [purchaseNoConfig],
+      // Split mode is active because some other purchase on this wallet has
+      // an override — purchase-3 itself still has no split configured.
+      overridesByPurchase: new Map([
+        ['other-purchase', [{ iban: 'x', label: null }]],
+      ]),
+    });
+
+    await service.sweepAutoWithdraw('wallet-1');
+
+    expect(savedTransactions).toHaveLength(1);
+    expect(savedTransactions[0]).toMatchObject({
+      amount: '500',
+      relatedTransactionId: 'purchase-3',
+      destinationIban: null,
+    });
   });
 });

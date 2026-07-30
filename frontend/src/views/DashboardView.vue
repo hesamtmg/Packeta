@@ -27,6 +27,10 @@ const chargeLinkCopied = ref(false);
 const newWalletType = ref('');
 const newWalletAutoWithdrawTimes = ref(['', '', '']);
 const newWalletPurchaseTimeoutMinutes = ref('');
+const newWalletSettlementAccounts = ref<{ iban: string; label: string; percent: string }[]>([]);
+const chargeSettlementSplits = ref<
+  { iban: string; label: string; type: 'PERCENT' | 'FIXED'; value: string }[]
+>([]);
 const depositWalletId = ref('');
 const depositAmount = ref('');
 const withdrawWalletId = ref('');
@@ -202,6 +206,13 @@ async function onSavePhoneNumber() {
   }
 }
 
+function addChargeSplitRow() {
+  chargeSettlementSplits.value.push({ iban: '', label: '', type: 'PERCENT', value: '' });
+}
+function removeChargeSplitRow(index: number) {
+  chargeSettlementSplits.value.splice(index, 1);
+}
+
 async function onCreateCharge() {
   chargeError.value = '';
   chargeResult.value = null;
@@ -210,13 +221,24 @@ async function onCreateCharge() {
   try {
     const currency = chargeCurrency.value;
     if (!currency) return;
+    const filledSplits = chargeSettlementSplits.value.filter((row) => row.iban && row.value);
+    const settlementSplits = filledSplits.length
+      ? filledSplits.map((row) => ({
+          iban: row.iban,
+          label: row.label || undefined,
+          type: row.type,
+          value: row.type === 'FIXED' ? toMinorUnits(row.value, currency) : Number(row.value),
+        }))
+      : undefined;
     const result = await wallet.createCharge(
       toMinorUnits(chargeAmount.value, currency),
       currency.code,
       chargeLanguage.value,
+      settlementSplits,
     );
     chargeResult.value = result;
     chargeAmount.value = '';
+    chargeSettlementSplits.value = [];
   } catch (err) {
     chargeError.value = err instanceof ApiError ? err.message : t('dashboard.charge.error');
   } finally {
@@ -246,11 +268,32 @@ async function runAction(fn: () => Promise<void>) {
   }
 }
 
+function addSettlementAccountRow() {
+  newWalletSettlementAccounts.value.push({ iban: '', label: '', percent: '' });
+}
+function removeSettlementAccountRow(index: number) {
+  newWalletSettlementAccounts.value.splice(index, 1);
+}
+
 function onAddWallet() {
   runAction(async () => {
-    const options: { autoWithdrawTimes?: string[]; purchaseTimeoutSeconds?: number } = {};
+    const options: {
+      autoWithdrawTimes?: string[];
+      purchaseTimeoutSeconds?: number;
+      settlementAccounts?: { iban: string; label?: string; percent: number }[];
+    } = {};
     if (showAutoWithdrawFields.value) {
       options.autoWithdrawTimes = newWalletAutoWithdrawTimes.value;
+      const filledAccounts = newWalletSettlementAccounts.value.filter(
+        (row) => row.iban && row.percent,
+      );
+      if (filledAccounts.length) {
+        options.settlementAccounts = filledAccounts.map((row) => ({
+          iban: row.iban,
+          label: row.label || undefined,
+          percent: Number(row.percent),
+        }));
+      }
     }
     if (showPurchaseTimeoutField.value && newWalletPurchaseTimeoutMinutes.value) {
       options.purchaseTimeoutSeconds = Math.round(
@@ -261,6 +304,7 @@ function onAddWallet() {
     newWalletType.value = '';
     newWalletAutoWithdrawTimes.value = ['', '', ''];
     newWalletPurchaseTimeoutMinutes.value = '';
+    newWalletSettlementAccounts.value = [];
   });
 }
 
@@ -398,6 +442,30 @@ function onPurchase() {
             <option value="en">{{ t('dashboard.charge.languageEn') }}</option>
             <option value="fa">{{ t('dashboard.charge.languageFa') }}</option>
           </select>
+
+          <div class="settlement-rows">
+            <span class="hint">{{ t('dashboard.charge.settlementHint') }}</span>
+            <div v-for="(row, i) in chargeSettlementSplits" :key="i" class="settlement-row">
+              <input v-model="row.iban" type="text" :placeholder="t('dashboard.settlement.ibanPlaceholder')" class="admin-input" />
+              <input v-model="row.label" type="text" :placeholder="t('dashboard.settlement.labelPlaceholder')" class="admin-input" />
+              <select v-model="row.type" class="admin-input">
+                <option value="PERCENT">{{ t('dashboard.settlement.percent') }}</option>
+                <option value="FIXED">{{ t('dashboard.settlement.fixed') }}</option>
+              </select>
+              <input
+                v-model="row.value"
+                type="number"
+                min="0"
+                :placeholder="row.type === 'PERCENT' ? t('dashboard.settlement.percentPlaceholder') : t('dashboard.settlement.amountPlaceholder')"
+                class="admin-input"
+              />
+              <button type="button" class="admin-btn admin-btn-ghost" @click="removeChargeSplitRow(i)">{{ t('dashboard.settlement.remove') }}</button>
+            </div>
+            <button type="button" class="admin-btn admin-btn-ghost" @click="addChargeSplitRow">
+              {{ t('dashboard.settlement.addSplit') }}
+            </button>
+          </div>
+
           <button type="submit" class="admin-btn admin-btn-primary" :disabled="chargeBusy">
             {{ t('dashboard.charge.create') }}
           </button>
@@ -437,6 +505,19 @@ function onPurchase() {
           <input v-model="newWalletAutoWithdrawTimes[0]" type="time" class="admin-input" required />
           <input v-model="newWalletAutoWithdrawTimes[1]" type="time" class="admin-input" required />
           <input v-model="newWalletAutoWithdrawTimes[2]" type="time" class="admin-input" required />
+
+          <div class="settlement-rows">
+            <span class="hint">{{ t('dashboard.settlement.walletHint') }}</span>
+            <div v-for="(row, i) in newWalletSettlementAccounts" :key="i" class="settlement-row">
+              <input v-model="row.iban" type="text" :placeholder="t('dashboard.settlement.ibanPlaceholder')" class="admin-input" />
+              <input v-model="row.label" type="text" :placeholder="t('dashboard.settlement.labelPlaceholder')" class="admin-input" />
+              <input v-model="row.percent" type="number" min="0" max="100" :placeholder="t('dashboard.settlement.percentPlaceholder')" class="admin-input" />
+              <button type="button" class="admin-btn admin-btn-ghost" @click="removeSettlementAccountRow(i)">{{ t('dashboard.settlement.remove') }}</button>
+            </div>
+            <button type="button" class="admin-btn admin-btn-ghost" @click="addSettlementAccountRow">
+              {{ t('dashboard.settlement.addAccount') }}
+            </button>
+          </div>
         </template>
 
         <template v-if="showPurchaseTimeoutField">
@@ -666,6 +747,25 @@ function onPurchase() {
 .hint {
   font-size: 0.8rem;
   color: var(--text-dim);
+}
+.settlement-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 10px;
+  border: 1px dashed var(--card-border);
+  border-radius: var(--radius-sm);
+}
+.settlement-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.settlement-row input,
+.settlement-row select {
+  flex: 1;
+  min-width: 100px;
 }
 .actions form {
   display: flex;

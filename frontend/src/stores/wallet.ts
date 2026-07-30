@@ -17,13 +17,34 @@ export interface WalletType {
   allowPurchaseIn: boolean;
 }
 
+export interface SettlementAccount {
+  id: string;
+  iban: string;
+  label: string | null;
+  percent: string;
+}
+
 export interface Wallet {
   id: string;
   balance: string;
   autoWithdrawTimes: string[] | null;
   purchaseTimeoutSeconds: number | null;
+  settlementAccounts?: SettlementAccount[];
   walletType: WalletType;
   createdAt: string;
+}
+
+export interface SettlementAccountInput {
+  iban: string;
+  label?: string;
+  percent: number;
+}
+
+export interface SettlementSplitInput {
+  iban: string;
+  label?: string;
+  type: 'PERCENT' | 'FIXED';
+  value: number;
 }
 
 interface Transaction {
@@ -53,7 +74,11 @@ export const useWalletStore = defineStore('wallet', {
     },
     async createWallet(
       walletTypeId: string,
-      options?: { autoWithdrawTimes?: string[]; purchaseTimeoutSeconds?: number },
+      options?: {
+        autoWithdrawTimes?: string[];
+        purchaseTimeoutSeconds?: number;
+        settlementAccounts?: SettlementAccountInput[];
+      },
     ) {
       await apiRequest('/wallets', {
         method: 'POST',
@@ -95,12 +120,17 @@ export const useWalletStore = defineStore('wallet', {
         },
       );
     },
-    async createCharge(amount: number, currencyCode: string, language: string) {
+    async createCharge(
+      amount: number,
+      currencyCode: string,
+      language: string,
+      settlementSplits?: SettlementSplitInput[],
+    ) {
       return apiRequest<{ transactionId: string; redirectUrl: string; expiresAt: string }>(
         '/transactions/purchase/charge',
         {
           method: 'POST',
-          body: { amount, currencyCode, language },
+          body: { amount, currencyCode, language, settlementSplits },
           idempotent: true,
         },
       );

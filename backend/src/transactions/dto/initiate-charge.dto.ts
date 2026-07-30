@@ -1,4 +1,14 @@
-import { IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  ArrayMinSize,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { SettlementSplitDto } from '../../settlement/dto/settlement-split.dto';
 
 // amount is expressed in minor units (e.g. cents) as a positive integer.
 // No customer or wallet is chosen yet — that happens at the IPG, after the
@@ -19,4 +29,15 @@ export class InitiateChargeDto {
   @IsOptional()
   @IsIn(['en', 'fa'])
   language?: 'en' | 'fa';
+
+  // Overrides the merchant wallet's default settlement split (see
+  // CreateWalletDto.settlementAccounts) for this one charge only — e.g. this
+  // specific 1000 needs to be split 60/40 to two different IBANs instead of
+  // the wallet's usual arrangement. Percentages must add up to exactly 100,
+  // or fixed amounts (minor units) must add up to exactly `amount`.
+  @IsOptional()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => SettlementSplitDto)
+  settlementSplits?: SettlementSplitDto[];
 }

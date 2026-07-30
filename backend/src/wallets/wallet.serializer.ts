@@ -1,11 +1,25 @@
 import { Wallet } from './entities/wallet.entity';
+import { SettlementSplit } from '../settlement/entities/settlement-split.entity';
 
-export function serializeWallet(wallet: Wallet) {
+function serializeSettlementAccount(row: SettlementSplit) {
+  return {
+    id: row.id,
+    iban: row.iban,
+    label: row.label,
+    percent: row.percentValue,
+  };
+}
+
+export function serializeWallet(
+  wallet: Wallet,
+  settlementAccounts?: SettlementSplit[],
+) {
   return {
     id: wallet.id,
     balance: wallet.balance,
     autoWithdrawTimes: wallet.autoWithdrawTimes,
     purchaseTimeoutSeconds: wallet.purchaseTimeoutSeconds,
+    settlementAccounts: settlementAccounts?.map(serializeSettlementAccount),
     walletType: {
       id: wallet.walletType.id,
       code: wallet.walletType.code,

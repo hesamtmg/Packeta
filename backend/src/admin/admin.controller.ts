@@ -56,7 +56,7 @@ export class AdminController {
       email: user.email,
       role: user.role,
       createdAt: user.createdAt,
-      wallets: wallets.map(serializeWallet),
+      wallets: wallets.map((wallet) => serializeWallet(wallet)),
     };
   }
 

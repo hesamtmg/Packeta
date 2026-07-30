@@ -73,6 +73,21 @@ export default {
       copy: 'کپی',
       copied: 'کپی شد',
       error: 'ایجاد درخواست پرداخت ناموفق بود',
+      settlementHint:
+        'اختیاری: تقسیم تسویه را فقط برای این پرداخت بازنویسی کنید (درصد یا مبلغ ثابت، باید دقیقاً جمع شود).',
+    },
+    settlement: {
+      walletHint:
+        'تقسیم پیش‌فرض تسویه برای این کیف پول (اختیاری) — درصدها باید دقیقاً به ۱۰۰ برسند.',
+      ibanPlaceholder: 'شماره شبا (IBAN)',
+      labelPlaceholder: 'برچسب (اختیاری)',
+      percent: 'درصد',
+      fixed: 'مبلغ ثابت',
+      percentPlaceholder: 'درصد',
+      amountPlaceholder: 'مبلغ',
+      addAccount: 'افزودن حساب تسویه',
+      addSplit: 'افزودن مقصد تقسیم',
+      remove: 'حذف',
     },
     wallets: {
       title: 'کیف‌پول‌ها',

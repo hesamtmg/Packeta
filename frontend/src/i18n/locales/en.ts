@@ -73,6 +73,21 @@ export default {
       copy: 'Copy',
       copied: 'Copied',
       error: 'Failed to create charge',
+      settlementHint:
+        'Optional: override the payout split for this charge only (percent or fixed amounts, must add up exactly).',
+    },
+    settlement: {
+      walletHint:
+        'Optional default payout split for this wallet (percentages must add up to exactly 100).',
+      ibanPlaceholder: 'IBAN',
+      labelPlaceholder: 'Label (optional)',
+      percent: 'Percent',
+      fixed: 'Fixed amount',
+      percentPlaceholder: 'Percent',
+      amountPlaceholder: 'Amount',
+      addAccount: 'Add settlement account',
+      addSplit: 'Add split destination',
+      remove: 'Remove',
     },
     wallets: {
       title: 'Wallets',

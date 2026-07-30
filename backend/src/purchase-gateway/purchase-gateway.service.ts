@@ -109,7 +109,10 @@ export class PurchaseGatewayService {
     );
 
     const sessionToken = this.otpService.createSession(authority, userId);
-    return { sessionToken, wallets: wallets.map(serializeWallet) };
+    return {
+      sessionToken,
+      wallets: wallets.map((wallet) => serializeWallet(wallet)),
+    };
   }
 
   async attachWallet(

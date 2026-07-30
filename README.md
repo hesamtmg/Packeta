@@ -66,6 +66,28 @@ A multi-wallet app, plus a standalone sandbox payment gateway (IPG) it settles m
   `isStarterType` on `wallet_types` controls whether a type is part of every new signup's default set (only
   the original four are); this also fixed a latent bug where any custom type created in the default currency
   was silently being granted to every new signup.
+- **Split settlement (payout IBANs)**: a merchant's auto-withdraw sweep can pay out to more than one bank
+  account instead of one lump `WITHDRAW`, in two layers — a `SettlementSplit` row belongs to exactly one of
+  them (DB `CHECK`), never both:
+  1. **Wallet default** (`POST /wallets`, `settlementAccounts: [{ iban, label?, percent }]`) — configured once
+     at wallet creation, always percentage-based, and must add up to exactly 100.
+  2. **Per-charge override** (`POST /transactions/purchase/charge`, `settlementSplits: [{ iban, label?, type:
+     'PERCENT' | 'FIXED', value }]`) — a one-off split for that specific charge only (e.g. a 1000 purchase
+     split 60/40 to two different accounts than usual), taking priority over the wallet default for that
+     purchase. `PERCENT` must add up to exactly 100; `FIXED` (minor units) must add up to exactly the
+     charge's own amount — mixing the two types within one split set isn't allowed, since "percent of what's
+     left after fixed deductions" is ambiguous.
+
+  Settlement isn't instant — it's still driven by the same `autoWithdrawTimes` schedule described above, but
+  a wallet with any settlement config switches from one aggregate sweep to processing each unsettled
+  `COMPLETED` purchase individually: its own override if the charge supplied one, else the wallet's default,
+  else (an older purchase with neither) a single plain `WITHDRAW` for just that purchase — so a per-charge
+  split is never diluted by being lumped in with other purchases' money. Each purchase is marked with a
+  `settledAt` timestamp once processed, and each generated `WITHDRAW` row records which `destinationIban` it
+  went to and which purchase (`relatedTransactionId`) it settles. Splitting a percentage always floors every
+  item but the last, which absorbs the rounding remainder, so the pieces reliably sum to the exact original
+  amount. Wallets with no settlement config at all are unaffected — the sweep still does the original
+  single-`WITHDRAW`-for-the-full-balance behavior.
 - **Merchant-initiated checkout (phone + OTP, no Packeta session required)**: `POST /transactions/purchase/charge`
   lets a merchant create a payment link naming only an amount and currency — no customer or wallet is chosen
   yet, unlike `purchase/initiate`. The merchant hands that link to a customer who may have no Packeta account
