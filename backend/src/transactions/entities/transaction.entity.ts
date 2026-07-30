@@ -86,6 +86,13 @@ export class Transaction {
   @Column({ type: 'varchar', length: 500, nullable: true })
   ipgPaymentUrl: string | null;
 
+  // Only set for PURCHASE rows created via the merchant-initiated charge
+  // flow: which language the IPG pay page should render in for the
+  // customer identifying themselves there, chosen by the merchant at
+  // charge-creation time.
+  @Column({ type: 'varchar', length: 5, nullable: true })
+  language: string | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

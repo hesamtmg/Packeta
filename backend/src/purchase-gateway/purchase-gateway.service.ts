@@ -35,6 +35,7 @@ export class PurchaseGatewayService {
     merchantName: string;
     displayAmount: string;
     expiresAt: Date | null;
+    language: string;
   }> {
     const transaction =
       await this.transactionsService.findByIpgAuthority(authority);
@@ -55,6 +56,7 @@ export class PurchaseGatewayService {
         toWallet.walletType.currency,
       ),
       expiresAt: transaction.expiresAt,
+      language: transaction.language ?? 'en',
     };
   }
 

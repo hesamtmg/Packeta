@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../../api/client';
 import { formatAmount } from '../../utils/currency';
 import {
@@ -12,6 +13,7 @@ import {
 import AdminLayout from '../../components/admin/AdminLayout.vue';
 import MiniLineChart from '../../components/admin/MiniLineChart.vue';
 
+const { t } = useI18n();
 const users = ref<AdminUser[]>([]);
 const wallets = ref<AdminWallet[]>([]);
 const transactions = ref<AdminTransaction[]>([]);
@@ -45,16 +47,16 @@ function formatTxAmount(tx: AdminTransaction): string {
 }
 
 function walletLabel(walletId: string | null): string {
-  if (!walletId) return '—';
+  if (!walletId) return t('common.none');
   const w = walletsById.value.get(walletId);
-  return w ? `${w.walletType.name} (${w.walletType.currency.code})` : 'Unknown';
+  return w ? `${w.walletType.name} (${w.walletType.currency.code})` : t('common.unknown');
 }
 
 function ownerEmail(tx: AdminTransaction): string {
   const w =
     (tx.fromWalletId && walletsById.value.get(tx.fromWalletId)) ||
     (tx.toWalletId && walletsById.value.get(tx.toWalletId));
-  return w ? w.ownerEmail : '—';
+  return w ? w.ownerEmail : t('common.none');
 }
 
 async function load() {
@@ -66,7 +68,7 @@ async function load() {
       apiRequest<AdminTransaction[]>('/admin/transactions?limit=300'),
     ]);
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : 'Failed to load dashboard';
+    error.value = err instanceof ApiError ? err.message : t('admin.dashboard.loadFailed');
   }
 }
 
@@ -74,50 +76,49 @@ onMounted(load);
 </script>
 
 <template>
-  <AdminLayout title="Dashboard">
+  <AdminLayout :title="t('admin.dashboard.title')">
     <p v-if="error" class="admin-error">{{ error }}</p>
 
     <div class="admin-grid admin-grid-2">
       <div class="hero-card">
         <div class="hero-copy">
-          <span class="hero-eyebrow">Overview</span>
-          <h2>Every wallet, currency, and customer in one place</h2>
+          <span class="hero-eyebrow">{{ t('dashboard.overviewEyebrow') }}</span>
+          <h2>{{ t('admin.dashboard.overviewHeading') }}</h2>
           <p>
-            {{ customerCount }} customers hold {{ walletCount }} wallets across
-            all currencies, with {{ transactionCount }} recent transactions on record.
+            {{ t('admin.dashboard.overviewSummary', { customers: customerCount, wallets: walletCount, transactions: transactionCount }) }}
           </p>
           <router-link :to="{ name: 'admin-reports' }" class="admin-btn admin-btn-primary">
-            View reports
+            {{ t('admin.dashboard.viewReports') }}
           </router-link>
         </div>
 
         <div class="hero-pills">
           <div class="pill">
             <span class="pill-value">{{ customerCount }}</span>
-            <span class="pill-label"><i class="dot dot-orange" />Customers</span>
+            <span class="pill-label"><i class="dot dot-orange" />{{ t('admin.dashboard.customers') }}</span>
           </div>
           <div class="pill">
             <span class="pill-value">{{ walletCount }}</span>
-            <span class="pill-label"><i class="dot dot-lime" />Wallets</span>
+            <span class="pill-label"><i class="dot dot-lime" />{{ t('admin.dashboard.wallets') }}</span>
           </div>
           <div class="pill">
             <span class="pill-value">{{ transactionCount }}</span>
-            <span class="pill-label"><i class="dot dot-blue" />Transactions</span>
+            <span class="pill-label"><i class="dot dot-blue" />{{ t('admin.dashboard.transactions') }}</span>
           </div>
           <div class="pill">
             <span class="pill-value">{{ adminCount }}</span>
-            <span class="pill-label"><i class="dot dot-red" />Admins</span>
+            <span class="pill-label"><i class="dot dot-red" />{{ t('admin.dashboard.admins') }}</span>
           </div>
         </div>
       </div>
 
       <div class="side-stack">
         <div class="admin-card">
-          <h2>New signups (14d)</h2>
+          <h2>{{ t('admin.dashboard.signups') }}</h2>
           <MiniLineChart :data="signupsPerDay" color="#d8ff5c" :height="70" />
         </div>
         <div class="admin-card" v-if="latestTransaction">
-          <h2>Latest transaction</h2>
+          <h2>{{ t('admin.dashboard.latestTransaction') }}</h2>
           <div class="latest-amount">{{ formatTxAmount(latestTransaction) }}</div>
           <div class="latest-meta">
             {{ latestTransaction.type }} · {{ walletLabel(latestTransaction.toWalletId ?? latestTransaction.fromWalletId) }}
@@ -128,15 +129,15 @@ onMounted(load);
     </div>
 
     <div class="admin-card">
-      <h2>Recent transactions</h2>
+      <h2>{{ t('admin.dashboard.recentTransactions') }}</h2>
       <table class="admin-table">
         <thead>
           <tr>
-            <th>Type</th>
-            <th>Amount</th>
-            <th>Wallet</th>
-            <th>Customer</th>
-            <th>Date</th>
+            <th>{{ t('admin.dashboard.tableType') }}</th>
+            <th>{{ t('admin.dashboard.tableAmount') }}</th>
+            <th>{{ t('admin.dashboard.tableWallet') }}</th>
+            <th>{{ t('admin.dashboard.tableCustomer') }}</th>
+            <th>{{ t('admin.dashboard.tableDate') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -147,7 +148,7 @@ onMounted(load);
             <td>{{ ownerEmail(tx) }}</td>
             <td>{{ new Date(tx.createdAt).toLocaleDateString() }}</td>
           </tr>
-          <tr v-if="!transactions.length"><td colspan="5">No transactions yet.</td></tr>
+          <tr v-if="!transactions.length"><td colspan="5">{{ t('admin.dashboard.noTransactions') }}</td></tr>
         </tbody>
       </table>
     </div>

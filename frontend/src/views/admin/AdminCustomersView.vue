@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../../api/client';
 import { amountStep, formatAmount, toMinorUnits, type CurrencyInfo } from '../../utils/currency';
 import type { AdminUser } from '../../types/admin';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
+
+const { t } = useI18n();
 
 interface WalletType {
   id: string;
@@ -67,7 +70,7 @@ async function loadUsers() {
   try {
     users.value = await apiRequest<AdminUser[]>('/admin/users');
   } catch (err) {
-    listError.value = err instanceof ApiError ? err.message : 'Failed to load customers';
+    listError.value = err instanceof ApiError ? err.message : t('admin.customers.loadFailed');
   }
 }
 
@@ -82,7 +85,7 @@ async function selectUser(id: string) {
     selected.value = detail;
     transactions.value = txs;
   } catch (err) {
-    detailError.value = err instanceof ApiError ? err.message : 'Failed to load customer';
+    detailError.value = err instanceof ApiError ? err.message : t('admin.customers.detailFailed');
   }
 }
 
@@ -101,7 +104,7 @@ async function adjust(wallet: Wallet) {
     adjustReason.value[wallet.id] = '';
     if (selected.value) await selectUser(selected.value.id);
   } catch (err) {
-    adjustError.value = err instanceof ApiError ? err.message : 'Adjustment failed';
+    adjustError.value = err instanceof ApiError ? err.message : t('admin.customers.adjustFailed');
   } finally {
     busy.value = false;
   }
@@ -111,19 +114,19 @@ loadUsers();
 </script>
 
 <template>
-  <AdminLayout title="Customers">
+  <AdminLayout :title="t('admin.customers.title')">
     <p v-if="listError" class="admin-error">{{ listError }}</p>
 
     <div class="admin-card">
       <div class="filter-row">
-        <h2>Customers ({{ filtered.length }})</h2>
-        <input v-model="search" class="admin-input" placeholder="Search by email…" />
+        <h2>{{ t('admin.customers.heading', { count: filtered.length }) }}</h2>
+        <input v-model="search" class="admin-input" :placeholder="t('admin.customers.searchPlaceholder')" />
       </div>
       <table class="admin-table">
         <thead>
           <tr>
-            <th>Email</th>
-            <th>Joined</th>
+            <th>{{ t('admin.customers.tableEmail') }}</th>
+            <th>{{ t('admin.customers.tableJoined') }}</th>
             <th></th>
           </tr>
         </thead>
@@ -131,9 +134,9 @@ loadUsers();
           <tr v-for="u in filtered" :key="u.id">
             <td>{{ u.email }}</td>
             <td>{{ new Date(u.createdAt).toLocaleDateString() }}</td>
-            <td><button class="admin-btn admin-btn-ghost" @click="selectUser(u.id)">View</button></td>
+            <td><button class="admin-btn admin-btn-ghost" @click="selectUser(u.id)">{{ t('admin.customers.view') }}</button></td>
           </tr>
-          <tr v-if="!filtered.length"><td colspan="3">No customers found.</td></tr>
+          <tr v-if="!filtered.length"><td colspan="3">{{ t('admin.customers.noCustomers') }}</td></tr>
         </tbody>
       </table>
     </div>
@@ -153,32 +156,32 @@ loadUsers();
               type="number"
               :step="amountStep(w.walletType.currency)"
               class="admin-input"
-              placeholder="+/- amount"
+              :placeholder="t('admin.customers.amountPlaceholder')"
             />
-            <input v-model="adjustReason[w.id]" type="text" class="admin-input" placeholder="Reason" />
-            <button class="admin-btn admin-btn-primary" :disabled="busy" @click="adjust(w)">Adjust</button>
+            <input v-model="adjustReason[w.id]" type="text" class="admin-input" :placeholder="t('admin.customers.reasonPlaceholder')" />
+            <button class="admin-btn admin-btn-primary" :disabled="busy" @click="adjust(w)">{{ t('admin.customers.adjust') }}</button>
           </div>
         </article>
       </div>
 
-      <h3>Transaction history</h3>
+      <h3>{{ t('admin.customers.historyHeading') }}</h3>
       <table class="admin-table">
         <thead>
           <tr>
-            <th>Type</th>
-            <th>Amount</th>
-            <th>Note</th>
-            <th>Date</th>
+            <th>{{ t('admin.customers.tableType') }}</th>
+            <th>{{ t('admin.customers.tableAmount') }}</th>
+            <th>{{ t('admin.customers.tableNote') }}</th>
+            <th>{{ t('admin.customers.tableDate') }}</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="tx in transactions" :key="tx.id">
             <td><span class="admin-badge">{{ tx.type }}</span></td>
             <td>{{ transactionCurrency(tx) ? formatAmount(tx.amount, transactionCurrency(tx)!) : tx.amount }}</td>
-            <td>{{ tx.note ?? '—' }}</td>
+            <td>{{ tx.note ?? t('common.none') }}</td>
             <td>{{ new Date(tx.createdAt).toLocaleString() }}</td>
           </tr>
-          <tr v-if="!transactions.length"><td colspan="4">No transactions yet.</td></tr>
+          <tr v-if="!transactions.length"><td colspan="4">{{ t('admin.customers.noTransactions') }}</td></tr>
         </tbody>
       </table>
     </div>

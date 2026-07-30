@@ -1,0 +1,47 @@
+export default {
+  brand: 'Packeta',
+  footer: 'Secured by Packeta IPG · Sandbox payment gateway — no real funds move outside Packeta wallets.',
+  heading: 'Secure Payment',
+  subheading: 'Complete your purchase safely through Packeta IPG.',
+  expired: 'Expired',
+  expiresIn: 'Expires in {time}',
+  loading: 'Loading…',
+  expiredMessage: 'This payment has expired. Ask the merchant for a new link.',
+  phone: {
+    prompt: 'Enter your phone number to identify yourself and pick a wallet to pay from.',
+    placeholder: '+15551234567',
+    captchaPrefix: 'Quick check: {question}',
+    answerPlaceholder: 'Answer',
+    sendCode: 'Send code',
+  },
+  otp: {
+    prompt: 'Enter the code sent to {phone}.',
+    devHint: 'Sandbox code (no real SMS sent): {code}',
+    verify: 'Verify',
+    resend: 'Resend code',
+  },
+  wallet: {
+    prompt: 'Choose which wallet to pay from.',
+    none: 'You have no wallet eligible for this purchase.',
+    continue: 'Continue',
+  },
+  redirecting: {
+    message: 'Redirecting you back to the merchant in {seconds}s…',
+    continueNow: 'Continue now',
+  },
+  pay: {
+    confirm: 'Confirm Payment',
+    cancel: 'Cancel',
+    authorized: 'Payment authorized — returning to merchant…',
+    verified: 'Payment already completed.',
+    canceled: 'Payment was canceled.',
+    expired: 'This payment link has expired.',
+  },
+  errors: {
+    paymentNotFound: 'Payment not found',
+    actionFailed: 'Action failed',
+    sendCodeFailed: 'Failed to send code',
+    invalidCode: 'Invalid or expired code',
+    walletSelectFailed: 'Failed to select wallet',
+  },
+};

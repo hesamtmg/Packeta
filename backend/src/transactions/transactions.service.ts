@@ -400,11 +400,12 @@ export class TransactionsService {
     amount: number,
     currencyCode: string,
     idempotencyKey: string,
+    language?: string,
   ): Promise<PurchaseInitiateResult> {
     return this.run(
       'purchase_charge',
       merchantUserId,
-      { amount, currencyCode },
+      { amount, currencyCode, language },
       idempotencyKey,
       async (manager) => {
         const currency = await this.currenciesService.findByCode(currencyCode);
@@ -433,6 +434,7 @@ export class TransactionsService {
           amount: amount.toString(),
           idempotencyKey,
           expiresAt,
+          language: language ?? 'en',
         });
         await manager.save(transaction);
 

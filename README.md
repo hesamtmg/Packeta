@@ -100,6 +100,15 @@ A multi-wallet app, plus a standalone sandbox payment gateway (IPG) it settles m
   straight to the merchant's callback URL — they land on a redirect-confirmation interstitial showing the
   destination and a short countdown, with a "Continue now" button to skip the wait, so the handoff can
   actually be inspected instead of happening instantly.
+- **Localization (English + Farsi)**: both `frontend` and `ipg-frontend` are localized with `vue-i18n`, each
+  with its own `en`/`fa` message files under `src/i18n/`. A language switcher (persisted to `localStorage`)
+  is available on every customer and admin page; switching to Farsi flips `<html dir>` to `rtl` as well as
+  swapping text, since Persian reads right-to-left — Vue's flex-based layouts mirror automatically. The IPG
+  pay page doesn't have its own login/session to remember a preference from, so it's driven differently: a
+  merchant creating a charge (`POST /transactions/purchase/charge`) can pass an optional `language: 'en' | 'fa'`
+  field, stored on the `PURCHASE` transaction and returned by the enriched
+  `GET /purchase-gateway/charge/:authority/status` endpoint, so the pay page auto-selects the right language
+  and direction before the customer sees anything — with a manual toggle in its nav bar as a fallback/override.
 - **Idempotency**: every deposit/withdraw/transfer call requires an `Idempotency-Key` header. The key is
   claimed (inserted `IN_PROGRESS`) in the same DB transaction as the wallet mutation, using the key's unique
   constraint (and a savepoint, so a conflicting insert doesn't abort the rest of the transaction) to

@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import { apiRequest, ApiError } from '../api/client';
 import { packetaRequest } from '../api/packetaClient';
 import { formatAmount, type CurrencyInfo } from '../utils/currency';
+import { setLocale } from '../i18n';
 
 interface PaymentInfo {
   merchantName: string;
@@ -17,6 +19,7 @@ interface ChargeStatus {
   merchantName: string;
   displayAmount: string;
   expiresAt: string | null;
+  language: string;
 }
 
 interface EligibleWallet {
@@ -31,6 +34,11 @@ interface EligibleWallet {
 
 const route = useRoute();
 const authority = route.params.authority as string;
+const { t, locale } = useI18n();
+
+function toggleLocale() {
+  setLocale(locale.value === 'fa' ? 'en' : 'fa');
+}
 
 // A charge-based purchase (merchant only named an amount) has no wallet
 // assigned yet, so the customer identifies themselves here first. A
@@ -88,15 +96,15 @@ const statusMessage = computed(() => {
   if (!info.value) return '';
   switch (info.value.status) {
     case 'AUTHORIZED':
-      return 'Payment authorized — returning to merchant…';
+      return t('pay.authorized');
     case 'VERIFIED':
-      return 'Payment already completed.';
+      return t('pay.verified');
     case 'CANCELED':
-      return 'Payment was canceled.';
+      return t('pay.canceled');
     case 'EXPIRED':
-      return 'This payment link has expired.';
+      return t('pay.expired');
     default:
-      return isExpired.value ? 'This payment link has expired.' : '';
+      return isExpired.value ? t('pay.expired') : '';
   }
 });
 
@@ -117,7 +125,7 @@ async function loadPaymentInfo() {
   try {
     info.value = await apiRequest<PaymentInfo>(`/payments/${authority}`);
   } catch (err) {
-    loadError.value = err instanceof ApiError ? err.message : 'Payment not found';
+    loadError.value = err instanceof ApiError ? err.message : t('errors.paymentNotFound');
   }
 }
 
@@ -130,7 +138,7 @@ async function act(action: 'confirm' | 'cancel') {
     );
     enterRedirectStep(result.redirectUrl);
   } catch (err) {
-    loadError.value = err instanceof ApiError ? err.message : 'Action failed';
+    loadError.value = err instanceof ApiError ? err.message : t('errors.actionFailed');
     await loadPaymentInfo();
   } finally {
     busy.value = false;
@@ -187,7 +195,7 @@ async function onRequestOtp() {
     otpDigits.value = ['', '', '', '', '', ''];
     step.value = 'otp';
   } catch (err) {
-    gatewayError.value = err instanceof ApiError ? err.message : 'Failed to send code';
+    gatewayError.value = err instanceof ApiError ? err.message : t('errors.sendCodeFailed');
     await loadCaptcha();
   } finally {
     gatewayBusy.value = false;
@@ -247,7 +255,7 @@ async function onVerifyOtp() {
     selectedWalletId.value = '';
     step.value = 'wallet';
   } catch (err) {
-    gatewayError.value = err instanceof ApiError ? err.message : 'Invalid or expired code';
+    gatewayError.value = err instanceof ApiError ? err.message : t('errors.invalidCode');
   } finally {
     gatewayBusy.value = false;
   }
@@ -275,7 +283,7 @@ async function onContinueWithWallet() {
     });
     await enterPayStep();
   } catch (err) {
-    gatewayError.value = err instanceof ApiError ? err.message : 'Failed to select wallet';
+    gatewayError.value = err instanceof ApiError ? err.message : t('errors.walletSelectFailed');
   } finally {
     gatewayBusy.value = false;
   }
@@ -292,6 +300,7 @@ onMounted(async () => {
       `/purchase-gateway/charge/${authority}/status`,
     );
     chargeInfo.value = status;
+    setLocale(status.language === 'fa' ? 'fa' : 'en');
     if (status.needsWalletSelection) {
       await goToPhoneStep();
     } else {
@@ -319,25 +328,28 @@ onUnmounted(() => {
     <header class="nav">
       <div class="nav-brand">
         <span class="logo-mark">P</span>
-        <span class="logo-text">Packeta</span>
+        <span class="logo-text">{{ t('brand') }}</span>
       </div>
-      <div
-        v-if="secondsLeft !== null && step !== 'redirecting' && step !== 'loading'"
-        class="timer-chip"
-        :class="{ expiring: secondsLeft < 60 }"
-      >
-        <svg class="timer-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <circle cx="12" cy="13" r="8" stroke="currentColor" stroke-width="2" />
-          <path d="M12 9v4l2.5 2.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-          <path d="M10 2h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-        </svg>
-        <span>{{ isExpired ? 'Expired' : countdownLabel }}</span>
+      <div class="nav-actions">
+        <button type="button" class="lang-toggle" @click="toggleLocale">{{ locale === 'fa' ? 'EN' : 'فارسی' }}</button>
+        <div
+          v-if="secondsLeft !== null && step !== 'redirecting' && step !== 'loading'"
+          class="timer-chip"
+          :class="{ expiring: secondsLeft < 60 }"
+        >
+          <svg class="timer-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="13" r="8" stroke="currentColor" stroke-width="2" />
+            <path d="M12 9v4l2.5 2.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            <path d="M10 2h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          </svg>
+          <span>{{ isExpired ? t('expired') : countdownLabel }}</span>
+        </div>
       </div>
     </header>
 
     <main class="page">
-      <h1 class="page-heading">Secure Payment</h1>
-      <p class="page-subheading">Complete your purchase safely through Packeta IPG.</p>
+      <h1 class="page-heading">{{ t('heading') }}</h1>
+      <p class="page-subheading">{{ t('subheading') }}</p>
 
       <div class="card">
         <template v-if="chargeInfo && step !== 'loading'">
@@ -348,29 +360,29 @@ onUnmounted(() => {
         </template>
 
         <template v-if="step === 'loading'">
-          <p class="status">Loading…</p>
+          <p class="status">{{ t('loading') }}</p>
         </template>
 
         <template v-else-if="isExpired && step !== 'redirecting'">
-          <p class="error">This payment has expired. Ask the merchant for a new link.</p>
+          <p class="error">{{ t('expiredMessage') }}</p>
         </template>
 
         <template v-else-if="step === 'phone'">
-          <p class="status">Enter your phone number to identify yourself and pick a wallet to pay from.</p>
+          <p class="status">{{ t('phone.prompt') }}</p>
           <form class="gateway-form" @submit.prevent="onRequestOtp">
-            <input v-model="phoneNumber" type="tel" placeholder="+15551234567" required />
+            <input v-model="phoneNumber" type="tel" :placeholder="t('phone.placeholder')" required />
             <label v-if="captchaQuestion" class="captcha-label">
-              Quick check: {{ captchaQuestion }}
-              <input v-model="captchaAnswer" type="text" inputmode="numeric" placeholder="Answer" required />
+              {{ t('phone.captchaPrefix', { question: captchaQuestion }) }}
+              <input v-model="captchaAnswer" type="text" inputmode="numeric" :placeholder="t('phone.answerPlaceholder')" required />
             </label>
-            <button class="confirm" type="submit" :disabled="gatewayBusy">Send code</button>
+            <button class="confirm" type="submit" :disabled="gatewayBusy">{{ t('phone.sendCode') }}</button>
           </form>
           <p v-if="gatewayError" class="error">{{ gatewayError }}</p>
         </template>
 
         <template v-else-if="step === 'otp'">
-          <p class="status">Enter the code sent to {{ phoneNumber }}.</p>
-          <p v-if="devCodeHint" class="dev-hint">Sandbox code (no real SMS sent): {{ devCodeHint }}</p>
+          <p class="status">{{ t('otp.prompt', { phone: phoneNumber }) }}</p>
+          <p v-if="devCodeHint" class="dev-hint">{{ t('otp.devHint', { code: devCodeHint }) }}</p>
           <div class="otp-boxes" @paste="onOtpPaste">
             <input
               v-for="(d, i) in otpDigits"
@@ -386,13 +398,13 @@ onUnmounted(() => {
               @keydown="onOtpKeydown(i, $event)"
             />
           </div>
-          <button class="confirm" :disabled="gatewayBusy || otpCode.length < 6" @click="onVerifyOtp">Verify</button>
-          <button class="link-btn" :disabled="gatewayBusy" @click="onRequestOtp">Resend code</button>
+          <button class="confirm" :disabled="gatewayBusy || otpCode.length < 6" @click="onVerifyOtp">{{ t('otp.verify') }}</button>
+          <button class="link-btn" :disabled="gatewayBusy" @click="onRequestOtp">{{ t('otp.resend') }}</button>
           <p v-if="gatewayError" class="error">{{ gatewayError }}</p>
         </template>
 
         <template v-else-if="step === 'wallet'">
-          <p class="status">Choose which wallet to pay from.</p>
+          <p class="status">{{ t('wallet.prompt') }}</p>
           <div v-if="eligibleWallets.length" class="carousel-wrap">
             <button class="carousel-nav" type="button" @click="scrollCarousel(-1)">‹</button>
             <div ref="carousel" class="carousel">
@@ -411,22 +423,22 @@ onUnmounted(() => {
             </div>
             <button class="carousel-nav" type="button" @click="scrollCarousel(1)">›</button>
           </div>
-          <p v-else class="status">You have no wallet eligible for this purchase.</p>
+          <p v-else class="status">{{ t('wallet.none') }}</p>
           <button
             v-if="eligibleWallets.length"
             class="confirm"
             :disabled="gatewayBusy || !selectedWalletId"
             @click="onContinueWithWallet"
           >
-            Continue
+            {{ t('wallet.continue') }}
           </button>
           <p v-if="gatewayError" class="error">{{ gatewayError }}</p>
         </template>
 
         <template v-else-if="step === 'redirecting'">
-          <p class="status">Redirecting you back to the merchant in {{ redirectSecondsLeft }}s…</p>
+          <p class="status">{{ t('redirecting.message', { seconds: redirectSecondsLeft }) }}</p>
           <p class="redirect-url">{{ redirectUrl }}</p>
-          <button class="confirm" @click="goToCallbackNow">Continue now</button>
+          <button class="confirm" @click="goToCallbackNow">{{ t('redirecting.continueNow') }}</button>
         </template>
 
         <template v-else>
@@ -437,21 +449,21 @@ onUnmounted(() => {
 
             <div v-if="isActionable" class="actions">
               <button class="confirm" :disabled="busy" @click="act('confirm')">
-                Confirm Payment
+                {{ t('pay.confirm') }}
               </button>
               <button class="cancel" :disabled="busy" @click="act('cancel')">
-                Cancel
+                {{ t('pay.cancel') }}
               </button>
             </div>
           </template>
 
-          <p v-else class="status">Loading…</p>
+          <p v-else class="status">{{ t('loading') }}</p>
         </template>
       </div>
     </main>
 
     <footer class="site-footer">
-      <p>Secured by Packeta IPG &middot; Sandbox payment gateway — no real funds move outside Packeta wallets.</p>
+      <p>{{ t('footer') }}</p>
     </footer>
   </div>
 </template>
@@ -529,6 +541,21 @@ onUnmounted(() => {
   font-weight: 700;
   font-size: 1.05rem;
   color: #1c1b3a;
+}
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.lang-toggle {
+  padding: 0.4rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid #e3e5f2;
+  background: #fff;
+  color: #4b39ef;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
 }
 .timer-chip {
   display: flex;

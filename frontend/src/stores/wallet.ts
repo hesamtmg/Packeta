@@ -95,12 +95,12 @@ export const useWalletStore = defineStore('wallet', {
         },
       );
     },
-    async createCharge(amount: number, currencyCode: string) {
+    async createCharge(amount: number, currencyCode: string, language: string) {
       return apiRequest<{ transactionId: string; redirectUrl: string; expiresAt: string }>(
         '/transactions/purchase/charge',
         {
           method: 'POST',
-          body: { amount, currencyCode },
+          body: { amount, currencyCode, language },
           idempotent: true,
         },
       );

@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { apiRequest, ApiError } from '../api/client';
+import LanguageSwitcher from '../components/LanguageSwitcher.vue';
 import '../styles/admin-theme.css';
 
 const email = ref('');
@@ -12,6 +14,7 @@ const loading = ref(false);
 
 const auth = useAuthStore();
 const router = useRouter();
+const { t } = useI18n();
 
 async function onSubmit() {
   error.value = '';
@@ -27,7 +30,7 @@ async function onSubmit() {
     auth.setEmail(me.email);
     router.push({ name: 'dashboard' });
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : 'Signup failed';
+    error.value = err instanceof ApiError ? err.message : t('auth.signup.error');
   } finally {
     loading.value = false;
   }
@@ -36,22 +39,23 @@ async function onSubmit() {
 
 <template>
   <div class="admin-theme auth-theme">
+    <LanguageSwitcher class="lang-corner" />
     <div class="auth-page">
       <form class="auth-form admin-card" @submit.prevent="onSubmit">
         <div class="auth-logo">P</div>
-        <h1>Create your account</h1>
-        <p class="auth-sub">Start managing your wallets on Packeta</p>
+        <h1>{{ t('auth.signup.title') }}</h1>
+        <p class="auth-sub">{{ t('auth.signup.subtitle') }}</p>
         <label>
-          Email
+          {{ t('auth.signup.email') }}
           <input v-model="email" type="email" class="admin-input" required />
         </label>
         <label>
-          Password (min 8 characters)
+          {{ t('auth.signup.password') }}
           <input v-model="password" type="password" class="admin-input" minlength="8" required />
         </label>
         <p v-if="error" class="admin-error">{{ error }}</p>
-        <button type="submit" class="admin-btn admin-btn-primary" :disabled="loading">Create account</button>
-        <router-link :to="{ name: 'login' }" class="auth-link">Already have an account? Log in</router-link>
+        <button type="submit" class="admin-btn admin-btn-primary" :disabled="loading">{{ t('auth.signup.submit') }}</button>
+        <router-link :to="{ name: 'login' }" class="auth-link">{{ t('auth.signup.haveAccount') }}</router-link>
       </form>
     </div>
   </div>
@@ -60,6 +64,13 @@ async function onSubmit() {
 <style scoped>
 .auth-theme {
   padding: 0;
+  position: relative;
+}
+.lang-corner {
+  position: absolute;
+  top: 16px;
+  inset-inline-end: 16px;
+  z-index: 1;
 }
 .auth-page {
   display: flex;

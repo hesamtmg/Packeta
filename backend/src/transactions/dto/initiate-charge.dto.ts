@@ -1,4 +1,4 @@
-import { IsInt, IsString, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
 
 // amount is expressed in minor units (e.g. cents) as a positive integer.
 // No customer or wallet is chosen yet — that happens at the IPG, after the
@@ -12,4 +12,11 @@ export class InitiateChargeDto {
 
   @IsString()
   currencyCode: string;
+
+  // Which language the IPG pay page should render in for the customer
+  // completing this specific charge — the merchant knows their customer,
+  // the IPG itself has no session to guess from. Defaults to English.
+  @IsOptional()
+  @IsIn(['en', 'fa'])
+  language?: 'en' | 'fa';
 }
