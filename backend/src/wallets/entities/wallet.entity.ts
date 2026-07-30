@@ -54,6 +54,22 @@ export class Wallet {
   @Column({ type: 'int', nullable: true })
   purchaseTimeoutSeconds: number | null;
 
+  // A closed marketplace: if set (non-empty), this wallet may only transfer
+  // to or purchase from/be purchased from a counterparty whose email is in
+  // this list — see WalletsService.isCounterpartyAllowed for the exact
+  // "either side's own list is enough" rule. Null/empty means unrestricted
+  // (today's default behavior).
+  @Column({ type: 'varchar', length: 255, array: true, nullable: true })
+  restrictedCounterparties: string[] | null;
+
+  // Set once a zero-balance wallet is closed (soft-delete — a wallet with
+  // any transaction history can never be hard-deleted, since transactions
+  // reference it by FK and are themselves permanent). A closed wallet stays
+  // visible for its history but is excluded from every money-movement path:
+  // it can't send/receive deposits, withdrawals, transfers, or purchases.
+  @Column({ type: 'timestamptz', nullable: true })
+  closedAt: Date | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

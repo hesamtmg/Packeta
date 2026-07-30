@@ -76,7 +76,10 @@ export class TransactionsService {
       idempotencyKey,
       async (manager) => {
         // Ownership check; deposits are allowed on every wallet type.
-        await this.walletsService.getById(userId, walletId);
+        const walletRef = await this.walletsService.getById(userId, walletId);
+        if (walletRef.closedAt) {
+          throw new BadRequestException('This wallet is closed');
+        }
 
         const wallet = await this.walletsService.lockById(manager, walletId);
         const newBalance = (BigInt(wallet.balance) + BigInt(amount)).toString();
@@ -114,6 +117,9 @@ export class TransactionsService {
       idempotencyKey,
       async (manager) => {
         const walletRef = await this.walletsService.getById(userId, walletId);
+        if (walletRef.closedAt) {
+          throw new BadRequestException('This wallet is closed');
+        }
         if (!walletRef.walletType.allowWithdraw) {
           throw new ForbiddenException(
             `${walletRef.walletType.name} wallets do not support withdrawals`,
@@ -168,12 +174,16 @@ export class TransactionsService {
           userId,
           fromWalletId,
         );
+        if (fromWalletRef.closedAt) {
+          throw new BadRequestException('This wallet is closed');
+        }
         if (!fromWalletRef.walletType.allowP2pOut) {
           throw new ForbiddenException(
             `${fromWalletRef.walletType.name} wallets cannot send transfers`,
           );
         }
 
+        const sender = await manager.findOne(User, { where: { id: userId } });
         const recipient = await manager.findOne(User, {
           where: { email: toEmail },
         });
@@ -192,6 +202,18 @@ export class TransactionsService {
         if (!toWalletRef) {
           throw new NotFoundException(
             `Recipient has no ${fromWalletRef.walletType.currency.code} wallet eligible to receive this transfer`,
+          );
+        }
+        if (
+          !this.walletsService.isCounterpartyAllowed(
+            fromWalletRef.restrictedCounterparties,
+            toEmail,
+            toWalletRef.restrictedCounterparties,
+            sender!.email,
+          )
+        ) {
+          throw new ForbiddenException(
+            'This transfer is not allowed between these two wallets',
           );
         }
 
@@ -263,6 +285,9 @@ export class TransactionsService {
       idempotencyKey,
       async (manager) => {
         const walletRef = await this.walletsService.getByIdUnscoped(walletId);
+        if (walletRef.closedAt) {
+          throw new BadRequestException('This wallet is closed');
+        }
         const floor = walletRef.walletType.allowNegativeBalance
           ? -BigInt(walletRef.walletType.creditLimit ?? '0')
           : 0n;
@@ -321,12 +346,18 @@ export class TransactionsService {
           userId,
           fromWalletId,
         );
+        if (fromWalletRef.closedAt) {
+          throw new BadRequestException('This wallet is closed');
+        }
         if (!fromWalletRef.walletType.allowPurchaseOut) {
           throw new ForbiddenException(
             `${fromWalletRef.walletType.name} wallets cannot make purchases`,
           );
         }
 
+        const customer = await manager.findOne(User, {
+          where: { id: userId },
+        });
         const merchant = await manager.findOne(User, {
           where: { email: toEmail },
         });
@@ -346,6 +377,18 @@ export class TransactionsService {
         if (!toWalletRef) {
           throw new NotFoundException(
             `Merchant has no ${fromWalletRef.walletType.currency.code} wallet eligible to receive purchases`,
+          );
+        }
+        if (
+          !this.walletsService.isCounterpartyAllowed(
+            fromWalletRef.restrictedCounterparties,
+            toEmail,
+            toWalletRef.restrictedCounterparties,
+            customer!.email,
+          )
+        ) {
+          throw new ForbiddenException(
+            'This purchase is not allowed between these two wallets',
           );
         }
 
@@ -593,6 +636,14 @@ export class TransactionsService {
       }
       const fromWallet = locked.get(transaction.fromWalletId!)!;
       const toWallet = locked.get(transaction.toWalletId!)!;
+
+      if (fromWallet.closedAt || toWallet.closedAt) {
+        transaction.status = TransactionStatus.REVERSED;
+        await manager.save(transaction);
+        throw new UnprocessableEntityException(
+          'One of the wallets for this purchase was closed before it could be verified',
+        );
+      }
 
       const floor = fromWalletRef.walletType.allowNegativeBalance
         ? -BigInt(fromWalletRef.walletType.creditLimit ?? '0')

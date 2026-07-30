@@ -19,6 +19,8 @@ export function serializeWallet(
     balance: wallet.balance,
     autoWithdrawTimes: wallet.autoWithdrawTimes,
     purchaseTimeoutSeconds: wallet.purchaseTimeoutSeconds,
+    restrictedCounterparties: wallet.restrictedCounterparties,
+    closedAt: wallet.closedAt,
     settlementAccounts: settlementAccounts?.map(serializeSettlementAccount),
     walletType: {
       id: wallet.walletType.id,

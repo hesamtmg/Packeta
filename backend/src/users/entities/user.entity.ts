@@ -7,9 +7,15 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
+// SUPER_ADMIN sits above ADMIN: it can do everything a regular admin can,
+// plus the two things a regular admin can't — promote/demote other admins,
+// and manage wallet types (create/edit/delete the "laws" every wallet is
+// bound by). A regular admin still handles everything else (customers,
+// wallets, transactions, balance adjustments, reports) exactly as before.
 export enum UserRole {
   USER = 'USER',
   ADMIN = 'ADMIN',
+  SUPER_ADMIN = 'SUPER_ADMIN',
 }
 
 @Entity('users')

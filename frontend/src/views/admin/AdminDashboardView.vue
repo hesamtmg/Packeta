@@ -22,7 +22,9 @@ const error = ref('');
 const walletsById = computed(() => walletLookup(wallets.value));
 
 const customerCount = computed(() => users.value.filter((u) => u.role === 'USER').length);
-const adminCount = computed(() => users.value.filter((u) => u.role === 'ADMIN').length);
+const adminCount = computed(
+  () => users.value.filter((u) => u.role === 'ADMIN' || u.role === 'SUPER_ADMIN').length,
+);
 const walletCount = computed(() => wallets.value.length);
 const transactionCount = computed(() => transactions.value.length);
 

@@ -135,11 +135,30 @@ export class PurchaseGatewayService {
       charge.toWalletId!,
     );
     if (
+      wallet.closedAt ||
+      toWallet.closedAt ||
       !wallet.walletType.allowPurchaseOut ||
       wallet.walletType.currencyId !== toWallet.walletType.currencyId
     ) {
       throw new BadRequestException(
         'That wallet cannot be used for this purchase',
+      );
+    }
+
+    const [customer, merchant] = await Promise.all([
+      this.usersService.findById(userId),
+      this.usersService.findById(toWallet.userId),
+    ]);
+    if (
+      !this.walletsService.isCounterpartyAllowed(
+        wallet.restrictedCounterparties,
+        merchant!.email,
+        toWallet.restrictedCounterparties,
+        customer!.email,
+      )
+    ) {
+      throw new BadRequestException(
+        'This purchase is not allowed between these two wallets',
       );
     }
 

@@ -28,6 +28,13 @@ const newWalletType = ref('');
 const newWalletAutoWithdrawTimes = ref(['', '', '']);
 const newWalletPurchaseTimeoutMinutes = ref('');
 const newWalletSettlementAccounts = ref<{ iban: string; label: string; percent: string }[]>([]);
+const newWalletRestrictedCounterparties = ref('');
+
+const editingWalletId = ref<string | null>(null);
+const editRestrictedCounterparties = ref('');
+const editAutoWithdrawTimes = ref(['', '', '']);
+const editPurchaseTimeoutMinutes = ref('');
+const editSettlementAccounts = ref<{ iban: string; label: string; percent: string }[]>([]);
 const chargeSettlementSplits = ref<
   { iban: string; label: string; type: 'PERCENT' | 'FIXED'; value: string }[]
 >([]);
@@ -125,6 +132,8 @@ function badges(w: Wallet): string[] {
   if (!w.walletType.allowP2pOut && !w.walletType.allowP2pIn) {
     list.push(t('dashboard.wallets.noTransfers'));
   }
+  if (w.restrictedCounterparties?.length) list.push(t('dashboard.wallets.marketBadge'));
+  if (w.closedAt) list.push(t('dashboard.wallets.closedBadge'));
   return list;
 }
 
@@ -275,13 +284,88 @@ function removeSettlementAccountRow(index: number) {
   newWalletSettlementAccounts.value.splice(index, 1);
 }
 
+function addEditSettlementAccountRow() {
+  editSettlementAccounts.value.push({ iban: '', label: '', percent: '' });
+}
+function removeEditSettlementAccountRow(index: number) {
+  editSettlementAccounts.value.splice(index, 1);
+}
+
+function parseEmailList(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((email) => email.trim())
+    .filter((email) => email.length > 0);
+}
+
+function toggleEditWallet(w: Wallet) {
+  if (editingWalletId.value === w.id) {
+    editingWalletId.value = null;
+    return;
+  }
+  editingWalletId.value = w.id;
+  editRestrictedCounterparties.value = (w.restrictedCounterparties ?? []).join(', ');
+  editAutoWithdrawTimes.value = w.autoWithdrawTimes ? [...w.autoWithdrawTimes] : ['', '', ''];
+  editPurchaseTimeoutMinutes.value = w.purchaseTimeoutSeconds
+    ? String(Math.round(w.purchaseTimeoutSeconds / 60))
+    : '';
+  editSettlementAccounts.value = (w.settlementAccounts ?? []).map((account) => ({
+    iban: account.iban,
+    label: account.label ?? '',
+    percent: account.percent,
+  }));
+}
+
+function onSaveWalletEdit(w: Wallet) {
+  runAction(async () => {
+    const options: {
+      autoWithdrawTimes?: string[];
+      purchaseTimeoutSeconds?: number;
+      settlementAccounts?: { iban: string; label?: string; percent: number }[];
+      restrictedCounterparties?: string[];
+    } = {
+      restrictedCounterparties: parseEmailList(editRestrictedCounterparties.value),
+    };
+    if (w.walletType.supportsAutoWithdraw) {
+      const filledTimes = editAutoWithdrawTimes.value.filter((time) => time);
+      options.autoWithdrawTimes = filledTimes.length ? editAutoWithdrawTimes.value : [];
+      const filledAccounts = editSettlementAccounts.value.filter(
+        (row) => row.iban && row.percent,
+      );
+      options.settlementAccounts = filledAccounts.length
+        ? filledAccounts.map((row) => ({
+            iban: row.iban,
+            label: row.label || undefined,
+            percent: Number(row.percent),
+          }))
+        : undefined;
+    }
+    if (w.walletType.allowPurchaseIn) {
+      options.purchaseTimeoutSeconds = editPurchaseTimeoutMinutes.value
+        ? Math.round(Number(editPurchaseTimeoutMinutes.value) * 60)
+        : undefined;
+    }
+    await wallet.updateWallet(w.id, options);
+    editingWalletId.value = null;
+  });
+}
+
+function onCloseWallet(w: Wallet) {
+  runAction(() => wallet.closeWallet(w.id));
+}
+
 function onAddWallet() {
   runAction(async () => {
     const options: {
       autoWithdrawTimes?: string[];
       purchaseTimeoutSeconds?: number;
       settlementAccounts?: { iban: string; label?: string; percent: number }[];
+      restrictedCounterparties?: string[];
     } = {};
+    const restricted = parseEmailList(newWalletRestrictedCounterparties.value);
+    if (restricted.length) {
+      options.restrictedCounterparties = restricted;
+    }
     if (showAutoWithdrawFields.value) {
       options.autoWithdrawTimes = newWalletAutoWithdrawTimes.value;
       const filledAccounts = newWalletSettlementAccounts.value.filter(
@@ -305,6 +389,7 @@ function onAddWallet() {
     newWalletAutoWithdrawTimes.value = ['', '', ''];
     newWalletPurchaseTimeoutMinutes.value = '';
     newWalletSettlementAccounts.value = [];
+    newWalletRestrictedCounterparties.value = '';
   });
 }
 
@@ -489,6 +574,65 @@ function onPurchase() {
           <div class="badges">
             <span v-for="b in badges(w)" :key="b" class="admin-badge">{{ b }}</span>
           </div>
+          <div class="wallet-card-actions">
+            <button
+              type="button"
+              class="admin-btn admin-btn-ghost"
+              :disabled="!!w.closedAt"
+              @click="toggleEditWallet(w)"
+            >
+              {{ editingWalletId === w.id ? t('dashboard.wallets.cancelEdit') : t('dashboard.wallets.edit') }}
+            </button>
+            <button
+              type="button"
+              class="admin-btn admin-btn-danger"
+              :disabled="busy || !!w.closedAt || w.balance !== '0'"
+              :title="w.balance !== '0' ? t('dashboard.wallets.closeRequiresZero') : ''"
+              @click="onCloseWallet(w)"
+            >
+              {{ t('dashboard.wallets.close') }}
+            </button>
+          </div>
+
+          <form v-if="editingWalletId === w.id" class="wallet-edit-form" @submit.prevent="onSaveWalletEdit(w)">
+            <label>
+              {{ t('dashboard.wallets.marketLabel') }}
+              <input
+                v-model="editRestrictedCounterparties"
+                type="text"
+                :placeholder="t('dashboard.wallets.marketPlaceholder')"
+                class="admin-input"
+              />
+            </label>
+            <span class="hint">{{ t('dashboard.wallets.marketHint') }}</span>
+
+            <template v-if="w.walletType.supportsAutoWithdraw">
+              <span class="hint">{{ t('dashboard.wallets.autoWithdrawLabel') }}</span>
+              <input v-model="editAutoWithdrawTimes[0]" type="time" class="admin-input" />
+              <input v-model="editAutoWithdrawTimes[1]" type="time" class="admin-input" />
+              <input v-model="editAutoWithdrawTimes[2]" type="time" class="admin-input" />
+
+              <div class="settlement-rows">
+                <span class="hint">{{ t('dashboard.settlement.walletHint') }}</span>
+                <div v-for="(row, i) in editSettlementAccounts" :key="i" class="settlement-row">
+                  <input v-model="row.iban" type="text" :placeholder="t('dashboard.settlement.ibanPlaceholder')" class="admin-input" />
+                  <input v-model="row.label" type="text" :placeholder="t('dashboard.settlement.labelPlaceholder')" class="admin-input" />
+                  <input v-model="row.percent" type="number" min="0" max="100" :placeholder="t('dashboard.settlement.percentPlaceholder')" class="admin-input" />
+                  <button type="button" class="admin-btn admin-btn-ghost" @click="removeEditSettlementAccountRow(i)">{{ t('dashboard.settlement.remove') }}</button>
+                </div>
+                <button type="button" class="admin-btn admin-btn-ghost" @click="addEditSettlementAccountRow">
+                  {{ t('dashboard.settlement.addAccount') }}
+                </button>
+              </div>
+            </template>
+
+            <template v-if="w.walletType.allowPurchaseIn">
+              <span class="hint">{{ t('dashboard.wallets.verifyTimeoutLabel') }}</span>
+              <input v-model="editPurchaseTimeoutMinutes" type="number" min="1" placeholder="15" class="admin-input" />
+            </template>
+
+            <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.wallets.saveEdit') }}</button>
+          </form>
         </article>
       </div>
 
@@ -499,6 +643,17 @@ function onPurchase() {
             {{ t2.name }} ({{ t2.currency.code }})
           </option>
         </select>
+
+        <label class="market-field">
+          {{ t('dashboard.wallets.marketLabel') }}
+          <input
+            v-model="newWalletRestrictedCounterparties"
+            type="text"
+            :placeholder="t('dashboard.wallets.marketPlaceholder')"
+            class="admin-input"
+          />
+        </label>
+        <span class="hint">{{ t('dashboard.wallets.marketHint') }}</span>
 
         <template v-if="showAutoWithdrawFields">
           <span class="hint">{{ t('dashboard.wallets.autoWithdrawLabel') }}</span>
@@ -733,6 +888,26 @@ function onPurchase() {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+.wallet-card-actions {
+  display: flex;
+  gap: 8px;
+}
+.wallet-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--card-border);
+}
+.wallet-edit-form label,
+.market-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
 }
 .add-wallet {
   display: flex;

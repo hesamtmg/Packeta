@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
+  IsEmail,
   IsInt,
   IsOptional,
   IsUUID,
@@ -42,4 +43,13 @@ export class CreateWalletDto {
   @ValidateNested({ each: true })
   @Type(() => SettlementAccountDto)
   settlementAccounts?: SettlementAccountDto[];
+
+  // A closed marketplace: if set, this wallet may only transfer to, or
+  // purchase from/be purchased from, a counterparty whose email is in this
+  // list (see WalletsService.isCounterpartyAllowed). Omit or leave empty for
+  // the default, unrestricted behavior.
+  @IsOptional()
+  @ArrayMinSize(1)
+  @IsEmail({}, { each: true })
+  restrictedCounterparties?: string[];
 }

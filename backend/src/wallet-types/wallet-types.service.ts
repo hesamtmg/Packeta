@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { WalletType } from './entities/wallet-type.entity';
+import { Wallet } from '../wallets/entities/wallet.entity';
 import { CurrenciesService } from '../currencies/currencies.service';
 import { CreateWalletTypeDto } from './dto/create-wallet-type.dto';
 import { UpdateWalletTypeDto } from './dto/update-wallet-type.dto';
@@ -16,6 +17,8 @@ export class WalletTypesService {
   constructor(
     @InjectRepository(WalletType)
     private readonly walletTypesRepository: Repository<WalletType>,
+    @InjectRepository(Wallet)
+    private readonly walletsRepository: Repository<Wallet>,
     private readonly currenciesService: CurrenciesService,
   ) {}
 
@@ -108,5 +111,21 @@ export class WalletTypesService {
     }
 
     return this.walletTypesRepository.save(type);
+  }
+
+  // Hard-delete is safe here (unlike a Wallet, a WalletType has no financial
+  // history of its own) but only once nothing references it — deleting a
+  // type still in use would orphan every wallet of that type.
+  async delete(id: string): Promise<void> {
+    const type = await this.findById(id);
+    const walletCount = await this.walletsRepository.count({
+      where: { walletTypeId: type.id },
+    });
+    if (walletCount > 0) {
+      throw new ConflictException(
+        `Cannot delete "${type.name}" — ${walletCount} wallet(s) still use this type`,
+      );
+    }
+    await this.walletTypesRepository.delete(type.id);
   }
 }

@@ -90,6 +90,20 @@ export class SettlementService {
     await manager.save(rows);
   }
 
+  // Used by wallet edits: fully replaces a wallet's default split set
+  // (delete-then-recreate) rather than trying to diff/patch individual
+  // rows — simpler, and this data has no history of its own worth
+  // preserving row-by-row (unlike the transactions it eventually funds).
+  async replaceForWallet(
+    manager: EntityManager,
+    walletId: string,
+    items: SettlementAccountDto[],
+  ): Promise<void> {
+    this.validateWalletDefaults(items);
+    await manager.delete(SettlementSplit, { walletId });
+    await this.createForWallet(manager, walletId, items);
+  }
+
   async createForTransaction(
     manager: EntityManager,
     transactionId: string,

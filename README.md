@@ -140,21 +140,37 @@ A multi-wallet app, plus a standalone sandbox payment gateway (IPG) it settles m
 - **Audit log**: every auth and transaction attempt (success or failure) is written to MongoDB. Mongo is
   never authoritative for financial state — a logging failure is caught and does not affect the
   already-committed Postgres transaction.
-- **Admin panel**: users have a `role` (`USER`/`ADMIN`). `AdminGuard` re-checks the caller's role against the
-  DB on every admin request (rather than trusting a claim baked into the JWT), so revoking admin access
-  takes effect immediately. There's no UI for granting the *first* admin (that would be a
-  privilege-escalation hole); use the `promote-admin` script instead — after that, admins can promote/demote
-  other users from the panel itself. Balance adjustments are their own ledger entry (`ADJUSTMENT`) recording
-  the admin's reason and who performed it, still bounded by the wallet's own balance floor — admins can
-  correct balances, not bypass a wallet type's fundamental rules.
+- **Admin panel**: users have a `role` (`USER`/`ADMIN`/`SUPER_ADMIN`). `AdminGuard` re-checks the caller's
+  role against the DB on every admin request (rather than trusting a claim baked into the JWT), so revoking
+  admin access takes effect immediately. `SUPER_ADMIN` sits above `ADMIN`: it can do everything a regular
+  admin can, plus the two things a regular admin can't — promote/demote other admins, and create/edit/delete
+  wallet types (the "laws" every wallet is bound by). There's no UI for granting the *first* admin (that
+  would be a privilege-escalation hole); use the `promote-admin` script instead (`npm run promote-admin --
+  <email> [ADMIN|SUPER_ADMIN]`) — after that, super-admins can promote/demote other users from the panel
+  itself. Balance adjustments are their own ledger entry (`ADJUSTMENT`) recording the admin's reason and who
+  performed it, still bounded by the wallet's own balance floor — admins can correct balances, not bypass a
+  wallet type's fundamental rules.
 
   The panel (`/admin`) is a dark dashboard-style UI with a sidebar: **Dashboard** (KPI tiles, a signups
   chart, latest transaction, recent activity table), **Transactions** (every transaction system-wide,
   filterable by type), **Wallets** (every wallet system-wide, searchable, with inline balance adjustment),
   **Customers** (`role: USER` accounts — drill into one to see its wallets, adjust balances, and view its
-  history), **Admins** (promote a customer / demote an admin — you can't demote yourself), **Wallet Types**
-  (the existing type/currency rule editor), and **Reports** (30-day activity chart, breakdowns by
-  transaction type and wallet type, most-active customers).
+  history), **Admins** (promote a customer to admin or super admin / demote an admin — you can't demote
+  yourself; regular admins get a read-only view), **Wallet Types** (the type/currency rule editor —
+  create/edit/delete is super-admin-only, regular admins get a read-only view), and **Reports** (30-day
+  activity chart, breakdowns by transaction type and wallet type, most-active customers).
+- **Market restrictions ("closed marketplace")**: any wallet can optionally carry a
+  `restrictedCounterparties` list of emails. If set, that wallet may only send/receive transfers and
+  purchases with those counterparties — unless the *other* wallet's own list allows the pairing back
+  (`WalletsService.isCounterpartyAllowed`: either side's own list is enough, so setting a restriction never
+  blocks a pairing the other side already opted into). An unrestricted wallet imposes no restriction of its
+  own. Enforced at every money-movement entry point that resolves a counterparty: `transfer`,
+  `initiatePurchase`, and the purchase gateway's `attach-wallet` step.
+- **Wallet edit/close**: `PATCH /wallets/:id` updates a wallet's auto-withdraw schedule, purchase timeout,
+  settlement accounts, and market restriction in place. `DELETE /wallets/:id` soft-closes a wallet (sets
+  `closedAt`) rather than deleting the row — a wallet with any transaction history can't be hard-deleted
+  (transactions reference it by a permanent FK), and closing is only allowed at a zero balance. A closed
+  wallet stays visible for its history but is excluded from every deposit/withdraw/transfer/purchase path.
 
 ## Running locally
 
@@ -229,7 +245,9 @@ All endpoints are JSON. Authenticated endpoints require `Authorization: Bearer <
 | GET    | `/wallet-types`           | ✅   | list of wallet types (each denominated in one currency) and the rules ("laws") each one enforces |
 | GET    | `/wallets`                | ✅   | list the current user's wallets                                     |
 | GET    | `/wallets/:id`            | ✅   | a specific wallet (must belong to the caller)                       |
-| POST   | `/wallets`                | ✅   | `{ walletTypeId, autoWithdrawTimes?, purchaseTimeoutSeconds? }` → create another wallet of that type/currency (the last two only apply to types that support them) |
+| POST   | `/wallets`                | ✅   | `{ walletTypeId, autoWithdrawTimes?, purchaseTimeoutSeconds?, settlementAccounts?, restrictedCounterparties? }` → create another wallet of that type/currency (auto-withdraw/purchase-timeout/settlement fields only apply to types that support them) |
+| PATCH  | `/wallets/:id`            | ✅   | partial update of a wallet's `autoWithdrawTimes`, `purchaseTimeoutSeconds`, `settlementAccounts`, and `restrictedCounterparties` (a "closed marketplace" list — see below) |
+| DELETE | `/wallets/:id`            | ✅   | soft-closes a wallet (sets `closedAt`); only allowed at a zero balance — a wallet with transaction history can never be hard-deleted |
 | POST   | `/transactions/deposit`   | ✅   | `{ walletId, amount }` (minor units) + `Idempotency-Key` header      |
 | POST   | `/transactions/withdraw`  | ✅   | `{ walletId, amount }` + `Idempotency-Key` header (blocked if the wallet type disallows withdrawals) |
 | POST   | `/transactions/transfer`  | ✅   | `{ fromWalletId, toEmail, amount }` + `Idempotency-Key` header (both wallets' types must allow peer-to-peer) |
@@ -242,11 +260,12 @@ All endpoints are JSON. Authenticated endpoints require `Authorization: Bearer <
 | GET    | `/transactions/:id`       | ✅   | full detail for one transaction (type, amount, from/to wallet + currency, note, idempotency key, purchase `status`/`expiresAt`) — must touch one of the caller's own wallets |
 | GET    | `/users/me`               | ✅   | the current user's id, email, role, and phone number                |
 | PATCH  | `/users/me/phone-number`  | ✅   | `{ phoneNumber }` → set/update the phone number used for the purchase gateway's OTP step |
-| POST   | `/wallet-types`           | 🔒 admin | `{ code, name, currencyCode, allowNegativeBalance, creditLimit?, allowWithdraw, allowP2pOut, allowP2pIn, supportsAutoWithdraw?, allowPurchaseOut?, allowPurchaseIn? }` → create a new wallet type |
-| PATCH  | `/wallet-types/:id`       | 🔒 admin | partial update of a wallet type's rules (currency can't be changed after creation) |
+| POST   | `/wallet-types`           | 🔒 super admin | `{ code, name, currencyCode, allowNegativeBalance, creditLimit?, allowWithdraw, allowP2pOut, allowP2pIn, supportsAutoWithdraw?, allowPurchaseOut?, allowPurchaseIn? }` → create a new wallet type |
+| PATCH  | `/wallet-types/:id`       | 🔒 super admin | partial update of a wallet type's rules (currency can't be changed after creation) |
+| DELETE | `/wallet-types/:id`       | 🔒 super admin | delete a wallet type — rejected with 409 if any wallet still uses it |
 | GET    | `/admin/users`            | 🔒 admin | list all users                                                       |
 | GET    | `/admin/users/:id`        | 🔒 admin | a user's profile + all of their wallets                              |
-| PATCH  | `/admin/users/:id/role`   | 🔒 admin | `{ role: "USER" \| "ADMIN" }` → promote/demote (can't target yourself) |
+| PATCH  | `/admin/users/:id/role`   | 🔒 super admin | `{ role: "USER" \| "ADMIN" \| "SUPER_ADMIN" }` → promote/demote (can't target yourself) |
 | GET    | `/admin/users/:id/transactions` | 🔒 admin | that user's full transaction history                           |
 | GET    | `/admin/wallets`          | 🔒 admin | every wallet system-wide, each with its owner's email                |
 | GET    | `/admin/transactions`     | 🔒 admin | every transaction system-wide, most recent first (`?limit=`)         |

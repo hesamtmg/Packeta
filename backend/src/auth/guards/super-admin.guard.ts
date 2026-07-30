@@ -7,21 +7,19 @@ import {
 import { UsersService } from '../../users/users.service';
 import { UserRole } from '../../users/entities/user.entity';
 
-// Must run after JwtAuthGuard (req.user populated). Re-fetches the user's
-// current role from the DB on every request rather than trusting a role
-// claim baked into the JWT, so revoking admin access takes effect
-// immediately instead of waiting for the token to expire.
+// Must run after JwtAuthGuard, and typically alongside/after AdminGuard.
+// Gates the two things a regular admin can't do: promote/demote other
+// admins, and manage wallet types. Re-fetches from the DB every request,
+// same reasoning as AdminGuard — a demotion takes effect immediately.
 @Injectable()
-export class AdminGuard implements CanActivate {
+export class SuperAdminGuard implements CanActivate {
   constructor(private readonly usersService: UsersService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
     const user = await this.usersService.findById(request.user.userId);
-    const isAdmin =
-      user?.role === UserRole.ADMIN || user?.role === UserRole.SUPER_ADMIN;
-    if (!isAdmin) {
-      throw new ForbiddenException('Admin access required');
+    if (!user || user.role !== UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('Super admin access required');
     }
     return true;
   }

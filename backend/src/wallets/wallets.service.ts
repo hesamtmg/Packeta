@@ -1,7 +1,9 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
@@ -32,6 +34,7 @@ export class WalletsService {
       autoWithdrawTimes?: string[];
       purchaseTimeoutSeconds?: number;
       settlementAccounts?: SettlementAccountDto[];
+      restrictedCounterparties?: string[];
     },
   ): Promise<Wallet> {
     const wallet = manager.create(Wallet, {
@@ -40,6 +43,7 @@ export class WalletsService {
       balance: '0',
       autoWithdrawTimes: options?.autoWithdrawTimes ?? null,
       purchaseTimeoutSeconds: options?.purchaseTimeoutSeconds ?? null,
+      restrictedCounterparties: options?.restrictedCounterparties ?? null,
     });
     await manager.save(wallet);
 
@@ -54,6 +58,100 @@ export class WalletsService {
     return wallet;
   }
 
+  // Applies a partial update in place — only fields present in `options` are
+  // touched. settlementAccounts, when provided, fully replaces the wallet's
+  // existing default split (delete-then-recreate, same as at creation).
+  async updateForUser(
+    manager: EntityManager,
+    userId: string,
+    walletId: string,
+    options: {
+      autoWithdrawTimes?: string[];
+      purchaseTimeoutSeconds?: number;
+      settlementAccounts?: SettlementAccountDto[];
+      restrictedCounterparties?: string[];
+    },
+  ): Promise<Wallet> {
+    const wallet = await this.getById(userId, walletId);
+    if (wallet.closedAt) {
+      throw new BadRequestException('This wallet is closed');
+    }
+
+    const patch: Partial<Wallet> = {};
+    if (options.autoWithdrawTimes !== undefined) {
+      patch.autoWithdrawTimes = options.autoWithdrawTimes.length
+        ? options.autoWithdrawTimes
+        : null;
+    }
+    if (options.purchaseTimeoutSeconds !== undefined) {
+      patch.purchaseTimeoutSeconds = options.purchaseTimeoutSeconds;
+    }
+    if (options.restrictedCounterparties !== undefined) {
+      patch.restrictedCounterparties = options.restrictedCounterparties.length
+        ? options.restrictedCounterparties
+        : null;
+    }
+    if (Object.keys(patch).length) {
+      await manager.update(Wallet, walletId, patch);
+    }
+
+    if (options.settlementAccounts !== undefined) {
+      await this.settlementService.replaceForWallet(
+        manager,
+        walletId,
+        options.settlementAccounts,
+      );
+    }
+
+    // Read back through the same transactional manager used for the writes
+    // above — this.getById would go through the pool's own connection and,
+    // since the writes haven't committed yet, could read pre-update data.
+    const updated = await manager.findOne(Wallet, {
+      where: { id: walletId },
+      relations: WALLET_RELATIONS,
+    });
+    return updated!;
+  }
+
+  // Soft-close: a wallet with any transaction history can't be hard-deleted
+  // (transactions reference it by FK, and are themselves permanent), so
+  // "deleting" a wallet just marks it closed instead. Only allowed at a zero
+  // balance, so no funds are ever stranded.
+  async closeForUser(userId: string, walletId: string): Promise<Wallet> {
+    const wallet = await this.getById(userId, walletId);
+    if (wallet.closedAt) {
+      throw new BadRequestException('This wallet is already closed');
+    }
+    if (BigInt(wallet.balance) !== 0n) {
+      throw new UnprocessableEntityException(
+        'Withdraw or transfer out the remaining balance before closing this wallet',
+      );
+    }
+    await this.walletsRepository.update(walletId, { closedAt: new Date() });
+    return this.getById(userId, walletId);
+  }
+
+  // "Either side's own list is enough": if a wallet has no restriction list
+  // at all, it imposes no restriction of its own — but if it does, that list
+  // alone is sufficient to allow the pairing regardless of what the other
+  // side's list says (so setting a restriction never blocks a pairing the
+  // *other* side already opted into). It only blocks when at least one side
+  // has a list configured and neither list actually contains the other
+  // party's email.
+  isCounterpartyAllowed(
+    walletARestrictions: string[] | null,
+    emailB: string,
+    walletBRestrictions: string[] | null,
+    emailA: string,
+  ): boolean {
+    const aHasList = !!walletARestrictions?.length;
+    const bHasList = !!walletBRestrictions?.length;
+    if (!aHasList && !bHasList) return true;
+    if (aHasList && walletARestrictions!.includes(emailB)) return true;
+    if (bHasList && walletBRestrictions!.includes(emailA)) return true;
+    return false;
+  }
+
   // Merchant wallets whose type supports the auto-withdraw sweep and have a
   // schedule configured. Used by the scheduler to find sweep candidates.
   async listWithAutoWithdrawDue(): Promise<Wallet[]> {
@@ -64,6 +162,7 @@ export class WalletsService {
       .where('walletType.supportsAutoWithdraw = true')
       .andWhere('wallet.autoWithdrawTimes IS NOT NULL')
       .andWhere('wallet.balance <> 0')
+      .andWhere('wallet.closedAt IS NULL')
       .getMany();
   }
 
@@ -145,6 +244,7 @@ export class WalletsService {
       .where('wallet.userId = :userId', { userId })
       .andWhere('walletType.allowP2pIn = true')
       .andWhere('walletType.currencyId = :currencyId', { currencyId })
+      .andWhere('wallet.closedAt IS NULL')
       .orderBy('wallet.createdAt', 'ASC')
       .getOne();
   }
@@ -164,6 +264,7 @@ export class WalletsService {
       .where('wallet.userId = :merchantUserId', { merchantUserId })
       .andWhere('walletType.allowPurchaseIn = true')
       .andWhere('walletType.currencyId = :currencyId', { currencyId })
+      .andWhere('wallet.closedAt IS NULL')
       .orderBy('wallet.createdAt', 'ASC')
       .getOne();
   }
@@ -183,6 +284,7 @@ export class WalletsService {
       .where('wallet.userId = :userId', { userId })
       .andWhere('walletType.allowPurchaseOut = true')
       .andWhere('walletType.currencyId = :currencyId', { currencyId })
+      .andWhere('wallet.closedAt IS NULL')
       .orderBy('wallet.createdAt', 'ASC')
       .getMany();
   }

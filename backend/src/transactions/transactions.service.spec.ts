@@ -75,6 +75,7 @@ function buildService(options: {
       const wallet = walletsById.get(id)!;
       return wallet;
     }),
+    isCounterpartyAllowed: jest.fn(() => true),
   };
 
   const idempotencyService = {

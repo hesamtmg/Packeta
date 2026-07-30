@@ -29,6 +29,8 @@ export interface Wallet {
   balance: string;
   autoWithdrawTimes: string[] | null;
   purchaseTimeoutSeconds: number | null;
+  restrictedCounterparties: string[] | null;
+  closedAt: string | null;
   settlementAccounts?: SettlementAccount[];
   walletType: WalletType;
   createdAt: string;
@@ -78,12 +80,32 @@ export const useWalletStore = defineStore('wallet', {
         autoWithdrawTimes?: string[];
         purchaseTimeoutSeconds?: number;
         settlementAccounts?: SettlementAccountInput[];
+        restrictedCounterparties?: string[];
       },
     ) {
       await apiRequest('/wallets', {
         method: 'POST',
         body: { walletTypeId, ...options },
       });
+      await this.fetchWallets();
+    },
+    async updateWallet(
+      walletId: string,
+      options: {
+        autoWithdrawTimes?: string[];
+        purchaseTimeoutSeconds?: number;
+        settlementAccounts?: SettlementAccountInput[];
+        restrictedCounterparties?: string[];
+      },
+    ) {
+      await apiRequest(`/wallets/${walletId}`, {
+        method: 'PATCH',
+        body: options,
+      });
+      await this.fetchWallets();
+    },
+    async closeWallet(walletId: string) {
+      await apiRequest(`/wallets/${walletId}`, { method: 'DELETE' });
       await this.fetchWallets();
     },
     async deposit(walletId: string, amount: number) {
