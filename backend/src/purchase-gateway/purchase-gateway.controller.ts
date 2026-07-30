@@ -18,11 +18,18 @@ export class PurchaseGatewayController {
     return this.purchaseGatewayService.getStatus(authority);
   }
 
+  @Get('captcha')
+  requestCaptcha() {
+    return this.purchaseGatewayService.requestCaptcha();
+  }
+
   @Post('otp/request')
   requestOtp(@Body() dto: RequestOtpDto) {
     return this.purchaseGatewayService.requestOtp(
       dto.authority,
       dto.phoneNumber,
+      dto.captchaId,
+      dto.captchaAnswer,
     );
   }
 

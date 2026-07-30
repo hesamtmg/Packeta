@@ -87,6 +87,19 @@ A multi-wallet app, plus a standalone sandbox payment gateway (IPG) it settles m
   comes from each step's own scoping: OTPs are one-time-use and tied to one specific charge, `attach-wallet`
   requires a session token that only exists after a successful OTP check, `verify` only ever moves money into
   the wallet that step already fixed, and `cancel` only ever touches a still-`PENDING` purchase.
+- **IPG pay page UX**: `GET /purchase-gateway/charge/:authority/status` returns everything the pay page's
+  header needs (`merchantName`, `displayAmount`, `expiresAt`), so a merchant-info banner with a live countdown
+  renders identically across every step — phone, OTP, wallet selection, and the final confirm screen — not
+  just at the end. The countdown reflects the merchant wallet's own configured `purchaseTimeoutSeconds`, so a
+  shorter or longer timeout set at wallet creation is immediately visible to the customer, and turns red under
+  a minute left. The phone-number step is guarded by a self-hosted math CAPTCHA (`GET /purchase-gateway/captcha`,
+  answer required by `otp/request`) — an in-memory, one-time-use challenge with no external provider, meant as
+  a lightweight deterrent against scripted OTP-request abuse rather than a hardened bot defense. Once OTP
+  verification returns the customer's eligible wallets, they're presented as a horizontally-swipeable card
+  carousel instead of a plain list. After confirming or canceling on the IPG, the customer no longer jumps
+  straight to the merchant's callback URL — they land on a redirect-confirmation interstitial showing the
+  destination and a short countdown, with a "Continue now" button to skip the wait, so the handoff can
+  actually be inspected instead of happening instantly.
 - **Idempotency**: every deposit/withdraw/transfer call requires an `Idempotency-Key` header. The key is
   claimed (inserted `IN_PROGRESS`) in the same DB transaction as the wallet mutation, using the key's unique
   constraint (and a savepoint, so a conflicting insert doesn't abort the rest of the transaction) to

@@ -9,4 +9,10 @@ export class RequestOtpDto {
     message: 'phoneNumber must be a valid phone number (e.g. +15551234567)',
   })
   phoneNumber: string;
+
+  @IsString()
+  captchaId: string;
+
+  @IsString()
+  captchaAnswer: string;
 }
