@@ -16,10 +16,8 @@ onMounted(async () => {
 
   try {
     if (ipgStatus === 'canceled') {
-      await apiRequest(`/transactions/${transactionId}/reverse`, {
+      await apiRequest(`/transactions/purchase/${transactionId}/cancel`, {
         method: 'POST',
-        body: { reason: 'Customer canceled on the payment page' },
-        idempotent: true,
       });
       status.value = 'canceled';
       message.value = 'Payment was canceled.';

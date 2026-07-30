@@ -84,10 +84,13 @@ function buildService(options: {
   const loggingService = { log: jest.fn().mockResolvedValue(undefined) };
 
   const ipgClientService = {
-    createPayment: jest
+    createPayment: jest.fn().mockResolvedValue({
+      authority: 'auth-1',
+      paymentUrl: 'http://ipg/pay/auth-1',
+    }),
+    verifyPayment: jest
       .fn()
-      .mockResolvedValue({ authority: 'auth-1', paymentUrl: 'http://ipg/pay/auth-1' }),
-    verifyPayment: jest.fn().mockResolvedValue({ success: true, refId: 'auth-1' }),
+      .mockResolvedValue({ success: true, refId: 'auth-1' }),
     ...ipgOverrides,
   };
 
@@ -125,6 +128,7 @@ function buildService(options: {
     loggingService as any,
     ipgClientService as any,
     configService as any,
+    {} as any,
     {} as any,
   );
 

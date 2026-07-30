@@ -66,6 +66,27 @@ A multi-wallet app, plus a standalone sandbox payment gateway (IPG) it settles m
   `isStarterType` on `wallet_types` controls whether a type is part of every new signup's default set (only
   the original four are); this also fixed a latent bug where any custom type created in the default currency
   was silently being granted to every new signup.
+- **Merchant-initiated checkout (phone + OTP, no Packeta session required)**: `POST /transactions/purchase/charge`
+  lets a merchant create a payment link naming only an amount and currency — no customer or wallet is chosen
+  yet, unlike `purchase/initiate`. The merchant hands that link to a customer who may have no Packeta account
+  open on that device at all:
+  1. The customer opens the IPG pay page, which first checks (`GET /purchase-gateway/charge/:authority/status`)
+     whether this authority still needs a wallet. If so, it shows a phone number field instead of the amount.
+  2. **`POST /purchase-gateway/otp/request`** looks up the phone number against `users.phoneNumber` (set via
+     `PATCH /users/me/phone-number`) and generates a one-time code — sandboxed, so there's no real SMS
+     provider, and the code is simply returned in the response instead of being texted.
+  3. **`POST /purchase-gateway/otp/verify`** checks the code (one-time use, 5-minute expiry) and, on success,
+     returns every wallet that account holds which is eligible to pay this merchant (`allowPurchaseOut` +
+     matching currency) along with a short-lived `sessionToken`.
+  4. **`POST /purchase-gateway/attach-wallet`** binds the customer's chosen wallet to the charge (only once,
+     only via that session token) — from here on it behaves exactly like a normal purchase: confirm/cancel on
+     the IPG, server-to-server verify, timeout, refund.
+
+  These three `purchase-gateway` endpoints, plus `purchase/:id/verify` and `purchase/:id/cancel`, are
+  intentionally unauthenticated — the customer using them may have no Packeta session at all. Safety instead
+  comes from each step's own scoping: OTPs are one-time-use and tied to one specific charge, `attach-wallet`
+  requires a session token that only exists after a successful OTP check, `verify` only ever moves money into
+  the wallet that step already fixed, and `cancel` only ever touches a still-`PENDING` purchase.
 - **Idempotency**: every deposit/withdraw/transfer call requires an `Idempotency-Key` header. The key is
   claimed (inserted `IN_PROGRESS`) in the same DB transaction as the wallet mutation, using the key's unique
   constraint (and a savepoint, so a conflicting insert doesn't abort the rest of the transaction) to
@@ -169,11 +190,14 @@ All endpoints are JSON. Authenticated endpoints require `Authorization: Bearer <
 | POST   | `/transactions/withdraw`  | ✅   | `{ walletId, amount }` + `Idempotency-Key` header (blocked if the wallet type disallows withdrawals) |
 | POST   | `/transactions/transfer`  | ✅   | `{ fromWalletId, toEmail, amount }` + `Idempotency-Key` header (both wallets' types must allow peer-to-peer) |
 | POST   | `/transactions/purchase/initiate` | ✅ | `{ fromWalletId, toEmail, amount }` + `Idempotency-Key` header → creates a `PENDING` purchase and returns `{ transactionId, redirectUrl, expiresAt }` to send the customer to the IPG |
-| POST   | `/transactions/purchase/:id/verify` | ✅ | called after the IPG callback; verifies with the IPG and, on success, moves the money and marks `COMPLETED` |
-| POST   | `/transactions/:id/reverse` | ✅ | `{ reason? }` + `Idempotency-Key` header → cancels a `PENDING` purchase or refunds a `COMPLETED` one (caller must own either wallet) |
+| POST   | `/transactions/purchase/charge` | ✅ | `{ amount, currencyCode }` + `Idempotency-Key` header → merchant-only "checkout link", no customer/wallet chosen yet; returns `{ transactionId, redirectUrl, expiresAt }` |
+| POST   | `/transactions/purchase/:id/verify` | — | public; called after the IPG callback; verifies with the IPG and, on success, moves the money and marks `COMPLETED` |
+| POST   | `/transactions/purchase/:id/cancel` | — | public; cancels a still-`PENDING` purchase (no funds to unwind) — used when the customer cancels on the IPG page |
+| POST   | `/transactions/:id/reverse` | ✅ | `{ reason? }` + `Idempotency-Key` header → refunds a `COMPLETED` purchase (caller must own either wallet) |
 | GET    | `/transactions`           | ✅   | transaction history across all of the current user's wallets (optionally `?walletId=` to filter to one) |
 | GET    | `/transactions/:id`       | ✅   | full detail for one transaction (type, amount, from/to wallet + currency, note, idempotency key, purchase `status`/`expiresAt`) — must touch one of the caller's own wallets |
-| GET    | `/users/me`               | ✅   | the current user's id, email, and role                              |
+| GET    | `/users/me`               | ✅   | the current user's id, email, role, and phone number                |
+| PATCH  | `/users/me/phone-number`  | ✅   | `{ phoneNumber }` → set/update the phone number used for the purchase gateway's OTP step |
 | POST   | `/wallet-types`           | 🔒 admin | `{ code, name, currencyCode, allowNegativeBalance, creditLimit?, allowWithdraw, allowP2pOut, allowP2pIn, supportsAutoWithdraw?, allowPurchaseOut?, allowPurchaseIn? }` → create a new wallet type |
 | PATCH  | `/wallet-types/:id`       | 🔒 admin | partial update of a wallet type's rules (currency can't be changed after creation) |
 | GET    | `/admin/users`            | 🔒 admin | list all users                                                       |
@@ -195,6 +219,18 @@ No user auth — merchant-facing endpoints instead require an `X-IPG-Api-Key` he
 | POST   | `/payments/:authority/confirm`| customer confirms → `{ redirectUrl }` back to the merchant's callback  |
 | POST   | `/payments/:authority/cancel` | customer cancels → `{ redirectUrl }`                                 |
 | POST   | `/payments/:authority/verify` | 🔑 one-time server-to-server confirmation, optionally cross-checking `{ amount }` |
+
+### Purchase gateway API (`backend/`, part of Packeta's own backend)
+
+Unauthenticated by design — see the architecture note above for why that's safe. Called directly by
+`ipg-frontend`, not through `ipg-backend`.
+
+| Method | Path                                     | Notes                                                    |
+| ------ | ----------------------------------------- | --------------------------------------------------------- |
+| GET    | `/purchase-gateway/charge/:authority/status` | `{ needsWalletSelection }` — whether the IPG pay page should show the phone/OTP/wallet steps |
+| POST   | `/purchase-gateway/otp/request`           | `{ authority, phoneNumber }` → `{ devCode }` (sandbox: the code is returned directly, not texted) |
+| POST   | `/purchase-gateway/otp/verify`            | `{ authority, code }` → `{ sessionToken, wallets }` — the phone owner's wallets eligible to pay this merchant |
+| POST   | `/purchase-gateway/attach-wallet`         | `{ authority, sessionToken, walletId }` → binds that wallet to the charge as `fromWalletId` |
 
 ## Tests
 

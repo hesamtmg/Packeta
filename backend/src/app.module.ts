@@ -19,6 +19,7 @@ import { IdempotencyModule } from './idempotency/idempotency.module';
 import { LoggingModule } from './logging/logging.module';
 import { AdminModule } from './admin/admin.module';
 import { SchedulerModule } from './scheduler/scheduler.module';
+import { PurchaseGatewayModule } from './purchase-gateway/purchase-gateway.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { SchedulerModule } from './scheduler/scheduler.module';
     LoggingModule,
     AdminModule,
     SchedulerModule,
+    PurchaseGatewayModule,
   ],
 })
 export class AppModule {}

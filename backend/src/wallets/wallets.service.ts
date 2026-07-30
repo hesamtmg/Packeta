@@ -154,6 +154,25 @@ export class WalletsService {
       .getOne();
   }
 
+  // Every wallet a customer could pay a given purchase's merchant from —
+  // used by the purchase gateway (phone+OTP flow) to show the customer their
+  // own choices at the IPG, rather than resolving just one automatically the
+  // way a P2P transfer or a wallet-preselected purchase does.
+  async listPurchaseEligibleWallets(
+    userId: string,
+    currencyId: string,
+  ): Promise<Wallet[]> {
+    return this.walletsRepository
+      .createQueryBuilder('wallet')
+      .innerJoinAndSelect('wallet.walletType', 'walletType')
+      .innerJoinAndSelect('walletType.currency', 'currency')
+      .where('wallet.userId = :userId', { userId })
+      .andWhere('walletType.allowPurchaseOut = true')
+      .andWhere('walletType.currencyId = :currencyId', { currencyId })
+      .orderBy('wallet.createdAt', 'ASC')
+      .getMany();
+  }
+
   // Locks the wallet row for the duration of the caller's DB transaction.
   // Must only be called with a manager that is inside an active transaction.
   async lockById(manager: EntityManager, walletId: string): Promise<Wallet> {

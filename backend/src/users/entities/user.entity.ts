@@ -27,6 +27,14 @@ export class User {
   @Column({ type: 'enum', enum: UserRole, default: UserRole.USER })
   role: UserRole;
 
+  // Used by the IPG's phone+OTP customer identification step (see
+  // PurchaseGatewayController) to look up which account — and therefore
+  // which wallets — a phone number belongs to. Optional and self-service;
+  // there's no phone-based signup, just a way to attach one afterwards.
+  @Index({ unique: true })
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  phoneNumber: string | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
