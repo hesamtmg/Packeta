@@ -81,6 +81,10 @@ export class TransactionsService {
         if (walletRef.closedAt) {
           throw new BadRequestException('This wallet is closed');
         }
+        if (!walletRef.depositable) {
+          throw new ForbiddenException('This wallet does not accept deposits');
+        }
+        this.walletsService.assertWithinTransactionLimits(walletRef, amount);
 
         const wallet = await this.walletsService.lockById(manager, walletId);
         const newBalance = (BigInt(wallet.balance) + BigInt(amount)).toString();
@@ -126,6 +130,7 @@ export class TransactionsService {
             `${walletRef.walletType.name} wallets do not support withdrawals`,
           );
         }
+        this.walletsService.assertWithinTransactionLimits(walletRef, amount);
 
         const wallet = await this.walletsService.lockById(manager, walletId);
         const floor = walletRef.walletType.allowNegativeBalance
@@ -217,6 +222,11 @@ export class TransactionsService {
             'This transfer is not allowed between these two wallets',
           );
         }
+        this.walletsService.assertWithinTransactionLimits(
+          fromWalletRef,
+          amount,
+        );
+        this.walletsService.assertWithinTransactionLimits(toWalletRef, amount);
 
         // Lock both wallet rows in a fixed order (ascending wallet id)
         // regardless of transfer direction, so two concurrent transfers
@@ -392,6 +402,11 @@ export class TransactionsService {
             'This purchase is not allowed between these two wallets',
           );
         }
+        this.walletsService.assertWithinTransactionLimits(
+          fromWalletRef,
+          amount,
+        );
+        this.walletsService.assertWithinTransactionLimits(toWalletRef, amount);
 
         const timeoutSeconds =
           toWalletRef.purchaseTimeoutSeconds ??
@@ -457,6 +472,7 @@ export class TransactionsService {
     language?: string,
     settlementSplits?: SettlementSplitDto[],
     explicitWalletId?: string,
+    requestContext?: { ip?: string; origin?: string },
   ): Promise<PurchaseInitiateResult> {
     if (settlementSplits) {
       this.settlementService.validateChargeOverrides(settlementSplits, amount);
@@ -498,7 +514,13 @@ export class TransactionsService {
               `You have no ${currency.code} wallet eligible to receive purchases`,
             );
           }
+          // Merchant access controls only apply to the merchant's own
+          // self-service charge creation (this branch) — an admin creating a
+          // charge on a merchant's behalf (explicitWalletId, above) isn't
+          // calling from the merchant's own IP/site.
+          this.assertMerchantChargeAllowed(toWalletRef, requestContext);
         }
+        this.walletsService.assertWithinTransactionLimits(toWalletRef, amount);
 
         const timeoutSeconds =
           toWalletRef.purchaseTimeoutSeconds ??
@@ -704,6 +726,11 @@ export class TransactionsService {
         success: true,
         metadata: { transactionId: transaction.id },
       });
+
+      const merchantWalletRef = await this.walletsService.getByIdUnscoped(
+        transaction.toWalletId!,
+      );
+      this.notifyMerchantCallback(merchantWalletRef, transaction);
 
       return { transactionId: transaction.id, status: transaction.status };
     });
@@ -963,6 +990,63 @@ export class TransactionsService {
       await manager.update(Wallet, wallet.id, {
         balance: remainingBalance.toString(),
       });
+    });
+  }
+
+  // Best-effort merchant access controls, only enforceable when the caller
+  // actually supplies the relevant signal — neither is fatal to skip when
+  // absent, since a server-to-server call may carry no Origin/Referer at
+  // all, and a wallet with no allowedIps/storeSite configured imposes no
+  // restriction of its own (same "opt in to restrict" philosophy as
+  // isCounterpartyAllowed).
+  private assertMerchantChargeAllowed(
+    wallet: Wallet,
+    requestContext?: { ip?: string; origin?: string },
+  ): void {
+    if (wallet.allowedIps?.length) {
+      const ip = requestContext?.ip;
+      if (!ip || !wallet.allowedIps.includes(ip)) {
+        throw new ForbiddenException(
+          'This request does not come from an allowed IP for this wallet',
+        );
+      }
+    }
+
+    if (wallet.storeSite && requestContext?.origin) {
+      try {
+        const requestHost = new URL(requestContext.origin).hostname;
+        const storeHost = new URL(wallet.storeSite).hostname;
+        if (requestHost !== storeHost) {
+          throw new ForbiddenException(
+            'This request does not originate from the wallet-registered store site',
+          );
+        }
+      } catch (error) {
+        if (error instanceof ForbiddenException) throw error;
+        // Malformed Origin/Referer header — ignore rather than block.
+      }
+    }
+  }
+
+  // Fire-and-forget notification to the merchant's own registered webhook
+  // once a purchase into this wallet completes — best-effort, never blocks
+  // or fails the customer-facing verify response.
+  private notifyMerchantCallback(
+    wallet: Wallet,
+    transaction: Transaction,
+  ): void {
+    if (!wallet.callbackUrl) return;
+    fetch(wallet.callbackUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        transactionId: transaction.id,
+        status: transaction.status,
+        amount: transaction.amount,
+      }),
+    }).catch(() => {
+      // Best-effort: the merchant's webhook being unreachable doesn't affect
+      // the purchase itself, which has already completed on our ledger.
     });
   }
 

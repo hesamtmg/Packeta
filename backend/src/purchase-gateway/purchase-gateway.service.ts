@@ -34,6 +34,9 @@ export class PurchaseGatewayService {
   async getStatus(authority: string): Promise<{
     needsWalletSelection: boolean;
     merchantName: string;
+    storeSite: string | null;
+    terminalId: string | null;
+    acceptorCode: string | null;
     displayAmount: string;
     expiresAt: Date | null;
     language: string;
@@ -51,7 +54,14 @@ export class PurchaseGatewayService {
 
     return {
       needsWalletSelection: !transaction.fromWalletId,
-      merchantName: merchant ? displayIdentity(merchant) : 'Merchant',
+      // Prefer the merchant's own configured storefront name over their raw
+      // account identity, when they've set one.
+      merchantName:
+        toWallet.storeName ||
+        (merchant ? displayIdentity(merchant) : 'Merchant'),
+      storeSite: toWallet.storeSite,
+      terminalId: toWallet.terminalId,
+      acceptorCode: toWallet.acceptorCode,
       displayAmount: formatAmount(
         transaction.amount,
         toWallet.walletType.currency,
@@ -162,6 +172,10 @@ export class PurchaseGatewayService {
         'This purchase is not allowed between these two wallets',
       );
     }
+    this.walletsService.assertWithinTransactionLimits(
+      wallet,
+      BigInt(charge.amount),
+    );
 
     await this.transactionsService.attachPurchaseWallet(authority, wallet.id);
     return { transactionId: charge.id };

@@ -128,3 +128,79 @@ describe('WalletsService.closeForUser', () => {
     expect(result.closedAt).toBeInstanceOf(Date);
   });
 });
+
+describe('WalletsService.assertWithinTransactionLimits', () => {
+  const service = new WalletsService({} as any, {} as any);
+
+  function wallet(min: string | null, max: string | null) {
+    return { minTransactionAmount: min, maxTransactionAmount: max } as any;
+  }
+
+  it('allows any amount when neither bound is set', () => {
+    expect(() =>
+      service.assertWithinTransactionLimits(wallet(null, null), 1),
+    ).not.toThrow();
+  });
+
+  it('rejects an amount below the configured minimum', () => {
+    expect(() =>
+      service.assertWithinTransactionLimits(wallet('100', null), 50),
+    ).toThrow(UnprocessableEntityException);
+  });
+
+  it('allows an amount exactly at the configured minimum', () => {
+    expect(() =>
+      service.assertWithinTransactionLimits(wallet('100', null), 100),
+    ).not.toThrow();
+  });
+
+  it('rejects an amount above the configured maximum', () => {
+    expect(() =>
+      service.assertWithinTransactionLimits(wallet(null, '1000'), 1001),
+    ).toThrow(UnprocessableEntityException);
+  });
+
+  it('allows an amount exactly at the configured maximum', () => {
+    expect(() =>
+      service.assertWithinTransactionLimits(wallet(null, '1000'), 1000),
+    ).not.toThrow();
+  });
+
+  it('accepts a bigint amount', () => {
+    expect(() =>
+      service.assertWithinTransactionLimits(wallet('100', '1000'), 500n),
+    ).not.toThrow();
+  });
+});
+
+describe('WalletsService.createForUser / updateForUser limit validation', () => {
+  it('rejects creating a wallet whose minTransactionAmount exceeds its maxTransactionAmount', async () => {
+    const manager = { create: jest.fn(), save: jest.fn() };
+    const service = new WalletsService({} as any, {} as any);
+
+    await expect(
+      service.createForUser(manager as any, 'user-1', 'type-1', {
+        minTransactionAmount: 1000,
+        maxTransactionAmount: 100,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(manager.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects updating maxTransactionAmount below the wallet's existing minTransactionAmount", async () => {
+    const { service } = buildService({
+      id: 'wallet-1',
+      userId: 'user-1',
+      balance: '0',
+      closedAt: null,
+      minTransactionAmount: '500',
+      maxTransactionAmount: null,
+    } as any);
+
+    await expect(
+      service.updateForUser({} as any, 'user-1', 'wallet-1', {
+        maxTransactionAmount: 100,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});

@@ -17,6 +17,9 @@ interface PaymentInfo {
 interface ChargeStatus {
   needsWalletSelection: boolean;
   merchantName: string;
+  storeSite: string | null;
+  terminalId: string | null;
+  acceptorCode: string | null;
   displayAmount: string;
   expiresAt: string | null;
   language: string;
@@ -355,7 +358,12 @@ onUnmounted(() => {
         <template v-if="chargeInfo && step !== 'loading'">
           <div class="merchant-header">
             <div class="merchant">{{ chargeInfo.merchantName }}</div>
+            <div v-if="chargeInfo.storeSite" class="merchant-site">{{ chargeInfo.storeSite }}</div>
             <div class="amount">{{ chargeInfo.displayAmount }}</div>
+            <div v-if="chargeInfo.terminalId || chargeInfo.acceptorCode" class="merchant-meta">
+              <span v-if="chargeInfo.terminalId">{{ t('merchant.terminal', { value: chargeInfo.terminalId }) }}</span>
+              <span v-if="chargeInfo.acceptorCode">{{ t('merchant.acceptor', { value: chargeInfo.acceptorCode }) }}</span>
+            </div>
           </div>
         </template>
 
@@ -646,6 +654,17 @@ onUnmounted(() => {
   font-size: 2.25rem;
   font-weight: 800;
   color: #1c1b3a;
+}
+.merchant-site {
+  font-size: 0.78rem;
+  color: #8b8aa8;
+}
+.merchant-meta {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.72rem;
+  color: #a3a2ba;
+  font-family: monospace;
 }
 .status {
   color: #6b7280;

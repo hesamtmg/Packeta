@@ -7,6 +7,10 @@ export default {
   expiresIn: 'انقضا تا {time}',
   loading: 'در حال بارگذاری…',
   expiredMessage: 'این لینک پرداخت منقضی شده است. از فروشنده لینک جدید بخواهید.',
+  merchant: {
+    terminal: 'ترمینال {value}',
+    acceptor: 'کد پذیرنده {value}',
+  },
   phone: {
     prompt: 'شماره تلفن خود را وارد کنید تا شناسایی شوید و کیف پول پرداخت را انتخاب کنید.',
     placeholder: '+15551234567',

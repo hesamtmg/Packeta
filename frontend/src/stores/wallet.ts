@@ -33,9 +33,36 @@ export interface Wallet {
   closedAt: string | null;
   terminalId: string | null;
   acceptorCode: string | null;
+  minTransactionAmount: string | null;
+  maxTransactionAmount: string | null;
+  depositable: boolean;
+  storeName: string | null;
+  storeSite: string | null;
+  allowedIps: string[] | null;
+  callbackUrl: string | null;
+  category: string | null;
+  subCategory: string | null;
   settlementAccounts?: SettlementAccount[];
   walletType: WalletType;
   createdAt: string;
+}
+
+export interface WalletOptionsInput {
+  autoWithdrawTimes?: string[];
+  purchaseTimeoutSeconds?: number;
+  settlementAccounts?: SettlementAccountInput[];
+  restrictedCounterparties?: string[];
+  terminalId?: string;
+  acceptorCode?: string;
+  minTransactionAmount?: number;
+  maxTransactionAmount?: number;
+  depositable?: boolean;
+  storeName?: string;
+  storeSite?: string;
+  allowedIps?: string[];
+  callbackUrl?: string;
+  category?: string;
+  subCategory?: string;
 }
 
 export interface SettlementAccountInput {
@@ -76,34 +103,14 @@ export const useWalletStore = defineStore('wallet', {
     async fetchTransactions() {
       this.transactions = await apiRequest<Transaction[]>('/transactions');
     },
-    async createWallet(
-      walletTypeId: string,
-      options?: {
-        autoWithdrawTimes?: string[];
-        purchaseTimeoutSeconds?: number;
-        settlementAccounts?: SettlementAccountInput[];
-        restrictedCounterparties?: string[];
-        terminalId?: string;
-        acceptorCode?: string;
-      },
-    ) {
+    async createWallet(walletTypeId: string, options?: WalletOptionsInput) {
       await apiRequest('/wallets', {
         method: 'POST',
         body: { walletTypeId, ...options },
       });
       await this.fetchWallets();
     },
-    async updateWallet(
-      walletId: string,
-      options: {
-        autoWithdrawTimes?: string[];
-        purchaseTimeoutSeconds?: number;
-        settlementAccounts?: SettlementAccountInput[];
-        restrictedCounterparties?: string[];
-        terminalId?: string;
-        acceptorCode?: string;
-      },
-    ) {
+    async updateWallet(walletId: string, options: WalletOptionsInput) {
       await apiRequest(`/wallets/${walletId}`, {
         method: 'PATCH',
         body: options,

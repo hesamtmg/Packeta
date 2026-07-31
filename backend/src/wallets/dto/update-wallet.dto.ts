@@ -1,12 +1,17 @@
 import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
+  IsBoolean,
   IsEmail,
+  IsIP,
   IsInt,
   IsOptional,
   IsString,
+  IsUrl,
   Matches,
+  MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { SettlementAccountDto } from '../../settlement/dto/settlement-account.dto';
@@ -15,12 +20,13 @@ import { SettlementAccountDto } from '../../settlement/dto/settlement-account.dt
 // the wallet) — every field here fully replaces its current value when
 // provided; omitting a field leaves it untouched. To clear a field back to
 // "unset", send an explicit empty array (autoWithdrawTimes/
-// restrictedCounterparties) — settlementAccounts still requires at least
-// one entry if provided at all, same as at creation, since an empty split
-// set can't fund a purchase's settlement. autoWithdrawTimes must still be
-// exactly 3 entries if non-empty — checked in the controller alongside the
-// wallet-type capability checks, not here, since "empty is fine, non-empty
-// must be exactly 3" isn't expressible with a single array-size decorator.
+// restrictedCounterparties/allowedIps) — settlementAccounts still requires at
+// least one entry if provided at all, same as at creation, since an empty
+// split set can't fund a purchase's settlement. autoWithdrawTimes must still
+// be exactly 3 entries if non-empty — checked in the controller alongside
+// the wallet-type capability checks, not here, since "empty is fine,
+// non-empty must be exactly 3" isn't expressible with a single array-size
+// decorator.
 export class UpdateWalletDto {
   @IsOptional()
   @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { each: true })
@@ -49,4 +55,49 @@ export class UpdateWalletDto {
   @IsOptional()
   @IsString()
   acceptorCode?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  minTransactionAmount?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  maxTransactionAmount?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  depositable?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  storeName?: string;
+
+  @IsOptional()
+  @ValidateIf((o) => o.storeSite !== '')
+  @IsUrl({ require_tld: false })
+  storeSite?: string;
+
+  @IsOptional()
+  @IsIP(undefined, { each: true })
+  allowedIps?: string[];
+
+  @IsOptional()
+  @ValidateIf((o) => o.callbackUrl !== '')
+  @IsUrl({ protocols: ['https'], require_protocol: true, require_tld: false })
+  callbackUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  category?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  subCategory?: string;
 }

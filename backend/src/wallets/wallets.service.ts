@@ -37,8 +37,22 @@ export class WalletsService {
       restrictedCounterparties?: string[];
       terminalId?: string;
       acceptorCode?: string;
+      minTransactionAmount?: number;
+      maxTransactionAmount?: number;
+      depositable?: boolean;
+      storeName?: string;
+      storeSite?: string;
+      allowedIps?: string[];
+      callbackUrl?: string;
+      category?: string;
+      subCategory?: string;
     },
   ): Promise<Wallet> {
+    this.assertValidLimits(
+      options?.minTransactionAmount,
+      options?.maxTransactionAmount,
+    );
+
     const wallet = manager.create(Wallet, {
       userId,
       walletTypeId,
@@ -48,6 +62,15 @@ export class WalletsService {
       restrictedCounterparties: options?.restrictedCounterparties ?? null,
       terminalId: options?.terminalId ?? null,
       acceptorCode: options?.acceptorCode ?? null,
+      minTransactionAmount: options?.minTransactionAmount?.toString() ?? null,
+      maxTransactionAmount: options?.maxTransactionAmount?.toString() ?? null,
+      depositable: options?.depositable ?? true,
+      storeName: options?.storeName ?? null,
+      storeSite: options?.storeSite ?? null,
+      allowedIps: options?.allowedIps ?? null,
+      callbackUrl: options?.callbackUrl ?? null,
+      category: options?.category ?? null,
+      subCategory: options?.subCategory ?? null,
     });
     await manager.save(wallet);
 
@@ -76,12 +99,34 @@ export class WalletsService {
       restrictedCounterparties?: string[];
       terminalId?: string;
       acceptorCode?: string;
+      minTransactionAmount?: number;
+      maxTransactionAmount?: number;
+      depositable?: boolean;
+      storeName?: string;
+      storeSite?: string;
+      allowedIps?: string[];
+      callbackUrl?: string;
+      category?: string;
+      subCategory?: string;
     },
   ): Promise<Wallet> {
     const wallet = await this.getById(userId, walletId);
     if (wallet.closedAt) {
       throw new BadRequestException('This wallet is closed');
     }
+
+    this.assertValidLimits(
+      options.minTransactionAmount !== undefined
+        ? options.minTransactionAmount
+        : wallet.minTransactionAmount
+          ? Number(wallet.minTransactionAmount)
+          : undefined,
+      options.maxTransactionAmount !== undefined
+        ? options.maxTransactionAmount
+        : wallet.maxTransactionAmount
+          ? Number(wallet.maxTransactionAmount)
+          : undefined,
+    );
 
     const patch: Partial<Wallet> = {};
     if (options.autoWithdrawTimes !== undefined) {
@@ -103,6 +148,37 @@ export class WalletsService {
     if (options.acceptorCode !== undefined) {
       patch.acceptorCode = options.acceptorCode.length
         ? options.acceptorCode
+        : null;
+    }
+    if (options.minTransactionAmount !== undefined) {
+      patch.minTransactionAmount = options.minTransactionAmount.toString();
+    }
+    if (options.maxTransactionAmount !== undefined) {
+      patch.maxTransactionAmount = options.maxTransactionAmount.toString();
+    }
+    if (options.depositable !== undefined) {
+      patch.depositable = options.depositable;
+    }
+    if (options.storeName !== undefined) {
+      patch.storeName = options.storeName.length ? options.storeName : null;
+    }
+    if (options.storeSite !== undefined) {
+      patch.storeSite = options.storeSite.length ? options.storeSite : null;
+    }
+    if (options.allowedIps !== undefined) {
+      patch.allowedIps = options.allowedIps.length ? options.allowedIps : null;
+    }
+    if (options.callbackUrl !== undefined) {
+      patch.callbackUrl = options.callbackUrl.length
+        ? options.callbackUrl
+        : null;
+    }
+    if (options.category !== undefined) {
+      patch.category = options.category.length ? options.category : null;
+    }
+    if (options.subCategory !== undefined) {
+      patch.subCategory = options.subCategory.length
+        ? options.subCategory
         : null;
     }
     if (Object.keys(patch).length) {
@@ -143,6 +219,40 @@ export class WalletsService {
     }
     await this.walletsRepository.update(walletId, { closedAt: new Date() });
     return this.getById(userId, walletId);
+  }
+
+  // Rejects a min/max pair where both are set and min exceeds max — checked
+  // whenever either bound changes, using the other's current value when only
+  // one side of the pair is being updated.
+  private assertValidLimits(min?: number, max?: number): void {
+    if (min !== undefined && max !== undefined && min > max) {
+      throw new BadRequestException(
+        'minTransactionAmount cannot be greater than maxTransactionAmount',
+      );
+    }
+  }
+
+  // Every wallet may configure an optional per-transaction amount band
+  // (minor units) — used by TransactionsService wherever an amount is about
+  // to move into or out of a wallet.
+  assertWithinTransactionLimits(wallet: Wallet, amount: number | bigint): void {
+    const value = typeof amount === 'bigint' ? amount : BigInt(amount);
+    if (
+      wallet.minTransactionAmount !== null &&
+      value < BigInt(wallet.minTransactionAmount)
+    ) {
+      throw new UnprocessableEntityException(
+        `This wallet requires a minimum transaction amount of ${wallet.minTransactionAmount}`,
+      );
+    }
+    if (
+      wallet.maxTransactionAmount !== null &&
+      value > BigInt(wallet.maxTransactionAmount)
+    ) {
+      throw new UnprocessableEntityException(
+        `This wallet allows a maximum transaction amount of ${wallet.maxTransactionAmount}`,
+      );
+    }
   }
 
   // "Either side's own list is enough": if a wallet has no restriction list

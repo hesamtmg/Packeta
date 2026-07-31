@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useWalletStore, type Wallet } from '../stores/wallet';
+import { useWalletStore, type Wallet, type WalletOptionsInput } from '../stores/wallet';
 import { apiRequest, ApiError } from '../api/client';
 import { amountStep, formatAmount, toMinorUnits, type CurrencyInfo } from '../utils/currency';
 import AppLayout from '../components/AppLayout.vue';
@@ -31,6 +31,15 @@ const newWalletSettlementAccounts = ref<{ iban: string; label: string; percent: 
 const newWalletRestrictedCounterparties = ref('');
 const newWalletTerminalId = ref('');
 const newWalletAcceptorCode = ref('');
+const newWalletMinAmount = ref('');
+const newWalletMaxAmount = ref('');
+const newWalletDepositable = ref(true);
+const newWalletStoreName = ref('');
+const newWalletStoreSite = ref('');
+const newWalletAllowedIps = ref('');
+const newWalletCallbackUrl = ref('');
+const newWalletCategory = ref('');
+const newWalletSubCategory = ref('');
 
 const editingWalletId = ref<string | null>(null);
 const editRestrictedCounterparties = ref('');
@@ -39,6 +48,15 @@ const editPurchaseTimeoutMinutes = ref('');
 const editSettlementAccounts = ref<{ iban: string; label: string; percent: string }[]>([]);
 const editTerminalId = ref('');
 const editAcceptorCode = ref('');
+const editMinAmount = ref('');
+const editMaxAmount = ref('');
+const editDepositable = ref(true);
+const editStoreName = ref('');
+const editStoreSite = ref('');
+const editAllowedIps = ref('');
+const editCallbackUrl = ref('');
+const editCategory = ref('');
+const editSubCategory = ref('');
 const chargeSettlementSplits = ref<
   { iban: string; label: string; type: 'PERCENT' | 'FIXED'; value: string }[]
 >([]);
@@ -320,20 +338,41 @@ function toggleEditWallet(w: Wallet) {
   }));
   editTerminalId.value = w.terminalId ?? '';
   editAcceptorCode.value = w.acceptorCode ?? '';
+  editMinAmount.value = w.minTransactionAmount
+    ? String(Number(w.minTransactionAmount) / 10 ** w.walletType.currency.decimalPlaces)
+    : '';
+  editMaxAmount.value = w.maxTransactionAmount
+    ? String(Number(w.maxTransactionAmount) / 10 ** w.walletType.currency.decimalPlaces)
+    : '';
+  editDepositable.value = w.depositable;
+  editStoreName.value = w.storeName ?? '';
+  editStoreSite.value = w.storeSite ?? '';
+  editAllowedIps.value = (w.allowedIps ?? []).join(', ');
+  editCallbackUrl.value = w.callbackUrl ?? '';
+  editCategory.value = w.category ?? '';
+  editSubCategory.value = w.subCategory ?? '';
+}
+
+function parseIpList(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((ip) => ip.trim())
+    .filter((ip) => ip.length > 0);
 }
 
 function onSaveWalletEdit(w: Wallet) {
   runAction(async () => {
-    const options: {
-      autoWithdrawTimes?: string[];
-      purchaseTimeoutSeconds?: number;
-      settlementAccounts?: { iban: string; label?: string; percent: number }[];
-      restrictedCounterparties?: string[];
-      terminalId?: string;
-      acceptorCode?: string;
-    } = {
+    const options: WalletOptionsInput = {
       restrictedCounterparties: parseEmailList(editRestrictedCounterparties.value),
+      depositable: editDepositable.value,
     };
+    const scale = 10 ** w.walletType.currency.decimalPlaces;
+    if (editMinAmount.value) {
+      options.minTransactionAmount = Math.round(Number(editMinAmount.value) * scale);
+    }
+    if (editMaxAmount.value) {
+      options.maxTransactionAmount = Math.round(Number(editMaxAmount.value) * scale);
+    }
     if (w.walletType.supportsAutoWithdraw) {
       const filledTimes = editAutoWithdrawTimes.value.filter((time) => time);
       options.autoWithdrawTimes = filledTimes.length ? editAutoWithdrawTimes.value : [];
@@ -354,6 +393,12 @@ function onSaveWalletEdit(w: Wallet) {
         : undefined;
       options.terminalId = editTerminalId.value;
       options.acceptorCode = editAcceptorCode.value;
+      options.storeName = editStoreName.value;
+      options.storeSite = editStoreSite.value;
+      options.allowedIps = parseIpList(editAllowedIps.value);
+      options.callbackUrl = editCallbackUrl.value;
+      options.category = editCategory.value;
+      options.subCategory = editSubCategory.value;
     }
     await wallet.updateWallet(w.id, options);
     editingWalletId.value = null;
@@ -366,17 +411,17 @@ function onCloseWallet(w: Wallet) {
 
 function onAddWallet() {
   runAction(async () => {
-    const options: {
-      autoWithdrawTimes?: string[];
-      purchaseTimeoutSeconds?: number;
-      settlementAccounts?: { iban: string; label?: string; percent: number }[];
-      restrictedCounterparties?: string[];
-      terminalId?: string;
-      acceptorCode?: string;
-    } = {};
+    const options: WalletOptionsInput = { depositable: newWalletDepositable.value };
     const restricted = parseEmailList(newWalletRestrictedCounterparties.value);
     if (restricted.length) {
       options.restrictedCounterparties = restricted;
+    }
+    const scale = 10 ** (selectedNewWalletType.value?.currency.decimalPlaces ?? 0);
+    if (newWalletMinAmount.value) {
+      options.minTransactionAmount = Math.round(Number(newWalletMinAmount.value) * scale);
+    }
+    if (newWalletMaxAmount.value) {
+      options.maxTransactionAmount = Math.round(Number(newWalletMaxAmount.value) * scale);
     }
     if (showAutoWithdrawFields.value) {
       options.autoWithdrawTimes = newWalletAutoWithdrawTimes.value;
@@ -399,6 +444,13 @@ function onAddWallet() {
       }
       if (newWalletTerminalId.value) options.terminalId = newWalletTerminalId.value;
       if (newWalletAcceptorCode.value) options.acceptorCode = newWalletAcceptorCode.value;
+      if (newWalletStoreName.value) options.storeName = newWalletStoreName.value;
+      if (newWalletStoreSite.value) options.storeSite = newWalletStoreSite.value;
+      const ips = parseIpList(newWalletAllowedIps.value);
+      if (ips.length) options.allowedIps = ips;
+      if (newWalletCallbackUrl.value) options.callbackUrl = newWalletCallbackUrl.value;
+      if (newWalletCategory.value) options.category = newWalletCategory.value;
+      if (newWalletSubCategory.value) options.subCategory = newWalletSubCategory.value;
     }
     await wallet.createWallet(newWalletType.value, options);
     newWalletType.value = '';
@@ -408,6 +460,15 @@ function onAddWallet() {
     newWalletRestrictedCounterparties.value = '';
     newWalletTerminalId.value = '';
     newWalletAcceptorCode.value = '';
+    newWalletMinAmount.value = '';
+    newWalletMaxAmount.value = '';
+    newWalletDepositable.value = true;
+    newWalletStoreName.value = '';
+    newWalletStoreSite.value = '';
+    newWalletAllowedIps.value = '';
+    newWalletCallbackUrl.value = '';
+    newWalletCategory.value = '';
+    newWalletSubCategory.value = '';
   });
 }
 
@@ -624,6 +685,19 @@ function onPurchase() {
             </label>
             <span class="hint">{{ t('dashboard.wallets.marketHint') }}</span>
 
+            <label class="checkbox-field">
+              <input v-model="editDepositable" type="checkbox" />
+              {{ t('dashboard.wallets.depositableLabel') }}
+            </label>
+            <label>
+              {{ t('dashboard.wallets.minAmountLabel') }}
+              <input v-model="editMinAmount" type="number" min="0" :step="amountStep(w.walletType.currency)" class="admin-input" />
+            </label>
+            <label>
+              {{ t('dashboard.wallets.maxAmountLabel') }}
+              <input v-model="editMaxAmount" type="number" min="0" :step="amountStep(w.walletType.currency)" class="admin-input" />
+            </label>
+
             <template v-if="w.walletType.supportsAutoWithdraw">
               <span class="hint">{{ t('dashboard.wallets.autoWithdrawLabel') }}</span>
               <input v-model="editAutoWithdrawTimes[0]" type="time" class="admin-input" />
@@ -655,6 +729,30 @@ function onPurchase() {
                 {{ t('dashboard.wallets.acceptorCodeLabel') }}
                 <input v-model="editAcceptorCode" type="text" class="admin-input" />
               </label>
+              <label>
+                {{ t('dashboard.wallets.storeNameLabel') }}
+                <input v-model="editStoreName" type="text" class="admin-input" />
+              </label>
+              <label>
+                {{ t('dashboard.wallets.storeSiteLabel') }}
+                <input v-model="editStoreSite" type="url" class="admin-input" />
+              </label>
+              <label>
+                {{ t('dashboard.wallets.allowedIpsLabel') }}
+                <input v-model="editAllowedIps" type="text" :placeholder="t('dashboard.wallets.allowedIpsPlaceholder')" class="admin-input" />
+              </label>
+              <label>
+                {{ t('dashboard.wallets.callbackUrlLabel') }}
+                <input v-model="editCallbackUrl" type="url" class="admin-input" />
+              </label>
+              <label>
+                {{ t('dashboard.wallets.categoryLabel') }}
+                <input v-model="editCategory" type="text" class="admin-input" />
+              </label>
+              <label>
+                {{ t('dashboard.wallets.subCategoryLabel') }}
+                <input v-model="editSubCategory" type="text" class="admin-input" />
+              </label>
             </template>
 
             <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.wallets.saveEdit') }}</button>
@@ -680,6 +778,31 @@ function onPurchase() {
           />
         </label>
         <span class="hint">{{ t('dashboard.wallets.marketHint') }}</span>
+
+        <label class="checkbox-field">
+          <input v-model="newWalletDepositable" type="checkbox" />
+          {{ t('dashboard.wallets.depositableLabel') }}
+        </label>
+        <label class="market-field">
+          {{ t('dashboard.wallets.minAmountLabel') }}
+          <input
+            v-model="newWalletMinAmount"
+            type="number"
+            min="0"
+            :step="selectedNewWalletType ? amountStep(selectedNewWalletType.currency) : '0.01'"
+            class="admin-input"
+          />
+        </label>
+        <label class="market-field">
+          {{ t('dashboard.wallets.maxAmountLabel') }}
+          <input
+            v-model="newWalletMaxAmount"
+            type="number"
+            min="0"
+            :step="selectedNewWalletType ? amountStep(selectedNewWalletType.currency) : '0.01'"
+            class="admin-input"
+          />
+        </label>
 
         <template v-if="showAutoWithdrawFields">
           <span class="hint">{{ t('dashboard.wallets.autoWithdrawLabel') }}</span>
@@ -717,6 +840,30 @@ function onPurchase() {
           <label class="market-field">
             {{ t('dashboard.wallets.acceptorCodeLabel') }}
             <input v-model="newWalletAcceptorCode" type="text" class="admin-input" />
+          </label>
+          <label class="market-field">
+            {{ t('dashboard.wallets.storeNameLabel') }}
+            <input v-model="newWalletStoreName" type="text" class="admin-input" />
+          </label>
+          <label class="market-field">
+            {{ t('dashboard.wallets.storeSiteLabel') }}
+            <input v-model="newWalletStoreSite" type="url" class="admin-input" />
+          </label>
+          <label class="market-field">
+            {{ t('dashboard.wallets.allowedIpsLabel') }}
+            <input v-model="newWalletAllowedIps" type="text" :placeholder="t('dashboard.wallets.allowedIpsPlaceholder')" class="admin-input" />
+          </label>
+          <label class="market-field">
+            {{ t('dashboard.wallets.callbackUrlLabel') }}
+            <input v-model="newWalletCallbackUrl" type="url" class="admin-input" />
+          </label>
+          <label class="market-field">
+            {{ t('dashboard.wallets.categoryLabel') }}
+            <input v-model="newWalletCategory" type="text" class="admin-input" />
+          </label>
+          <label class="market-field">
+            {{ t('dashboard.wallets.subCategoryLabel') }}
+            <input v-model="newWalletSubCategory" type="text" class="admin-input" />
           </label>
         </template>
 
@@ -942,6 +1089,12 @@ function onPurchase() {
   gap: 4px;
   font-size: 0.8rem;
   color: var(--text-dim);
+}
+.wallet-edit-form label.checkbox-field,
+label.checkbox-field {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
 }
 .add-wallet {
   display: flex;

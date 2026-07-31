@@ -76,6 +76,7 @@ function buildService(options: {
       return wallet;
     }),
     isCounterpartyAllowed: jest.fn(() => true),
+    assertWithinTransactionLimits: jest.fn(),
   };
 
   const idempotencyService = {
@@ -161,6 +162,155 @@ function walletType(
     ...overrides,
   };
 }
+
+describe('TransactionsService.deposit', () => {
+  it('rejects a deposit into a wallet that has deposits disabled', async () => {
+    const wallet: WalletFixture = {
+      id: 'wallet-1',
+      balance: '0',
+      walletType: walletType(),
+      depositable: false,
+    } as any;
+    const { service } = buildService({ senderWallet: wallet });
+
+    await expect(
+      service.deposit('user-1', 'wallet-1', 100, 'idem-1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('allows a deposit into a wallet that accepts deposits', async () => {
+    const wallet: WalletFixture = {
+      id: 'wallet-1',
+      balance: '0',
+      walletType: walletType(),
+      depositable: true,
+    } as any;
+    const { service } = buildService({ senderWallet: wallet });
+
+    const result = await service.deposit('user-1', 'wallet-1', 250, 'idem-2');
+
+    expect(result.balance).toBe('250');
+  });
+});
+
+describe('TransactionsService.initiateCharge merchant access controls', () => {
+  function buildChargeService(merchantWallet: WalletFixture) {
+    const { service, ...rest } = buildService({
+      senderWallet: merchantWallet,
+      recipientWallet: merchantWallet,
+    });
+    // initiateCharge's auto-pick path resolves currency via
+    // currenciesService.findByCode, not the walletsService/manager mocks
+    // buildService wires up for transfer/purchase — inject a minimal stub.
+    (service as any).currenciesService = {
+      findByCode: jest.fn(async () => ({
+        id: merchantWallet.walletType.currencyId,
+        code: merchantWallet.walletType.currency.code,
+      })),
+    };
+    // initiateCharge looks the merchant up for displayIdentity() — the
+    // shared manager mock's default findOne stub has no email, which
+    // displayIdentity requires.
+    rest.manager.findOne = jest.fn().mockResolvedValue({
+      id: 'merchant-1',
+      email: 'merchant@example.com',
+      phoneNumber: null,
+    });
+    return { service, ...rest };
+  }
+
+  it('rejects a self-service charge from an IP outside the configured allowlist', async () => {
+    const merchantWallet: WalletFixture = {
+      id: 'wallet-merchant',
+      userId: 'merchant-1',
+      balance: '0',
+      walletType: walletType({ allowPurchaseIn: true }),
+      allowedIps: ['203.0.113.4'],
+    } as any;
+    const { service } = buildChargeService(merchantWallet);
+
+    await expect(
+      service.initiateCharge(
+        'merchant-1',
+        500,
+        'USD',
+        'idem-charge-1',
+        undefined,
+        undefined,
+        undefined,
+        { ip: '198.51.100.9' },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('allows a self-service charge from an IP in the configured allowlist', async () => {
+    const merchantWallet: WalletFixture = {
+      id: 'wallet-merchant',
+      userId: 'merchant-1',
+      balance: '0',
+      walletType: walletType({ allowPurchaseIn: true }),
+      allowedIps: ['203.0.113.4'],
+    } as any;
+    const { service } = buildChargeService(merchantWallet);
+
+    const result = await service.initiateCharge(
+      'merchant-1',
+      500,
+      'USD',
+      'idem-charge-2',
+      undefined,
+      undefined,
+      undefined,
+      { ip: '203.0.113.4' },
+    );
+
+    expect(result.redirectUrl).toBe('http://ipg/pay/auth-1');
+  });
+
+  it('rejects a self-service charge whose Origin does not match the registered store site', async () => {
+    const merchantWallet: WalletFixture = {
+      id: 'wallet-merchant',
+      userId: 'merchant-1',
+      balance: '0',
+      walletType: walletType({ allowPurchaseIn: true }),
+      storeSite: 'https://my-real-store.example',
+    } as any;
+    const { service } = buildChargeService(merchantWallet);
+
+    await expect(
+      service.initiateCharge(
+        'merchant-1',
+        500,
+        'USD',
+        'idem-charge-3',
+        undefined,
+        undefined,
+        undefined,
+        { origin: 'https://evil.example' },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('allows a self-service charge with no Origin/Referer header even when storeSite is configured', async () => {
+    const merchantWallet: WalletFixture = {
+      id: 'wallet-merchant',
+      userId: 'merchant-1',
+      balance: '0',
+      walletType: walletType({ allowPurchaseIn: true }),
+      storeSite: 'https://my-real-store.example',
+    } as any;
+    const { service } = buildChargeService(merchantWallet);
+
+    const result = await service.initiateCharge(
+      'merchant-1',
+      500,
+      'USD',
+      'idem-charge-4',
+    );
+
+    expect(result.redirectUrl).toBe('http://ipg/pay/auth-1');
+  });
+});
 
 describe('TransactionsService.transfer', () => {
   it('locks wallets in ascending id order regardless of transfer direction', async () => {
