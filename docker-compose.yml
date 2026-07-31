@@ -1,15 +1,4 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: packeta
-      POSTGRES_PASSWORD: packeta
-      POSTGRES_DB: packeta
-    ports:
-      - '5432:5432'
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
 
   mongo:
     image: mongo:7
@@ -19,18 +8,7 @@ services:
     volumes:
       - mongo_data:/data/db
 
-  ipg-postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ipg
-      POSTGRES_PASSWORD: ipg
-      POSTGRES_DB: packeta_ipg
-    ports:
-      - '5433:5432'
-    volumes:
-      - ipg_postgres_data:/var/lib/postgresql/data
-
+ 
 volumes:
   postgres_data:
   mongo_data:

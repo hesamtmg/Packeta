@@ -1,4 +1,7 @@
 /* Shared dark theme for the admin panel, imported once by AdminLayout. */
+body{
+  margin: 0;
+}
 .admin-theme {
   --admin-bg: #0a0a0d;
   --shell-bg: #18171e;
