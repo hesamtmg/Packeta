@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../../api/client';
 import { formatAmount } from '../../utils/currency';
+import { displayIdentity } from '../../utils/identity';
 import {
   walletLookup,
   transactionCurrency,
@@ -36,7 +37,8 @@ function walletLabel(walletId: string | null): string {
 
 function ownerEmail(walletId: string | null): string {
   if (!walletId) return t('common.none');
-  return walletsById.value.get(walletId)?.ownerEmail ?? t('common.none');
+  const w = walletsById.value.get(walletId);
+  return w ? displayIdentity({ email: w.ownerEmail, phoneNumber: w.ownerPhoneNumber }) : t('common.none');
 }
 
 async function load() {
@@ -81,7 +83,12 @@ onMounted(load);
           </tr>
         </thead>
         <tbody>
-          <tr v-for="tx in filtered" :key="tx.id">
+          <tr
+            v-for="tx in filtered"
+            :key="tx.id"
+            class="tx-row-clickable"
+            @click="$router.push({ name: 'admin-transaction-detail', params: { id: tx.id } })"
+          >
             <td><span class="admin-badge">{{ tx.type }}</span></td>
             <td>{{ formatTxAmount(tx) }}</td>
             <td>
@@ -111,5 +118,8 @@ onMounted(load);
 }
 .filter-row h2 {
   margin: 0;
+}
+.tx-row-clickable {
+  cursor: pointer;
 }
 </style>

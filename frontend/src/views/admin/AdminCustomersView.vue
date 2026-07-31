@@ -3,10 +3,14 @@ import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../../api/client';
 import { amountStep, formatAmount, toMinorUnits, type CurrencyInfo } from '../../utils/currency';
+import { displayIdentity } from '../../utils/identity';
 import type { AdminUser } from '../../types/admin';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
+import BatchImportCard from '../../components/admin/BatchImportCard.vue';
+import { useAuthStore } from '../../stores/auth';
 
 const { t } = useI18n();
+const auth = useAuthStore();
 
 interface WalletType {
   id: string;
@@ -132,7 +136,7 @@ loadUsers();
         </thead>
         <tbody>
           <tr v-for="u in filtered" :key="u.id">
-            <td>{{ u.email }}</td>
+            <td>{{ displayIdentity(u) }}</td>
             <td>{{ new Date(u.createdAt).toLocaleDateString() }}</td>
             <td><button class="admin-btn admin-btn-ghost" @click="selectUser(u.id)">{{ t('admin.customers.view') }}</button></td>
           </tr>
@@ -141,8 +145,17 @@ loadUsers();
       </table>
     </div>
 
+    <BatchImportCard
+      v-if="auth.isSuperAdmin"
+      endpoint="/admin/customers/batch"
+      sample-url="/samples/customers-sample.xlsx"
+      :title="t('admin.batchImport.customersTitle')"
+      :hint="t('admin.batchImport.customersHint')"
+      @imported="loadUsers"
+    />
+
     <div v-if="selected" class="admin-card">
-      <h2>{{ selected.email }}</h2>
+      <h2>{{ displayIdentity(selected) }}</h2>
       <p v-if="detailError" class="admin-error">{{ detailError }}</p>
       <p v-if="adjustError" class="admin-error">{{ adjustError }}</p>
 
@@ -175,7 +188,12 @@ loadUsers();
           </tr>
         </thead>
         <tbody>
-          <tr v-for="tx in transactions" :key="tx.id">
+          <tr
+            v-for="tx in transactions"
+            :key="tx.id"
+            class="tx-row-clickable"
+            @click="$router.push({ name: 'admin-transaction-detail', params: { id: tx.id } })"
+          >
             <td><span class="admin-badge">{{ tx.type }}</span></td>
             <td>{{ transactionCurrency(tx) ? formatAmount(tx.amount, transactionCurrency(tx)!) : tx.amount }}</td>
             <td>{{ tx.note ?? t('common.none') }}</td>
@@ -189,6 +207,9 @@ loadUsers();
 </template>
 
 <style scoped>
+.tx-row-clickable {
+  cursor: pointer;
+}
 .filter-row {
   display: flex;
   align-items: center;

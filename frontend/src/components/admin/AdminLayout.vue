@@ -45,6 +45,11 @@ const navItems = computed(() => [
     icon: 'M7 7h.01M3 7l0 4.5c0 .5.2 1 .6 1.4l8 8a2 2 0 002.8 0l4.6-4.6a2 2 0 000-2.8l-8-8A2 2 0 009 5H4a1 1 0 00-1 1v1z',
   },
   {
+    name: 'admin-purchase',
+    label: t('adminNav.purchase'),
+    icon: 'M3 6h18M3 6l1.5 12a2 2 0 002 2h11a2 2 0 002-2L21 6M8 10v4m4-4v4m4-4v4',
+  },
+  {
     name: 'admin-reports',
     label: t('adminNav.reports'),
     icon: 'M4 19V9m6 10V4m6 15v-6',
@@ -93,6 +98,9 @@ function logout() {
         <header class="admin-topbar">
           <h1>{{ title }}</h1>
           <div class="admin-topbar-actions">
+            <router-link :to="{ name: 'dashboard' }" class="admin-btn admin-btn-ghost">
+              {{ t('nav.backToWallet') }}
+            </router-link>
             <LanguageSwitcher />
             <div class="admin-avatar">{{ initials }}</div>
           </div>

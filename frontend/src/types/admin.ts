@@ -3,6 +3,7 @@ import type { CurrencyInfo } from '../utils/currency';
 export interface AdminUser {
   id: string;
   email: string;
+  phoneNumber: string | null;
   role: 'USER' | 'ADMIN' | 'SUPER_ADMIN';
   createdAt: string;
 }
@@ -26,6 +27,7 @@ export interface AdminWallet {
   createdAt: string;
   ownerId: string;
   ownerEmail: string;
+  ownerPhoneNumber: string | null;
 }
 
 export interface AdminTransaction {

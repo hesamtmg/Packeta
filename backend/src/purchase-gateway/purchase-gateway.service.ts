@@ -11,6 +11,7 @@ import { OtpService } from './otp.service';
 import { CaptchaService } from './captcha.service';
 import { serializeWallet } from '../wallets/wallet.serializer';
 import { formatAmount } from '../common/format-amount';
+import { displayIdentity } from '../common/synthetic-email';
 
 // Backs the IPG's "identify yourself" step for merchant-initiated charges:
 // the customer proves who they are with phone + OTP (no Packeta session
@@ -50,7 +51,7 @@ export class PurchaseGatewayService {
 
     return {
       needsWalletSelection: !transaction.fromWalletId,
-      merchantName: merchant?.email ?? 'Merchant',
+      merchantName: merchant ? displayIdentity(merchant) : 'Merchant',
       displayAmount: formatAmount(
         transaction.amount,
         toWallet.walletType.currency,

@@ -3,10 +3,14 @@ import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../../api/client';
 import { amountStep, formatAmount, toMinorUnits } from '../../utils/currency';
+import { displayIdentity } from '../../utils/identity';
 import type { AdminWallet } from '../../types/admin';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
+import BatchImportCard from '../../components/admin/BatchImportCard.vue';
+import { useAuthStore } from '../../stores/auth';
 
 const { t } = useI18n();
+const auth = useAuthStore();
 const wallets = ref<AdminWallet[]>([]);
 const error = ref('');
 const search = ref('');
@@ -85,7 +89,7 @@ onMounted(load);
         <tbody>
           <template v-for="w in filtered" :key="w.id">
             <tr>
-              <td>{{ w.ownerEmail }}</td>
+              <td>{{ displayIdentity({ email: w.ownerEmail, phoneNumber: w.ownerPhoneNumber }) }}</td>
               <td>{{ w.walletType.name }}</td>
               <td>{{ w.walletType.currency.code }}</td>
               <td>{{ formatAmount(w.balance, w.walletType.currency) }}</td>
@@ -112,6 +116,15 @@ onMounted(load);
         </tbody>
       </table>
     </div>
+
+    <BatchImportCard
+      v-if="auth.isSuperAdmin"
+      endpoint="/admin/wallets/batch"
+      sample-url="/samples/wallets-sample.xlsx"
+      :title="t('admin.batchImport.walletsTitle')"
+      :hint="t('admin.batchImport.walletsHint')"
+      @imported="load"
+    />
   </AdminLayout>
 </template>
 
