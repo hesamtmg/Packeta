@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  Ip,
   Param,
   Post,
   Query,
@@ -90,6 +91,9 @@ export class TransactionsController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: InitiateChargeDto,
     @Headers('idempotency-key') idempotencyKey: string,
+    @Ip() ip: string,
+    @Headers('origin') origin?: string,
+    @Headers('referer') referer?: string,
   ) {
     return this.transactionsService.initiateCharge(
       user.userId,
@@ -98,6 +102,8 @@ export class TransactionsController {
       idempotencyKey,
       dto.language,
       dto.settlementSplits,
+      undefined,
+      { ip, origin: origin ?? referer },
     );
   }
 

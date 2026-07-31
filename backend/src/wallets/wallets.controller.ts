@@ -78,6 +78,12 @@ export class WalletsController {
       walletType,
       'an acceptor code',
     );
+    this.assertPurchaseInCapable(dto.storeName, walletType, 'a store name');
+    this.assertPurchaseInCapable(dto.storeSite, walletType, 'a store site');
+    this.assertPurchaseInCapable(dto.allowedIps, walletType, 'an IP allowlist');
+    this.assertPurchaseInCapable(dto.callbackUrl, walletType, 'a callback URL');
+    this.assertPurchaseInCapable(dto.category, walletType, 'a category');
+    this.assertPurchaseInCapable(dto.subCategory, walletType, 'a sub-category');
     if (dto.settlementAccounts) {
       this.settlementService.validateWalletDefaults(dto.settlementAccounts);
     }
@@ -90,6 +96,15 @@ export class WalletsController {
         restrictedCounterparties: dto.restrictedCounterparties,
         terminalId: dto.terminalId,
         acceptorCode: dto.acceptorCode,
+        minTransactionAmount: dto.minTransactionAmount,
+        maxTransactionAmount: dto.maxTransactionAmount,
+        depositable: dto.depositable,
+        storeName: dto.storeName,
+        storeSite: dto.storeSite,
+        allowedIps: dto.allowedIps,
+        callbackUrl: dto.callbackUrl,
+        category: dto.category,
+        subCategory: dto.subCategory,
       }),
     );
     const settlementAccounts = await this.settlementService.findForWallet(
@@ -126,6 +141,12 @@ export class WalletsController {
       walletType,
       'an acceptor code',
     );
+    this.assertPurchaseInCapable(dto.storeName, walletType, 'a store name');
+    this.assertPurchaseInCapable(dto.storeSite, walletType, 'a store site');
+    this.assertPurchaseInCapable(dto.allowedIps, walletType, 'an IP allowlist');
+    this.assertPurchaseInCapable(dto.callbackUrl, walletType, 'a callback URL');
+    this.assertPurchaseInCapable(dto.category, walletType, 'a category');
+    this.assertPurchaseInCapable(dto.subCategory, walletType, 'a sub-category');
 
     const wallet = await this.dataSource.transaction((manager) =>
       this.walletsService.updateForUser(manager, user.userId, id, {
@@ -135,6 +156,15 @@ export class WalletsController {
         restrictedCounterparties: dto.restrictedCounterparties,
         terminalId: dto.terminalId,
         acceptorCode: dto.acceptorCode,
+        minTransactionAmount: dto.minTransactionAmount,
+        maxTransactionAmount: dto.maxTransactionAmount,
+        depositable: dto.depositable,
+        storeName: dto.storeName,
+        storeSite: dto.storeSite,
+        allowedIps: dto.allowedIps,
+        callbackUrl: dto.callbackUrl,
+        category: dto.category,
+        subCategory: dto.subCategory,
       }),
     );
     const settlementAccounts = await this.settlementService.findForWallet(

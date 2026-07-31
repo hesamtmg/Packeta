@@ -2,13 +2,18 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
+  IsBoolean,
   IsEmail,
+  IsIP,
   IsInt,
   IsOptional,
   IsString,
   IsUUID,
+  IsUrl,
   Matches,
+  MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { SettlementAccountDto } from '../../settlement/dto/settlement-account.dto';
@@ -63,4 +68,57 @@ export class CreateWalletDto {
   @IsOptional()
   @IsString()
   acceptorCode?: string;
+
+  // All wallets: an optional per-transaction amount band (minor units).
+  // Both are independently optional; a transaction whose amount falls
+  // outside whichever bound(s) are set is rejected.
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  minTransactionAmount?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  maxTransactionAmount?: number;
+
+  // All wallets: whether the self-service Deposit action is allowed here.
+  // Defaults to true (matches the DB column default) when omitted.
+  @IsOptional()
+  @IsBoolean()
+  depositable?: boolean;
+
+  // Merchant wallets only: storefront identity + access controls — see the
+  // Wallet entity for how each is used.
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  storeName?: string;
+
+  @IsOptional()
+  @ValidateIf((o) => o.storeSite !== '')
+  @IsUrl({ require_tld: false })
+  storeSite?: string;
+
+  @IsOptional()
+  @ArrayMinSize(1)
+  @IsIP(undefined, { each: true })
+  allowedIps?: string[];
+
+  @IsOptional()
+  @ValidateIf((o) => o.callbackUrl !== '')
+  @IsUrl({ protocols: ['https'], require_protocol: true, require_tld: false })
+  callbackUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  category?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  subCategory?: string;
 }

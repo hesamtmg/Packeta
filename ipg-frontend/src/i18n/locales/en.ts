@@ -7,6 +7,10 @@ export default {
   expiresIn: 'Expires in {time}',
   loading: 'Loading…',
   expiredMessage: 'This payment has expired. Ask the merchant for a new link.',
+  merchant: {
+    terminal: 'Terminal {value}',
+    acceptor: 'Acceptor {value}',
+  },
   phone: {
     prompt: 'Enter your phone number to identify yourself and pick a wallet to pay from.',
     placeholder: '+15551234567',
