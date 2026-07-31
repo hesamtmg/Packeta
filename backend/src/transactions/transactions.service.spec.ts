@@ -17,6 +17,7 @@ interface WalletTypeFixture {
   allowP2pIn: boolean;
   allowPurchaseOut?: boolean;
   allowPurchaseIn?: boolean;
+  depositable?: boolean;
 }
 
 interface WalletFixture {
@@ -159,18 +160,18 @@ function walletType(
     allowWithdraw: true,
     allowP2pOut: true,
     allowP2pIn: true,
+    depositable: true,
     ...overrides,
   };
 }
 
 describe('TransactionsService.deposit', () => {
-  it('rejects a deposit into a wallet that has deposits disabled', async () => {
+  it('rejects a deposit into a wallet whose type has deposits disabled', async () => {
     const wallet: WalletFixture = {
       id: 'wallet-1',
       balance: '0',
-      walletType: walletType(),
-      depositable: false,
-    } as any;
+      walletType: walletType({ depositable: false }),
+    };
     const { service } = buildService({ senderWallet: wallet });
 
     await expect(
@@ -178,13 +179,12 @@ describe('TransactionsService.deposit', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('allows a deposit into a wallet that accepts deposits', async () => {
+  it('allows a deposit into a wallet whose type accepts deposits', async () => {
     const wallet: WalletFixture = {
       id: 'wallet-1',
       balance: '0',
-      walletType: walletType(),
-      depositable: true,
-    } as any;
+      walletType: walletType({ depositable: true }),
+    };
     const { service } = buildService({ senderWallet: wallet });
 
     const result = await service.deposit('user-1', 'wallet-1', 250, 'idem-2');

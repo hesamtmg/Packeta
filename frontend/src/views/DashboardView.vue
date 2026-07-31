@@ -33,7 +33,6 @@ const newWalletTerminalId = ref('');
 const newWalletAcceptorCode = ref('');
 const newWalletMinAmount = ref('');
 const newWalletMaxAmount = ref('');
-const newWalletDepositable = ref(true);
 const newWalletStoreName = ref('');
 const newWalletStoreSite = ref('');
 const newWalletAllowedIps = ref('');
@@ -50,7 +49,6 @@ const editTerminalId = ref('');
 const editAcceptorCode = ref('');
 const editMinAmount = ref('');
 const editMaxAmount = ref('');
-const editDepositable = ref(true);
 const editStoreName = ref('');
 const editStoreSite = ref('');
 const editAllowedIps = ref('');
@@ -154,6 +152,7 @@ function badges(w: Wallet): string[] {
   if (!w.walletType.allowP2pOut && !w.walletType.allowP2pIn) {
     list.push(t('dashboard.wallets.noTransfers'));
   }
+  if (!w.walletType.depositable) list.push(t('dashboard.wallets.noDeposits'));
   if (w.restrictedCounterparties?.length) list.push(t('dashboard.wallets.marketBadge'));
   if (w.closedAt) list.push(t('dashboard.wallets.closedBadge'));
   return list;
@@ -344,7 +343,6 @@ function toggleEditWallet(w: Wallet) {
   editMaxAmount.value = w.maxTransactionAmount
     ? String(Number(w.maxTransactionAmount) / 10 ** w.walletType.currency.decimalPlaces)
     : '';
-  editDepositable.value = w.depositable;
   editStoreName.value = w.storeName ?? '';
   editStoreSite.value = w.storeSite ?? '';
   editAllowedIps.value = (w.allowedIps ?? []).join(', ');
@@ -364,7 +362,6 @@ function onSaveWalletEdit(w: Wallet) {
   runAction(async () => {
     const options: WalletOptionsInput = {
       restrictedCounterparties: parseEmailList(editRestrictedCounterparties.value),
-      depositable: editDepositable.value,
     };
     const scale = 10 ** w.walletType.currency.decimalPlaces;
     if (editMinAmount.value) {
@@ -411,7 +408,7 @@ function onCloseWallet(w: Wallet) {
 
 function onAddWallet() {
   runAction(async () => {
-    const options: WalletOptionsInput = { depositable: newWalletDepositable.value };
+    const options: WalletOptionsInput = {};
     const restricted = parseEmailList(newWalletRestrictedCounterparties.value);
     if (restricted.length) {
       options.restrictedCounterparties = restricted;
@@ -462,7 +459,6 @@ function onAddWallet() {
     newWalletAcceptorCode.value = '';
     newWalletMinAmount.value = '';
     newWalletMaxAmount.value = '';
-    newWalletDepositable.value = true;
     newWalletStoreName.value = '';
     newWalletStoreSite.value = '';
     newWalletAllowedIps.value = '';
@@ -685,10 +681,6 @@ function onPurchase() {
             </label>
             <span class="hint">{{ t('dashboard.wallets.marketHint') }}</span>
 
-            <label class="checkbox-field">
-              <input v-model="editDepositable" type="checkbox" />
-              {{ t('dashboard.wallets.depositableLabel') }}
-            </label>
             <label>
               {{ t('dashboard.wallets.minAmountLabel') }}
               <input v-model="editMinAmount" type="number" min="0" :step="amountStep(w.walletType.currency)" class="admin-input" />
@@ -779,10 +771,6 @@ function onPurchase() {
         </label>
         <span class="hint">{{ t('dashboard.wallets.marketHint') }}</span>
 
-        <label class="checkbox-field">
-          <input v-model="newWalletDepositable" type="checkbox" />
-          {{ t('dashboard.wallets.depositableLabel') }}
-        </label>
         <label class="market-field">
           {{ t('dashboard.wallets.minAmountLabel') }}
           <input
@@ -1089,12 +1077,6 @@ function onPurchase() {
   gap: 4px;
   font-size: 0.8rem;
   color: var(--text-dim);
-}
-.wallet-edit-form label.checkbox-field,
-label.checkbox-field {
-  flex-direction: row;
-  align-items: center;
-  gap: 6px;
 }
 .add-wallet {
   display: flex;

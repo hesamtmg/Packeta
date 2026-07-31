@@ -25,7 +25,6 @@ export function serializeWallet(
     acceptorCode: wallet.acceptorCode,
     minTransactionAmount: wallet.minTransactionAmount,
     maxTransactionAmount: wallet.maxTransactionAmount,
-    depositable: wallet.depositable,
     storeName: wallet.storeName,
     storeSite: wallet.storeSite,
     allowedIps: wallet.allowedIps,
@@ -45,6 +44,7 @@ export function serializeWallet(
       supportsAutoWithdraw: wallet.walletType.supportsAutoWithdraw,
       allowPurchaseOut: wallet.walletType.allowPurchaseOut,
       allowPurchaseIn: wallet.walletType.allowPurchaseIn,
+      depositable: wallet.walletType.depositable,
       currency: {
         code: wallet.walletType.currency.code,
         symbol: wallet.walletType.currency.symbol,

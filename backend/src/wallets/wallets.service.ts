@@ -39,7 +39,6 @@ export class WalletsService {
       acceptorCode?: string;
       minTransactionAmount?: number;
       maxTransactionAmount?: number;
-      depositable?: boolean;
       storeName?: string;
       storeSite?: string;
       allowedIps?: string[];
@@ -64,7 +63,6 @@ export class WalletsService {
       acceptorCode: options?.acceptorCode ?? null,
       minTransactionAmount: options?.minTransactionAmount?.toString() ?? null,
       maxTransactionAmount: options?.maxTransactionAmount?.toString() ?? null,
-      depositable: options?.depositable ?? true,
       storeName: options?.storeName ?? null,
       storeSite: options?.storeSite ?? null,
       allowedIps: options?.allowedIps ?? null,
@@ -101,7 +99,6 @@ export class WalletsService {
       acceptorCode?: string;
       minTransactionAmount?: number;
       maxTransactionAmount?: number;
-      depositable?: boolean;
       storeName?: string;
       storeSite?: string;
       allowedIps?: string[];
@@ -155,9 +152,6 @@ export class WalletsService {
     }
     if (options.maxTransactionAmount !== undefined) {
       patch.maxTransactionAmount = options.maxTransactionAmount.toString();
-    }
-    if (options.depositable !== undefined) {
-      patch.depositable = options.depositable;
     }
     if (options.storeName !== undefined) {
       patch.storeName = options.storeName.length ? options.storeName : null;

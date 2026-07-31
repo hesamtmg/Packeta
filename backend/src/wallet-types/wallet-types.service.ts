@@ -69,6 +69,7 @@ export class WalletTypesService {
       supportsAutoWithdraw: dto.supportsAutoWithdraw ?? false,
       allowPurchaseOut: dto.allowPurchaseOut ?? false,
       allowPurchaseIn: dto.allowPurchaseIn ?? false,
+      depositable: dto.depositable ?? true,
     });
     const saved = await this.walletTypesRepository.save(type);
     saved.currency = currency;
@@ -102,6 +103,9 @@ export class WalletTypesService {
     }
     if (dto.allowPurchaseIn !== undefined) {
       type.allowPurchaseIn = dto.allowPurchaseIn;
+    }
+    if (dto.depositable !== undefined) {
+      type.depositable = dto.depositable;
     }
     type.allowNegativeBalance = allowNegativeBalance;
     if (!allowNegativeBalance) {

@@ -80,6 +80,11 @@ export class WalletType {
   @Column({ type: 'boolean', default: false })
   allowPurchaseIn: boolean;
 
+  // Whether the self-service Deposit action is allowed on wallets of this
+  // type at all.
+  @Column({ type: 'boolean', default: true })
+  depositable: boolean;
+
   // Whether every new signup gets a starter wallet of this type (in the
   // default currency). Only the four original built-ins are starter types;
   // custom types (including Merchant) are opt-in via POST /wallets.

@@ -6,7 +6,10 @@ import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
 import { WalletsService } from '../wallets/wallets.service';
 import { WalletTypesService } from '../wallet-types/wallet-types.service';
-import { PHONE_NUMBER_REGEX } from '../common/phone-number';
+import {
+  normalizePhoneNumber,
+  PHONE_NUMBER_REGEX,
+} from '../common/phone-number';
 import { parseXlsxRows } from './xlsx-rows';
 
 const SALT_ROUNDS = 10;
@@ -47,7 +50,9 @@ export class BatchImportService {
       const rowNumber = index + 2; // header is row 1
       const email = row.email?.trim();
       const password = row.password ?? '';
-      const phoneNumber = row.phoneNumber?.trim() || null;
+      const phoneNumber = row.phoneNumber?.trim()
+        ? normalizePhoneNumber(row.phoneNumber.trim())
+        : null;
 
       if (!email || !isEmail(email)) {
         errors.push({ row: rowNumber, message: 'email is missing or invalid' });

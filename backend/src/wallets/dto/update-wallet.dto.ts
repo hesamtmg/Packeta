@@ -1,7 +1,6 @@
 import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
-  IsBoolean,
   IsEmail,
   IsIP,
   IsInt,
@@ -67,10 +66,6 @@ export class UpdateWalletDto {
   @IsInt()
   @Min(1)
   maxTransactionAmount?: number;
-
-  @IsOptional()
-  @IsBoolean()
-  depositable?: boolean;
 
   @IsOptional()
   @IsString()

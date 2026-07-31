@@ -15,6 +15,7 @@ export interface WalletType {
   supportsAutoWithdraw: boolean;
   allowPurchaseOut: boolean;
   allowPurchaseIn: boolean;
+  depositable: boolean;
 }
 
 export interface SettlementAccount {
@@ -35,7 +36,6 @@ export interface Wallet {
   acceptorCode: string | null;
   minTransactionAmount: string | null;
   maxTransactionAmount: string | null;
-  depositable: boolean;
   storeName: string | null;
   storeSite: string | null;
   allowedIps: string[] | null;
@@ -56,7 +56,6 @@ export interface WalletOptionsInput {
   acceptorCode?: string;
   minTransactionAmount?: number;
   maxTransactionAmount?: number;
-  depositable?: boolean;
   storeName?: string;
   storeSite?: string;
   allowedIps?: string[];
