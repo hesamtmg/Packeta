@@ -5,16 +5,26 @@ import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { apiRequest, ApiError } from '../api/client';
 import LanguageSwitcher from '../components/LanguageSwitcher.vue';
+import PhoneAuthForm from '../components/PhoneAuthForm.vue';
 import '../styles/admin-theme.css';
 
 const email = ref('');
 const password = ref('');
 const error = ref('');
 const loading = ref(false);
+const method = ref<'email' | 'phone'>('email');
 
 const auth = useAuthStore();
 const router = useRouter();
 const { t } = useI18n();
+
+async function completeAuth(accessToken: string) {
+  auth.setToken(accessToken);
+  const me = await apiRequest<{ role: string; email: string }>('/users/me');
+  auth.setRole(me.role);
+  auth.setEmail(me.email);
+  router.push({ name: 'dashboard' });
+}
 
 async function onSubmit() {
   error.value = '';
@@ -24,11 +34,7 @@ async function onSubmit() {
       '/auth/signup',
       { method: 'POST', body: { email: email.value, password: password.value } },
     );
-    auth.setToken(accessToken);
-    const me = await apiRequest<{ role: string; email: string }>('/users/me');
-    auth.setRole(me.role);
-    auth.setEmail(me.email);
-    router.push({ name: 'dashboard' });
+    await completeAuth(accessToken);
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : t('auth.signup.error');
   } finally {
@@ -41,22 +47,46 @@ async function onSubmit() {
   <div class="admin-theme auth-theme">
     <LanguageSwitcher class="lang-corner" />
     <div class="auth-page">
-      <form class="auth-form admin-card" @submit.prevent="onSubmit">
+      <div class="auth-form admin-card">
         <div class="auth-logo">P</div>
         <h1>{{ t('auth.signup.title') }}</h1>
         <p class="auth-sub">{{ t('auth.signup.subtitle') }}</p>
-        <label>
-          {{ t('auth.signup.email') }}
-          <input v-model="email" type="email" class="admin-input" required />
-        </label>
-        <label>
-          {{ t('auth.signup.password') }}
-          <input v-model="password" type="password" class="admin-input" minlength="8" required />
-        </label>
-        <p v-if="error" class="admin-error">{{ error }}</p>
-        <button type="submit" class="admin-btn admin-btn-primary" :disabled="loading">{{ t('auth.signup.submit') }}</button>
+
+        <div class="method-toggle">
+          <button
+            type="button"
+            class="method-btn"
+            :class="{ active: method === 'email' }"
+            @click="method = 'email'"
+          >
+            {{ t('auth.methodEmail') }}
+          </button>
+          <button
+            type="button"
+            class="method-btn"
+            :class="{ active: method === 'phone' }"
+            @click="method = 'phone'"
+          >
+            {{ t('auth.methodPhone') }}
+          </button>
+        </div>
+
+        <form v-if="method === 'email'" @submit.prevent="onSubmit">
+          <label>
+            {{ t('auth.signup.email') }}
+            <input v-model="email" type="email" class="admin-input" required />
+          </label>
+          <label>
+            {{ t('auth.signup.password') }}
+            <input v-model="password" type="password" class="admin-input" minlength="8" required />
+          </label>
+          <p v-if="error" class="admin-error">{{ error }}</p>
+          <button type="submit" class="admin-btn admin-btn-primary" :disabled="loading">{{ t('auth.signup.submit') }}</button>
+        </form>
+        <PhoneAuthForm v-else @success="completeAuth" />
+
         <router-link :to="{ name: 'login' }" class="auth-link">{{ t('auth.signup.haveAccount') }}</router-link>
-      </form>
+      </div>
     </div>
   </div>
 </template>
@@ -84,6 +114,35 @@ async function onSubmit() {
   gap: 12px;
   width: 340px;
   padding: 32px 28px;
+}
+.auth-form form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.method-toggle {
+  display: flex;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 999px;
+  padding: 4px;
+}
+.method-btn {
+  flex: 1;
+  width: auto;
+  margin-top: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: 999px;
+  padding: 7px 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.method-btn.active {
+  background: var(--text);
+  color: var(--shell-bg);
 }
 .auth-logo {
   width: 44px;

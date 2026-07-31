@@ -35,6 +35,8 @@ export class WalletsService {
       purchaseTimeoutSeconds?: number;
       settlementAccounts?: SettlementAccountDto[];
       restrictedCounterparties?: string[];
+      terminalId?: string;
+      acceptorCode?: string;
     },
   ): Promise<Wallet> {
     const wallet = manager.create(Wallet, {
@@ -44,6 +46,8 @@ export class WalletsService {
       autoWithdrawTimes: options?.autoWithdrawTimes ?? null,
       purchaseTimeoutSeconds: options?.purchaseTimeoutSeconds ?? null,
       restrictedCounterparties: options?.restrictedCounterparties ?? null,
+      terminalId: options?.terminalId ?? null,
+      acceptorCode: options?.acceptorCode ?? null,
     });
     await manager.save(wallet);
 
@@ -70,6 +74,8 @@ export class WalletsService {
       purchaseTimeoutSeconds?: number;
       settlementAccounts?: SettlementAccountDto[];
       restrictedCounterparties?: string[];
+      terminalId?: string;
+      acceptorCode?: string;
     },
   ): Promise<Wallet> {
     const wallet = await this.getById(userId, walletId);
@@ -89,6 +95,14 @@ export class WalletsService {
     if (options.restrictedCounterparties !== undefined) {
       patch.restrictedCounterparties = options.restrictedCounterparties.length
         ? options.restrictedCounterparties
+        : null;
+    }
+    if (options.terminalId !== undefined) {
+      patch.terminalId = options.terminalId.length ? options.terminalId : null;
+    }
+    if (options.acceptorCode !== undefined) {
+      patch.acceptorCode = options.acceptorCode.length
+        ? options.acceptorCode
         : null;
     }
     if (Object.keys(patch).length) {
@@ -228,6 +242,19 @@ export class WalletsService {
     return wallet;
   }
 
+  // Same as getByIdUnscoped but with the owner attached — for admin detail
+  // views that need to show whose wallet this is.
+  async getByIdWithOwner(walletId: string): Promise<Wallet> {
+    const wallet = await this.walletsRepository.findOne({
+      where: { id: walletId },
+      relations: WALLET_RELATIONS_WITH_OWNER,
+    });
+    if (!wallet) {
+      throw new NotFoundException('Wallet not found');
+    }
+    return wallet;
+  }
+
   // Any wallet of the given currency that is eligible to receive a
   // peer-to-peer transfer, oldest first — the recipient's own choice of
   // which specific wallet to expose is not something the sender gets to
@@ -284,6 +311,23 @@ export class WalletsService {
       .where('wallet.userId = :userId', { userId })
       .andWhere('walletType.allowPurchaseOut = true')
       .andWhere('walletType.currencyId = :currencyId', { currencyId })
+      .andWhere('wallet.closedAt IS NULL')
+      .orderBy('wallet.createdAt', 'ASC')
+      .getMany();
+  }
+
+  // Admin use only: every not-closed wallet of this user that can receive
+  // purchases, across all currencies — used by the admin panel's "create a
+  // charge on this merchant's behalf" flow, where the admin (not the
+  // merchant) needs to see and choose among all of them rather than having
+  // one auto-picked for a single currency.
+  async listMerchantEligibleWallets(userId: string): Promise<Wallet[]> {
+    return this.walletsRepository
+      .createQueryBuilder('wallet')
+      .innerJoinAndSelect('wallet.walletType', 'walletType')
+      .innerJoinAndSelect('walletType.currency', 'currency')
+      .where('wallet.userId = :userId', { userId })
+      .andWhere('walletType.allowPurchaseIn = true')
       .andWhere('wallet.closedAt IS NULL')
       .orderBy('wallet.createdAt', 'ASC')
       .getMany();

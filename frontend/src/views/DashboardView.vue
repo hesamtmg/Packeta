@@ -29,12 +29,16 @@ const newWalletAutoWithdrawTimes = ref(['', '', '']);
 const newWalletPurchaseTimeoutMinutes = ref('');
 const newWalletSettlementAccounts = ref<{ iban: string; label: string; percent: string }[]>([]);
 const newWalletRestrictedCounterparties = ref('');
+const newWalletTerminalId = ref('');
+const newWalletAcceptorCode = ref('');
 
 const editingWalletId = ref<string | null>(null);
 const editRestrictedCounterparties = ref('');
 const editAutoWithdrawTimes = ref(['', '', '']);
 const editPurchaseTimeoutMinutes = ref('');
 const editSettlementAccounts = ref<{ iban: string; label: string; percent: string }[]>([]);
+const editTerminalId = ref('');
+const editAcceptorCode = ref('');
 const chargeSettlementSplits = ref<
   { iban: string; label: string; type: 'PERCENT' | 'FIXED'; value: string }[]
 >([]);
@@ -314,6 +318,8 @@ function toggleEditWallet(w: Wallet) {
     label: account.label ?? '',
     percent: account.percent,
   }));
+  editTerminalId.value = w.terminalId ?? '';
+  editAcceptorCode.value = w.acceptorCode ?? '';
 }
 
 function onSaveWalletEdit(w: Wallet) {
@@ -323,6 +329,8 @@ function onSaveWalletEdit(w: Wallet) {
       purchaseTimeoutSeconds?: number;
       settlementAccounts?: { iban: string; label?: string; percent: number }[];
       restrictedCounterparties?: string[];
+      terminalId?: string;
+      acceptorCode?: string;
     } = {
       restrictedCounterparties: parseEmailList(editRestrictedCounterparties.value),
     };
@@ -344,6 +352,8 @@ function onSaveWalletEdit(w: Wallet) {
       options.purchaseTimeoutSeconds = editPurchaseTimeoutMinutes.value
         ? Math.round(Number(editPurchaseTimeoutMinutes.value) * 60)
         : undefined;
+      options.terminalId = editTerminalId.value;
+      options.acceptorCode = editAcceptorCode.value;
     }
     await wallet.updateWallet(w.id, options);
     editingWalletId.value = null;
@@ -361,6 +371,8 @@ function onAddWallet() {
       purchaseTimeoutSeconds?: number;
       settlementAccounts?: { iban: string; label?: string; percent: number }[];
       restrictedCounterparties?: string[];
+      terminalId?: string;
+      acceptorCode?: string;
     } = {};
     const restricted = parseEmailList(newWalletRestrictedCounterparties.value);
     if (restricted.length) {
@@ -379,10 +391,14 @@ function onAddWallet() {
         }));
       }
     }
-    if (showPurchaseTimeoutField.value && newWalletPurchaseTimeoutMinutes.value) {
-      options.purchaseTimeoutSeconds = Math.round(
-        Number(newWalletPurchaseTimeoutMinutes.value) * 60,
-      );
+    if (showPurchaseTimeoutField.value) {
+      if (newWalletPurchaseTimeoutMinutes.value) {
+        options.purchaseTimeoutSeconds = Math.round(
+          Number(newWalletPurchaseTimeoutMinutes.value) * 60,
+        );
+      }
+      if (newWalletTerminalId.value) options.terminalId = newWalletTerminalId.value;
+      if (newWalletAcceptorCode.value) options.acceptorCode = newWalletAcceptorCode.value;
     }
     await wallet.createWallet(newWalletType.value, options);
     newWalletType.value = '';
@@ -390,6 +406,8 @@ function onAddWallet() {
     newWalletPurchaseTimeoutMinutes.value = '';
     newWalletSettlementAccounts.value = [];
     newWalletRestrictedCounterparties.value = '';
+    newWalletTerminalId.value = '';
+    newWalletAcceptorCode.value = '';
   });
 }
 
@@ -629,6 +647,14 @@ function onPurchase() {
             <template v-if="w.walletType.allowPurchaseIn">
               <span class="hint">{{ t('dashboard.wallets.verifyTimeoutLabel') }}</span>
               <input v-model="editPurchaseTimeoutMinutes" type="number" min="1" placeholder="15" class="admin-input" />
+              <label>
+                {{ t('dashboard.wallets.terminalIdLabel') }}
+                <input v-model="editTerminalId" type="text" class="admin-input" />
+              </label>
+              <label>
+                {{ t('dashboard.wallets.acceptorCodeLabel') }}
+                <input v-model="editAcceptorCode" type="text" class="admin-input" />
+              </label>
             </template>
 
             <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.wallets.saveEdit') }}</button>
@@ -684,6 +710,14 @@ function onPurchase() {
             placeholder="15"
             class="admin-input"
           />
+          <label class="market-field">
+            {{ t('dashboard.wallets.terminalIdLabel') }}
+            <input v-model="newWalletTerminalId" type="text" class="admin-input" />
+          </label>
+          <label class="market-field">
+            {{ t('dashboard.wallets.acceptorCodeLabel') }}
+            <input v-model="newWalletAcceptorCode" type="text" class="admin-input" />
+          </label>
         </template>
 
         <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.wallets.add') }}</button>
