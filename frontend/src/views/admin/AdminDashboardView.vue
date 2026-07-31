@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../../api/client';
 import { formatAmount } from '../../utils/currency';
+import { displayIdentity } from '../../utils/identity';
 import {
   walletLookup,
   transactionCurrency,
@@ -58,7 +59,7 @@ function ownerEmail(tx: AdminTransaction): string {
   const w =
     (tx.fromWalletId && walletsById.value.get(tx.fromWalletId)) ||
     (tx.toWalletId && walletsById.value.get(tx.toWalletId));
-  return w ? w.ownerEmail : t('common.none');
+  return w ? displayIdentity({ email: w.ownerEmail, phoneNumber: w.ownerPhoneNumber }) : t('common.none');
 }
 
 async function load() {
@@ -143,7 +144,12 @@ onMounted(load);
           </tr>
         </thead>
         <tbody>
-          <tr v-for="tx in transactions.slice(0, 8)" :key="tx.id">
+          <tr
+            v-for="tx in transactions.slice(0, 8)"
+            :key="tx.id"
+            class="tx-row-clickable"
+            @click="$router.push({ name: 'admin-transaction-detail', params: { id: tx.id } })"
+          >
             <td><span class="admin-badge">{{ tx.type }}</span></td>
             <td>{{ formatTxAmount(tx) }}</td>
             <td>{{ walletLabel(tx.toWalletId ?? tx.fromWalletId) }}</td>
@@ -158,6 +164,9 @@ onMounted(load);
 </template>
 
 <style scoped>
+.tx-row-clickable {
+  cursor: pointer;
+}
 .hero-card {
   position: relative;
   border-radius: var(--radius-md);

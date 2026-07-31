@@ -12,6 +12,8 @@ import AdminCustomersView from '../views/admin/AdminCustomersView.vue';
 import AdminAdminsView from '../views/admin/AdminAdminsView.vue';
 import AdminWalletTypesView from '../views/admin/AdminWalletTypesView.vue';
 import AdminReportsView from '../views/admin/AdminReportsView.vue';
+import AdminTransactionDetailView from '../views/admin/AdminTransactionDetailView.vue';
+import AdminPurchaseView from '../views/admin/AdminPurchaseView.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -52,6 +54,12 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresAdmin: true },
     },
     {
+      path: '/admin/transactions/:id',
+      name: 'admin-transaction-detail',
+      component: AdminTransactionDetailView,
+      meta: { requiresAuth: true, requiresAdmin: true },
+    },
+    {
       path: '/admin/wallets',
       name: 'admin-wallets',
       component: AdminWalletsView,
@@ -79,6 +87,12 @@ const router = createRouter({
       path: '/admin/reports',
       name: 'admin-reports',
       component: AdminReportsView,
+      meta: { requiresAuth: true, requiresAdmin: true },
+    },
+    {
+      path: '/admin/purchase',
+      name: 'admin-purchase',
+      component: AdminPurchaseView,
       meta: { requiresAuth: true, requiresAdmin: true },
     },
   ],

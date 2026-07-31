@@ -24,6 +24,7 @@ import { serializeWallet } from '../wallets/wallet.serializer';
 import { IpgClientService } from '../ipg/ipg-client.service';
 import { CurrenciesService } from '../currencies/currencies.service';
 import { formatAmount } from '../common/format-amount';
+import { displayIdentity } from '../common/synthetic-email';
 import { SettlementService } from '../settlement/settlement.service';
 import { SettlementSplitDto } from '../settlement/dto/settlement-split.dto';
 
@@ -441,6 +442,13 @@ export class TransactionsService {
   // they identify themselves at the IPG via phone + OTP and pick one of
   // their own eligible wallets there (see PurchaseGatewayService), which
   // calls attachPurchaseWallet to fill in fromWalletId before verify can run.
+  //
+  // explicitWalletId lets a caller who already knows which of the merchant's
+  // wallets should receive this charge skip the oldest-eligible auto-pick —
+  // used by the admin panel, where an admin creating a charge on a
+  // merchant's behalf picks the wallet themselves when there's more than
+  // one. currencyCode is ignored when explicitWalletId is given (the
+  // wallet's own currency is authoritative).
   async initiateCharge(
     merchantUserId: string,
     amount: number,
@@ -448,6 +456,7 @@ export class TransactionsService {
     idempotencyKey: string,
     language?: string,
     settlementSplits?: SettlementSplitDto[],
+    explicitWalletId?: string,
   ): Promise<PurchaseInitiateResult> {
     if (settlementSplits) {
       this.settlementService.validateChargeOverrides(settlementSplits, amount);
@@ -456,20 +465,39 @@ export class TransactionsService {
     return this.run(
       'purchase_charge',
       merchantUserId,
-      { amount, currencyCode, language, settlementSplits },
+      { amount, currencyCode, language, settlementSplits, explicitWalletId },
       idempotencyKey,
       async (manager) => {
-        const currency = await this.currenciesService.findByCode(currencyCode);
-        const toWalletRef =
-          await this.walletsService.findEligiblePurchaseInWallet(
+        let toWalletRef: Wallet | null;
+        let currency: Awaited<ReturnType<CurrenciesService['findByCode']>>;
+        if (explicitWalletId) {
+          // getByIdUnscoped loads walletType.currency, unlike the
+          // findEligiblePurchaseInWallet path below (which only joins
+          // walletType for filtering, not selecting).
+          toWalletRef =
+            await this.walletsService.getByIdUnscoped(explicitWalletId);
+          if (
+            toWalletRef.userId !== merchantUserId ||
+            !toWalletRef.walletType.allowPurchaseIn ||
+            toWalletRef.closedAt
+          ) {
+            throw new NotFoundException(
+              'That wallet cannot receive purchases for this merchant',
+            );
+          }
+          currency = toWalletRef.walletType.currency;
+        } else {
+          currency = await this.currenciesService.findByCode(currencyCode);
+          toWalletRef = await this.walletsService.findEligiblePurchaseInWallet(
             manager,
             merchantUserId,
             currency.id,
           );
-        if (!toWalletRef) {
-          throw new NotFoundException(
-            `You have no ${currency.code} wallet eligible to receive purchases`,
-          );
+          if (!toWalletRef) {
+            throw new NotFoundException(
+              `You have no ${currency.code} wallet eligible to receive purchases`,
+            );
+          }
         }
 
         const timeoutSeconds =
@@ -503,7 +531,7 @@ export class TransactionsService {
         const frontendUrl = this.configService.get<string>('frontendUrl');
         const { authority, paymentUrl } =
           await this.ipgClientService.createPayment({
-            merchantName: merchant!.email,
+            merchantName: displayIdentity(merchant!),
             amount: transaction.amount,
             displayAmount: formatAmount(amount, currency),
             callbackUrl: `${frontendUrl}/purchase/${transaction.id}/callback`,
@@ -1020,6 +1048,58 @@ export class TransactionsService {
       relatedTransactionId: transaction.relatedTransactionId,
       settledAt: transaction.settledAt,
       destinationIban: transaction.destinationIban,
+    };
+  }
+
+  // Admin use only: full detail for any transaction, no ownership check,
+  // with each wallet's owner attached (the customer-scoped getById above
+  // only ever shows the caller their own side).
+  async getByIdUnscoped(transactionId: string) {
+    const transaction = await this.transactionsRepository.findOne({
+      where: { id: transactionId },
+    });
+    if (!transaction) {
+      throw new NotFoundException('Transaction not found');
+    }
+
+    const [fromWallet, toWallet] = await Promise.all([
+      transaction.fromWalletId
+        ? this.walletsService.getByIdWithOwner(transaction.fromWalletId)
+        : null,
+      transaction.toWalletId
+        ? this.walletsService.getByIdWithOwner(transaction.toWalletId)
+        : null,
+    ]);
+
+    return {
+      id: transaction.id,
+      type: transaction.type,
+      amount: transaction.amount,
+      note: transaction.note,
+      idempotencyKey: transaction.idempotencyKey,
+      createdAt: transaction.createdAt,
+      fromWallet: fromWallet
+        ? {
+            ...serializeWallet(fromWallet),
+            ownerId: fromWallet.user.id,
+            ownerEmail: fromWallet.user.email,
+            ownerPhoneNumber: fromWallet.user.phoneNumber,
+          }
+        : null,
+      toWallet: toWallet
+        ? {
+            ...serializeWallet(toWallet),
+            ownerId: toWallet.user.id,
+            ownerEmail: toWallet.user.email,
+            ownerPhoneNumber: toWallet.user.phoneNumber,
+          }
+        : null,
+      status: transaction.status,
+      expiresAt: transaction.expiresAt,
+      relatedTransactionId: transaction.relatedTransactionId,
+      settledAt: transaction.settledAt,
+      destinationIban: transaction.destinationIban,
+      performedByUserId: transaction.performedByUserId,
     };
   }
 

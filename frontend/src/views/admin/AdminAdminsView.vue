@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuthStore } from '../../stores/auth';
+import { displayIdentity } from '../../utils/identity';
 import type { AdminUser } from '../../types/admin';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
 
@@ -75,7 +76,7 @@ onMounted(load);
       <div class="promote-row">
         <select v-model="promoteUserId" class="admin-input">
           <option value="" disabled>{{ t('admin.admins.chooseCustomer') }}</option>
-          <option v-for="c in customers" :key="c.id" :value="c.id">{{ c.email }}</option>
+          <option v-for="c in customers" :key="c.id" :value="c.id">{{ displayIdentity(c) }}</option>
         </select>
         <select v-model="promoteRole" class="admin-input">
           <option value="ADMIN">{{ t('admin.admins.roleAdmin') }}</option>
@@ -100,7 +101,7 @@ onMounted(load);
         </thead>
         <tbody>
           <tr v-for="a in admins" :key="a.id">
-            <td>{{ a.email }}</td>
+            <td>{{ displayIdentity(a) }}</td>
             <td>{{ a.role === 'SUPER_ADMIN' ? t('admin.admins.roleSuperAdmin') : t('admin.admins.roleAdmin') }}</td>
             <td>{{ new Date(a.createdAt).toLocaleDateString() }}</td>
             <td>

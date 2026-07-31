@@ -31,6 +31,8 @@ export interface Wallet {
   purchaseTimeoutSeconds: number | null;
   restrictedCounterparties: string[] | null;
   closedAt: string | null;
+  terminalId: string | null;
+  acceptorCode: string | null;
   settlementAccounts?: SettlementAccount[];
   walletType: WalletType;
   createdAt: string;
@@ -81,6 +83,8 @@ export const useWalletStore = defineStore('wallet', {
         purchaseTimeoutSeconds?: number;
         settlementAccounts?: SettlementAccountInput[];
         restrictedCounterparties?: string[];
+        terminalId?: string;
+        acceptorCode?: string;
       },
     ) {
       await apiRequest('/wallets', {
@@ -96,6 +100,8 @@ export const useWalletStore = defineStore('wallet', {
         purchaseTimeoutSeconds?: number;
         settlementAccounts?: SettlementAccountInput[];
         restrictedCounterparties?: string[];
+        terminalId?: string;
+        acceptorCode?: string;
       },
     ) {
       await apiRequest(`/wallets/${walletId}`, {

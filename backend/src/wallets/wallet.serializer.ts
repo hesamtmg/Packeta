@@ -21,6 +21,8 @@ export function serializeWallet(
     purchaseTimeoutSeconds: wallet.purchaseTimeoutSeconds,
     restrictedCounterparties: wallet.restrictedCounterparties,
     closedAt: wallet.closedAt,
+    terminalId: wallet.terminalId,
+    acceptorCode: wallet.acceptorCode,
     settlementAccounts: settlementAccounts?.map(serializeSettlementAccount),
     walletType: {
       id: wallet.walletType.id,

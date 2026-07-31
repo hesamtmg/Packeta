@@ -70,6 +70,17 @@ export class Wallet {
   @Column({ type: 'timestamptz', nullable: true })
   closedAt: Date | null;
 
+  // Merchant wallets only: the payment-switch (e.g. Shaparak) terminal and
+  // acceptor identifiers this wallet settles under. Purely descriptive on
+  // our side — nothing in the sandbox IPG validates or uses these — but
+  // recorded so a merchant's real-world PSP configuration is visible
+  // alongside the wallet that represents it.
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  terminalId: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  acceptorCode: string | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

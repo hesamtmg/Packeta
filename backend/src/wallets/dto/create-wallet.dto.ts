@@ -5,6 +5,7 @@ import {
   IsEmail,
   IsInt,
   IsOptional,
+  IsString,
   IsUUID,
   Matches,
   Min,
@@ -52,4 +53,14 @@ export class CreateWalletDto {
   @ArrayMinSize(1)
   @IsEmail({}, { each: true })
   restrictedCounterparties?: string[];
+
+  // Merchant wallets only: the PSP terminal/acceptor identifiers this
+  // wallet settles under. Purely descriptive — see the Wallet entity.
+  @IsOptional()
+  @IsString()
+  terminalId?: string;
+
+  @IsOptional()
+  @IsString()
+  acceptorCode?: string;
 }

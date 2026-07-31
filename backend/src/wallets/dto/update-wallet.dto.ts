@@ -4,6 +4,7 @@ import {
   IsEmail,
   IsInt,
   IsOptional,
+  IsString,
   Matches,
   Min,
   ValidateNested,
@@ -40,4 +41,12 @@ export class UpdateWalletDto {
   @IsOptional()
   @IsEmail({}, { each: true })
   restrictedCounterparties?: string[];
+
+  @IsOptional()
+  @IsString()
+  terminalId?: string;
+
+  @IsOptional()
+  @IsString()
+  acceptorCode?: string;
 }

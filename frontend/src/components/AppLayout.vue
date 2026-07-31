@@ -60,6 +60,13 @@ function logout() {
         <header class="admin-topbar">
           <h1>{{ title }}</h1>
           <div class="admin-topbar-actions">
+            <router-link
+              v-if="auth.isAdmin"
+              :to="{ name: 'admin-dashboard' }"
+              class="admin-btn admin-btn-ghost"
+            >
+              {{ t('nav.adminPanel') }}
+            </router-link>
             <LanguageSwitcher />
             <div class="admin-avatar">{{ initials }}</div>
           </div>

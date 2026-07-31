@@ -72,6 +72,12 @@ export class WalletsController {
       walletType,
       'settlement accounts',
     );
+    this.assertPurchaseInCapable(dto.terminalId, walletType, 'a terminal id');
+    this.assertPurchaseInCapable(
+      dto.acceptorCode,
+      walletType,
+      'an acceptor code',
+    );
     if (dto.settlementAccounts) {
       this.settlementService.validateWalletDefaults(dto.settlementAccounts);
     }
@@ -82,6 +88,8 @@ export class WalletsController {
         purchaseTimeoutSeconds: dto.purchaseTimeoutSeconds,
         settlementAccounts: dto.settlementAccounts,
         restrictedCounterparties: dto.restrictedCounterparties,
+        terminalId: dto.terminalId,
+        acceptorCode: dto.acceptorCode,
       }),
     );
     const settlementAccounts = await this.settlementService.findForWallet(
@@ -112,6 +120,12 @@ export class WalletsController {
       walletType,
       'settlement accounts',
     );
+    this.assertPurchaseInCapable(dto.terminalId, walletType, 'a terminal id');
+    this.assertPurchaseInCapable(
+      dto.acceptorCode,
+      walletType,
+      'an acceptor code',
+    );
 
     const wallet = await this.dataSource.transaction((manager) =>
       this.walletsService.updateForUser(manager, user.userId, id, {
@@ -119,6 +133,8 @@ export class WalletsController {
         purchaseTimeoutSeconds: dto.purchaseTimeoutSeconds,
         settlementAccounts: dto.settlementAccounts,
         restrictedCounterparties: dto.restrictedCounterparties,
+        terminalId: dto.terminalId,
+        acceptorCode: dto.acceptorCode,
       }),
     );
     const settlementAccounts = await this.settlementService.findForWallet(
@@ -151,10 +167,11 @@ export class WalletsController {
   private assertPurchaseInCapable(
     value: unknown,
     walletType: { allowPurchaseIn: boolean },
+    label = 'a verification timeout',
   ): void {
     if (value !== undefined && !walletType.allowPurchaseIn) {
       throw new BadRequestException(
-        'This wallet type does not accept purchases, so a verification timeout is not applicable',
+        `This wallet type does not accept purchases, so ${label} is not applicable`,
       );
     }
   }
