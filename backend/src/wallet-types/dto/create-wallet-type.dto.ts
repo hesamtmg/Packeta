@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsString,
   Matches,
+  Max,
   Min,
 } from 'class-validator';
 
@@ -64,4 +65,48 @@ export class CreateWalletTypeDto {
   @IsOptional()
   @IsBoolean()
   depositable?: boolean;
+
+  // Credit-line fields (repository/credit wallet feature). All optional and
+  // only meaningful on the CREDIT-style types this feature applies to.
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  virtualAmount?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(31)
+  installmentDate?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(31)
+  paymentDeadlineDate?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  fee?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  penalty?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  unblockFee?: number;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{10}$/, { message: 'nationalCode must be 10 digits' })
+  nationalCode?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  installmentCount?: number;
 }

@@ -92,6 +92,45 @@ export class WalletType {
   @Column({ type: 'boolean', default: true })
   depositable: boolean;
 
+  // Credit-line fields (repository/credit wallet feature). All nullable and
+  // only meaningful on the CREDIT-style types this feature applies to —
+  // unused on every other type.
+  //
+  // Ceiling on the virtual (allocatable, not directly spendable) balance a
+  // wallet of this type can be granted, in minor units.
+  @Column({ type: 'bigint', nullable: true })
+  virtualAmount: string | null;
+
+  // Day of month (1-31) each billing cycle's installment is generated.
+  @Column({ type: 'smallint', nullable: true })
+  installmentDate: number | null;
+
+  // Day of month (1-31) by which a generated installment must be paid.
+  @Column({ type: 'smallint', nullable: true })
+  paymentDeadlineDate: number | null;
+
+  // Flat fee charged per installment, in minor units.
+  @Column({ type: 'bigint', nullable: true })
+  fee: string | null;
+
+  // Flat penalty charged when an installment misses its payment deadline, in
+  // minor units.
+  @Column({ type: 'bigint', nullable: true })
+  penalty: string | null;
+
+  // Flat fee charged to unblock a wallet frozen for missed payment, in minor
+  // units.
+  @Column({ type: 'bigint', nullable: true })
+  unblockFee: string | null;
+
+  // Iranian national ID required of the wallet holder.
+  @Column({ type: 'varchar', length: 10, nullable: true })
+  nationalCode: string | null;
+
+  // How many installments each credit line is split into.
+  @Column({ type: 'smallint', nullable: true })
+  installmentCount: number | null;
+
   // Whether every new signup gets a starter wallet of this type (in the
   // default currency). Only the four original built-ins are starter types;
   // custom types (including Merchant) are opt-in via POST /wallets.

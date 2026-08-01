@@ -1,6 +1,5 @@
 import { Type } from 'class-transformer';
 import {
-  ArrayMaxSize,
   ArrayMinSize,
   IsEmail,
   IsIP,
@@ -9,7 +8,6 @@ import {
   IsString,
   IsUUID,
   IsUrl,
-  Matches,
   MaxLength,
   Min,
   ValidateIf,

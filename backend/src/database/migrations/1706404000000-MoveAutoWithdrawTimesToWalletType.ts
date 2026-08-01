@@ -4,9 +4,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 // per-wallet-type "law" instead, consistent with every other capability
 // flag (depositable, allowWithdraw, allowP2pOut, etc.) — see the WalletType
 // entity. Every wallet of a given type now sweeps on the same schedule.
-export class MoveAutoWithdrawTimesToWalletType1706404000000
-  implements MigrationInterface
-{
+export class MoveAutoWithdrawTimesToWalletType1706404000000 implements MigrationInterface {
   name = 'MoveAutoWithdrawTimesToWalletType1706404000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

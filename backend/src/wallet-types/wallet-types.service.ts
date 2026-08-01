@@ -76,6 +76,15 @@ export class WalletTypesService {
       allowPurchaseOut: dto.allowPurchaseOut ?? false,
       allowPurchaseIn: dto.allowPurchaseIn ?? false,
       depositable: dto.depositable ?? true,
+      virtualAmount:
+        dto.virtualAmount !== undefined ? String(dto.virtualAmount) : null,
+      installmentDate: dto.installmentDate ?? null,
+      paymentDeadlineDate: dto.paymentDeadlineDate ?? null,
+      fee: dto.fee !== undefined ? String(dto.fee) : null,
+      penalty: dto.penalty !== undefined ? String(dto.penalty) : null,
+      unblockFee: dto.unblockFee !== undefined ? String(dto.unblockFee) : null,
+      nationalCode: dto.nationalCode ?? null,
+      installmentCount: dto.installmentCount ?? null,
     });
     const saved = await this.walletTypesRepository.save(type);
     saved.currency = currency;
@@ -140,6 +149,30 @@ export class WalletTypesService {
     }
     if (dto.depositable !== undefined) {
       type.depositable = dto.depositable;
+    }
+    if (dto.virtualAmount !== undefined) {
+      type.virtualAmount = String(dto.virtualAmount);
+    }
+    if (dto.installmentDate !== undefined) {
+      type.installmentDate = dto.installmentDate;
+    }
+    if (dto.paymentDeadlineDate !== undefined) {
+      type.paymentDeadlineDate = dto.paymentDeadlineDate;
+    }
+    if (dto.fee !== undefined) {
+      type.fee = String(dto.fee);
+    }
+    if (dto.penalty !== undefined) {
+      type.penalty = String(dto.penalty);
+    }
+    if (dto.unblockFee !== undefined) {
+      type.unblockFee = String(dto.unblockFee);
+    }
+    if (dto.nationalCode !== undefined) {
+      type.nationalCode = dto.nationalCode;
+    }
+    if (dto.installmentCount !== undefined) {
+      type.installmentCount = dto.installmentCount;
     }
     type.allowNegativeBalance = allowNegativeBalance;
     if (!allowNegativeBalance) {
