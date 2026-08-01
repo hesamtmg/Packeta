@@ -416,7 +416,7 @@ describe('WalletsService.grantCredit', () => {
     expect(manager.update).toHaveBeenCalledWith(
       expect.anything(),
       'credit-wallet-1',
-      { repositoryWalletId: 'repo-1' },
+      { repositoryWalletId: 'repo-1', balance: '400' },
     );
     expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'repo-1', {
       virtualAmount: '600',

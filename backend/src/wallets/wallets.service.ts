@@ -279,8 +279,13 @@ export class WalletsService {
         nationalCode: dto.nationalCode,
       },
     );
+    // The grant preloads the wallet's spendable balance up to its ceiling —
+    // virtualAmount stays the fixed ceiling this wallet was granted, while
+    // balance is what's actually left to spend right now (drawn down by
+    // ordinary spends, same as any other wallet's balance).
     await manager.update(Wallet, creditWallet.id, {
       repositoryWalletId: repository.id,
+      balance: requested.toString(),
     });
     await manager.update(Wallet, repository.id, {
       virtualAmount: (availablePool - requested).toString(),
