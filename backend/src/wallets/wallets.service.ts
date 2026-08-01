@@ -31,7 +31,6 @@ export class WalletsService {
     userId: string,
     walletTypeId: string,
     options?: {
-      autoWithdrawTimes?: string[];
       purchaseTimeoutSeconds?: number;
       settlementAccounts?: SettlementAccountDto[];
       restrictedCounterparties?: string[];
@@ -56,7 +55,6 @@ export class WalletsService {
       userId,
       walletTypeId,
       balance: '0',
-      autoWithdrawTimes: options?.autoWithdrawTimes ?? null,
       purchaseTimeoutSeconds: options?.purchaseTimeoutSeconds ?? null,
       restrictedCounterparties: options?.restrictedCounterparties ?? null,
       terminalId: options?.terminalId ?? null,
@@ -91,7 +89,6 @@ export class WalletsService {
     userId: string,
     walletId: string,
     options: {
-      autoWithdrawTimes?: string[];
       purchaseTimeoutSeconds?: number;
       settlementAccounts?: SettlementAccountDto[];
       restrictedCounterparties?: string[];
@@ -126,11 +123,6 @@ export class WalletsService {
     );
 
     const patch: Partial<Wallet> = {};
-    if (options.autoWithdrawTimes !== undefined) {
-      patch.autoWithdrawTimes = options.autoWithdrawTimes.length
-        ? options.autoWithdrawTimes
-        : null;
-    }
     if (options.purchaseTimeoutSeconds !== undefined) {
       patch.purchaseTimeoutSeconds = options.purchaseTimeoutSeconds;
     }
@@ -278,7 +270,7 @@ export class WalletsService {
       .innerJoinAndSelect('wallet.walletType', 'walletType')
       .innerJoinAndSelect('walletType.currency', 'currency')
       .where('walletType.supportsAutoWithdraw = true')
-      .andWhere('wallet.autoWithdrawTimes IS NOT NULL')
+      .andWhere('walletType.autoWithdrawTimes IS NOT NULL')
       .andWhere('wallet.balance <> 0')
       .andWhere('wallet.closedAt IS NULL')
       .getMany();

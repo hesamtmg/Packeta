@@ -65,7 +65,6 @@ export class WalletsController {
     @Body() dto: CreateWalletDto,
   ) {
     const walletType = await this.walletTypesService.findById(dto.walletTypeId);
-    this.assertAutoWithdrawCapable(dto.autoWithdrawTimes, walletType);
     this.assertPurchaseInCapable(dto.purchaseTimeoutSeconds, walletType);
     this.assertAutoWithdrawCapable(
       dto.settlementAccounts,
@@ -90,7 +89,6 @@ export class WalletsController {
 
     const wallet = await this.dataSource.transaction((manager) =>
       this.walletsService.createForUser(manager, user.userId, walletType.id, {
-        autoWithdrawTimes: dto.autoWithdrawTimes,
         purchaseTimeoutSeconds: dto.purchaseTimeoutSeconds,
         settlementAccounts: dto.settlementAccounts,
         restrictedCounterparties: dto.restrictedCounterparties,
@@ -122,12 +120,6 @@ export class WalletsController {
     const existing = await this.walletsService.getById(user.userId, id);
     const walletType = existing.walletType;
 
-    this.assertAutoWithdrawCapable(dto.autoWithdrawTimes, walletType);
-    if (dto.autoWithdrawTimes?.length && dto.autoWithdrawTimes.length !== 3) {
-      throw new BadRequestException(
-        'autoWithdrawTimes must be exactly 3 times, or an empty array to clear it',
-      );
-    }
     this.assertPurchaseInCapable(dto.purchaseTimeoutSeconds, walletType);
     this.assertAutoWithdrawCapable(
       dto.settlementAccounts,
@@ -149,7 +141,6 @@ export class WalletsController {
 
     const wallet = await this.dataSource.transaction((manager) =>
       this.walletsService.updateForUser(manager, user.userId, id, {
-        autoWithdrawTimes: dto.autoWithdrawTimes,
         purchaseTimeoutSeconds: dto.purchaseTimeoutSeconds,
         settlementAccounts: dto.settlementAccounts,
         restrictedCounterparties: dto.restrictedCounterparties,

@@ -17,7 +17,6 @@ export function serializeWallet(
   return {
     id: wallet.id,
     balance: wallet.balance,
-    autoWithdrawTimes: wallet.autoWithdrawTimes,
     purchaseTimeoutSeconds: wallet.purchaseTimeoutSeconds,
     restrictedCounterparties: wallet.restrictedCounterparties,
     closedAt: wallet.closedAt,
@@ -42,6 +41,7 @@ export function serializeWallet(
       allowP2pOut: wallet.walletType.allowP2pOut,
       allowP2pIn: wallet.walletType.allowP2pIn,
       supportsAutoWithdraw: wallet.walletType.supportsAutoWithdraw,
+      autoWithdrawTimes: wallet.walletType.autoWithdrawTimes,
       allowPurchaseOut: wallet.walletType.allowPurchaseOut,
       allowPurchaseIn: wallet.walletType.allowPurchaseIn,
       depositable: wallet.walletType.depositable,

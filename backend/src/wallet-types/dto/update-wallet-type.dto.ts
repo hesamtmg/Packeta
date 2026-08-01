@@ -1,5 +1,10 @@
-import { IsBoolean, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Matches, Min } from 'class-validator';
 
+// Same "empty clears" convention as UpdateWalletDto: send an explicit empty
+// array to clear autoWithdrawTimes back to unset. Non-empty must still be
+// exactly 3 times — checked in the service alongside the supportsAutoWithdraw
+// cross-check, since "empty is fine, non-empty must be exactly 3" isn't
+// expressible with a single array-size decorator.
 export class UpdateWalletTypeDto {
   @IsOptional()
   @IsString()
@@ -29,6 +34,10 @@ export class UpdateWalletTypeDto {
   @IsOptional()
   @IsBoolean()
   supportsAutoWithdraw?: boolean;
+
+  @IsOptional()
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { each: true })
+  autoWithdrawTimes?: string[];
 
   @IsOptional()
   @IsBoolean()

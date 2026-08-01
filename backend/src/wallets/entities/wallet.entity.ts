@@ -41,12 +41,6 @@ export class Wallet {
   @Column({ type: 'bigint', default: 0 })
   balance: string;
 
-  // Merchant wallets only: exactly 3 "HH:MM" times (server-local) at which
-  // the full balance is auto-swept out. Set at creation, only meaningful
-  // when the wallet type's supportsAutoWithdraw is true.
-  @Column({ type: 'varchar', length: 5, array: true, nullable: true })
-  autoWithdrawTimes: string[] | null;
-
   // Merchant wallets only: how long a PURCHASE stays PENDING awaiting the
   // merchant's /verify call before the timeout sweep auto-reverses it. Set
   // at creation, only meaningful when the wallet type's allowPurchaseIn is

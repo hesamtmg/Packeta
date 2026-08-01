@@ -13,7 +13,6 @@ import {
 import { parseXlsxRows } from './xlsx-rows';
 
 const SALT_ROUNDS = 10;
-const AUTO_WITHDRAW_TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export interface BatchRowError {
   row: number;
@@ -114,10 +113,9 @@ export class BatchImportService {
   }
 
   // Columns: ownerEmail, walletTypeCode, currencyCode, and optionally
-  // terminalId, acceptorCode, autoWithdrawTimes ("06:00;12:00;18:00"),
-  // purchaseTimeoutMinutes, restrictedCounterparties (comma-separated
-  // emails) — same fields CreateWalletDto accepts, just flattened for a
-  // spreadsheet row.
+  // terminalId, acceptorCode, purchaseTimeoutMinutes, restrictedCounterparties
+  // (comma-separated emails) — same fields CreateWalletDto accepts, just
+  // flattened for a spreadsheet row.
   async importWallets(buffer: Buffer): Promise<BatchResult> {
     const rows = await parseXlsxRows(buffer);
     const errors: BatchRowError[] = [];
@@ -166,30 +164,6 @@ export class BatchImportService {
         continue;
       }
 
-      const autoWithdrawTimes = row.autoWithdrawTimes
-        ? row.autoWithdrawTimes.split(';').map((t) => t.trim())
-        : [];
-      if (autoWithdrawTimes.length) {
-        if (
-          autoWithdrawTimes.length !== 3 ||
-          !autoWithdrawTimes.every((t) => AUTO_WITHDRAW_TIME_REGEX.test(t))
-        ) {
-          errors.push({
-            row: rowNumber,
-            message:
-              'autoWithdrawTimes must be exactly 3 "HH:MM" times separated by ;',
-          });
-          continue;
-        }
-        if (!walletType.supportsAutoWithdraw) {
-          errors.push({
-            row: rowNumber,
-            message: `${walletTypeCode}/${currencyCode} does not support auto-withdraw scheduling`,
-          });
-          continue;
-        }
-      }
-
       const purchaseTimeoutMinutesRaw = row.purchaseTimeoutMinutes?.trim();
       const terminalId = row.terminalId?.trim() || undefined;
       const acceptorCode = row.acceptorCode?.trim() || undefined;
@@ -236,9 +210,6 @@ export class BatchImportService {
       try {
         await this.dataSource.transaction((manager) =>
           this.walletsService.createForUser(manager, owner.id, walletType.id, {
-            autoWithdrawTimes: autoWithdrawTimes.length
-              ? autoWithdrawTimes
-              : undefined,
             purchaseTimeoutSeconds,
             restrictedCounterparties: restrictedCounterparties.length
               ? restrictedCounterparties

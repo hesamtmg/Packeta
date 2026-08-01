@@ -68,11 +68,18 @@ export class WalletType {
   @Column({ type: 'boolean', default: false })
   allowP2pIn: boolean;
 
-  // Merchant-style types: eligible for the per-wallet auto-withdraw sweep
-  // schedule, and/or able to send/receive a PURCHASE (customer -> merchant
-  // only, never the reverse).
+  // Merchant-style types: eligible for the auto-withdraw sweep schedule,
+  // and/or able to send/receive a PURCHASE (customer -> merchant only,
+  // never the reverse).
   @Column({ type: 'boolean', default: false })
   supportsAutoWithdraw: boolean;
+
+  // Exactly 3 "HH:MM" (server-local) times at which every wallet of this
+  // type has its full balance auto-swept out via a plain WITHDRAW. Only
+  // meaningful when supportsAutoWithdraw is true — shared by every wallet of
+  // this type, not configurable per wallet.
+  @Column({ type: 'varchar', length: 5, array: true, nullable: true })
+  autoWithdrawTimes: string[] | null;
 
   @Column({ type: 'boolean', default: false })
   allowPurchaseOut: boolean;
