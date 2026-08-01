@@ -2,7 +2,6 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
-  IsBoolean,
   IsEmail,
   IsIP,
   IsInt,
@@ -83,12 +82,6 @@ export class CreateWalletDto {
   @IsInt()
   @Min(1)
   maxTransactionAmount?: number;
-
-  // All wallets: whether the self-service Deposit action is allowed here.
-  // Defaults to true (matches the DB column default) when omitted.
-  @IsOptional()
-  @IsBoolean()
-  depositable?: boolean;
 
   // Merchant wallets only: storefront identity + access controls — see the
   // Wallet entity for how each is used.

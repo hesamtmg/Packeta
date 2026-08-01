@@ -90,11 +90,6 @@ export class Wallet {
   @Column({ type: 'bigint', nullable: true })
   maxTransactionAmount: string | null;
 
-  // Every wallet: whether the self-service Deposit action is allowed on
-  // this wallet at all. Defaults to true so existing wallets are unaffected.
-  @Column({ type: 'boolean', default: true })
-  depositable: boolean;
-
   // Merchant wallets only: storefront identity shown on the IPG pay page in
   // place of the merchant's raw email/phone, and access controls enforced on
   // self-service charge creation (POST /transactions/purchase/charge) — see

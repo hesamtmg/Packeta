@@ -50,4 +50,8 @@ export class CreateWalletTypeDto {
   @IsOptional()
   @IsBoolean()
   allowPurchaseIn?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  depositable?: boolean;
 }

@@ -37,4 +37,8 @@ export class UpdateWalletTypeDto {
   @IsOptional()
   @IsBoolean()
   allowPurchaseIn?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  depositable?: boolean;
 }

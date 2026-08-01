@@ -22,6 +22,7 @@ interface WalletType {
   supportsAutoWithdraw: boolean;
   allowPurchaseOut: boolean;
   allowPurchaseIn: boolean;
+  depositable: boolean;
 }
 
 const types = ref<WalletType[]>([]);
@@ -41,6 +42,7 @@ const newType = reactive({
   supportsAutoWithdraw: false,
   allowPurchaseOut: false,
   allowPurchaseIn: false,
+  depositable: true,
 });
 
 const newTypeCurrency = computed(
@@ -89,6 +91,7 @@ async function save(type: WalletType) {
         supportsAutoWithdraw: type.supportsAutoWithdraw,
         allowPurchaseOut: type.allowPurchaseOut,
         allowPurchaseIn: type.allowPurchaseIn,
+        depositable: type.depositable,
       },
     });
     await loadTypes();
@@ -134,6 +137,7 @@ async function createType() {
         supportsAutoWithdraw: newType.supportsAutoWithdraw,
         allowPurchaseOut: newType.allowPurchaseOut,
         allowPurchaseIn: newType.allowPurchaseIn,
+        depositable: newType.depositable,
       },
     });
     newType.code = '';
@@ -147,6 +151,7 @@ async function createType() {
     newType.supportsAutoWithdraw = false;
     newType.allowPurchaseOut = false;
     newType.allowPurchaseIn = false;
+    newType.depositable = true;
     await loadTypes();
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : t('admin.walletTypes.createFailed');
@@ -190,6 +195,7 @@ loadTypes();
           <label class="checkbox-label"><input v-model="wt.supportsAutoWithdraw" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.autoWithdrawLabel') }}</label>
           <label class="checkbox-label"><input v-model="wt.allowPurchaseOut" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.canPurchaseLabel') }}</label>
           <label class="checkbox-label"><input v-model="wt.allowPurchaseIn" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.canReceivePurchaseLabel') }}</label>
+          <label class="checkbox-label"><input v-model="wt.depositable" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.depositableLabel') }}</label>
           <div v-if="auth.isSuperAdmin" class="type-card-actions">
             <button class="admin-btn admin-btn-primary" :disabled="busy" @click="save(wt)">{{ t('admin.walletTypes.save') }}</button>
             <button class="admin-btn admin-btn-danger" :disabled="busy" @click="remove(wt)">{{ t('admin.walletTypes.delete') }}</button>
@@ -231,6 +237,7 @@ loadTypes();
       <label class="checkbox-label"><input v-model="newType.supportsAutoWithdraw" type="checkbox" /> {{ t('admin.walletTypes.autoWithdrawLabel') }}</label>
       <label class="checkbox-label"><input v-model="newType.allowPurchaseOut" type="checkbox" /> {{ t('admin.walletTypes.canPurchaseLabel') }}</label>
       <label class="checkbox-label"><input v-model="newType.allowPurchaseIn" type="checkbox" /> {{ t('admin.walletTypes.canReceivePurchaseLabel') }}</label>
+      <label class="checkbox-label"><input v-model="newType.depositable" type="checkbox" /> {{ t('admin.walletTypes.depositableLabel') }}</label>
       <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('admin.walletTypes.create') }}</button>
     </form>
   </AdminLayout>

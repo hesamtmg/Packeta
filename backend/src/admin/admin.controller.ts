@@ -29,6 +29,7 @@ import { serializeWallet } from '../wallets/wallet.serializer';
 import { AdjustWalletDto } from './dto/adjust-wallet.dto';
 import { UpdateUserRoleDto } from './dto/update-user-role.dto';
 import { AdminCreateChargeDto } from './dto/admin-create-charge.dto';
+import { normalizePhoneNumber } from '../common/phone-number';
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
@@ -81,7 +82,9 @@ export class AdminController {
     if (!phone) {
       throw new BadRequestException('phone query parameter is required');
     }
-    const merchant = await this.usersService.findByPhoneNumber(phone);
+    const merchant = await this.usersService.findByPhoneNumber(
+      normalizePhoneNumber(phone),
+    );
     if (!merchant) {
       throw new NotFoundException('No account found with that phone number');
     }

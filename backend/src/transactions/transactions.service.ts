@@ -76,13 +76,14 @@ export class TransactionsService {
       { walletId, amount },
       idempotencyKey,
       async (manager) => {
-        // Ownership check; deposits are allowed on every wallet type.
         const walletRef = await this.walletsService.getById(userId, walletId);
         if (walletRef.closedAt) {
           throw new BadRequestException('This wallet is closed');
         }
-        if (!walletRef.depositable) {
-          throw new ForbiddenException('This wallet does not accept deposits');
+        if (!walletRef.walletType.depositable) {
+          throw new ForbiddenException(
+            `${walletRef.walletType.name} wallets do not accept deposits`,
+          );
         }
         this.walletsService.assertWithinTransactionLimits(walletRef, amount);
 
