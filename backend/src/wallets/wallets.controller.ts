@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   Param,
   Patch,
   Post,
@@ -17,6 +18,7 @@ import {
 } from '../common/decorators/current-user.decorator';
 import { WalletsService } from './wallets.service';
 import { WalletTypesService } from '../wallet-types/wallet-types.service';
+import { WalletTypeCode } from '../wallet-types/entities/wallet-type.entity';
 import { CreateWalletDto } from './dto/create-wallet.dto';
 import { UpdateWalletDto } from './dto/update-wallet.dto';
 import { GrantCreditDto } from './dto/grant-credit.dto';
@@ -66,6 +68,11 @@ export class WalletsController {
     @Body() dto: CreateWalletDto,
   ) {
     const walletType = await this.walletTypesService.findById(dto.walletTypeId);
+    if (walletType.code === WalletTypeCode.CREDIT) {
+      throw new BadRequestException(
+        'CREDIT wallets can only be created by a repository owner via POST /wallets/credit-grant',
+      );
+    }
     this.assertPurchaseInCapable(dto.purchaseTimeoutSeconds, walletType);
     this.assertAutoWithdrawCapable(
       dto.settlementAccounts,
@@ -127,16 +134,23 @@ export class WalletsController {
   }
 
   // A repository owner splits off some of their unallocated virtual pool
-  // into a brand-new CREDIT wallet for an existing user, looked up by phone.
+  // into a brand-new CREDIT wallet for an existing user, looked up by phone —
+  // the only way a CREDIT wallet can be created (see the CREDIT guard in
+  // create() above).
   @Post('credit-grant')
   async grantCredit(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: GrantCreditDto,
+    @Headers('idempotency-key') idempotencyKey: string,
   ) {
-    const wallet = await this.dataSource.transaction((manager) =>
-      this.walletsService.grantCredit(manager, user.userId, dto),
+    return this.dataSource.transaction((manager) =>
+      this.walletsService.grantCredit(
+        manager,
+        user.userId,
+        dto,
+        idempotencyKey,
+      ),
     );
-    return serializeWallet(wallet);
   }
 
   @Patch(':id')

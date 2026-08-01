@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { WalletType } from './entities/wallet-type.entity';
+import { WalletType, WalletTypeCode } from './entities/wallet-type.entity';
 import { Wallet } from '../wallets/entities/wallet.entity';
 import { CurrenciesService } from '../currencies/currencies.service';
 import { CreateWalletTypeDto } from './dto/create-wallet-type.dto';
@@ -56,9 +56,22 @@ export class WalletTypesService {
         'creditLimit is required when allowNegativeBalance is true',
       );
     }
+    if (dto.autoWithdrawTimes?.length && dto.autoWithdrawTimes.length !== 3) {
+      throw new BadRequestException(
+        'autoWithdrawTimes must be exactly 3 times, or omitted/empty to leave the schedule unset',
+      );
+    }
     if (dto.autoWithdrawTimes?.length && !dto.supportsAutoWithdraw) {
       throw new BadRequestException(
         'supportsAutoWithdraw must be true to set autoWithdrawTimes',
+      );
+    }
+    if (
+      dto.code === WalletTypeCode.REPOSITORY &&
+      (dto.allowWithdraw || dto.supportsAutoWithdraw)
+    ) {
+      throw new BadRequestException(
+        'REPOSITORY wallets cannot allow withdrawals or auto-withdraw settlement — they only hold real (IPG) and virtual (manual) balances',
       );
     }
 
@@ -72,7 +85,9 @@ export class WalletTypesService {
       allowP2pOut: dto.allowP2pOut,
       allowP2pIn: dto.allowP2pIn,
       supportsAutoWithdraw: dto.supportsAutoWithdraw ?? false,
-      autoWithdrawTimes: dto.autoWithdrawTimes ?? null,
+      autoWithdrawTimes: dto.autoWithdrawTimes?.length
+        ? dto.autoWithdrawTimes
+        : null,
       allowPurchaseOut: dto.allowPurchaseOut ?? false,
       allowPurchaseIn: dto.allowPurchaseIn ?? false,
       depositable: dto.depositable ?? true,
@@ -124,6 +139,16 @@ export class WalletTypesService {
       // clear them too, since a stale schedule on a type that can no longer
       // sweep would otherwise linger invisibly.
       type.autoWithdrawTimes = null;
+    }
+
+    const allowWithdraw = dto.allowWithdraw ?? type.allowWithdraw;
+    if (
+      type.code === WalletTypeCode.REPOSITORY &&
+      (allowWithdraw || supportsAutoWithdraw)
+    ) {
+      throw new BadRequestException(
+        'REPOSITORY wallets cannot allow withdrawals or auto-withdraw settlement — they only hold real (IPG) and virtual (manual) balances',
+      );
     }
 
     if (dto.name !== undefined) type.name = dto.name;

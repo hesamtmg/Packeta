@@ -220,7 +220,10 @@ npm run start:dev
 ```
 
 API listens on `http://localhost:4000`. Packeta's backend calls this over HTTP for purchase
-initiate/verify — set `IPG_BASE_URL`/`IPG_API_KEY` in `backend/.env` to match.
+and installment-repayment initiate/verify — set `IPG_BASE_URL`/`IPG_API_KEY` in `backend/.env`
+to match. Deposits, on the other hand, always go through ZarinPal (a real payment gateway,
+not this sandbox) — see `ZARINPAL_BASE_URL`/`ZARINPAL_MERCHANT_ID` below; a deposit only
+completes once ZarinPal itself confirms it.
 
 ### 5. IPG frontend (payment page)
 

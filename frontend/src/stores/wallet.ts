@@ -196,6 +196,7 @@ export const useWalletStore = defineStore('wallet', {
       await apiRequest('/wallets/credit-grant', {
         method: 'POST',
         body: input,
+        idempotent: true,
       });
       await this.fetchWallets();
     },

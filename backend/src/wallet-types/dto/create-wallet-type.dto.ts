@@ -1,6 +1,4 @@
 import {
-  ArrayMaxSize,
-  ArrayMinSize,
   IsBoolean,
   IsInt,
   IsOptional,
@@ -47,10 +45,12 @@ export class CreateWalletTypeDto {
   supportsAutoWithdraw?: boolean;
 
   // Only meaningful when supportsAutoWithdraw is true: exactly 3 "HH:MM"
-  // (24h, server-local) times every wallet of this type sweeps out at.
+  // (24h, server-local) times every wallet of this type sweeps out at — or
+  // omit/send an empty array to leave the schedule unset for now. Same
+  // "empty is fine, non-empty must be exactly 3" rule as UpdateWalletTypeDto
+  // (checked in WalletTypesService.create), not expressible with a single
+  // array-size decorator.
   @IsOptional()
-  @ArrayMinSize(3)
-  @ArrayMaxSize(3)
   @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { each: true })
   autoWithdrawTimes?: string[];
 
