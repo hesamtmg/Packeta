@@ -39,13 +39,27 @@ export class Installment {
   sequenceNumber: number;
 
   // Principal share (virtualAmount / installmentCount, remainder folded into
-  // the last installment) plus the type's flat fee, in minor units. Grows by
-  // the type's penalty once the installment goes OVERDUE.
+  // the last installment) plus the type's feePercent, in minor units. Grows
+  // by penaltyPercentPerDay for every day it stays unpaid past deadlineDate.
   @Column({ type: 'bigint' })
   amount: string;
 
+  // The principal share alone, fixed at generation time before feePercent is
+  // folded into `amount` — the fee/penalty percentage base, so daily penalty
+  // accrual is always a percentage of this fixed principal rather than of
+  // the ever-growing `amount` (which would compound).
+  @Column({ type: 'bigint' })
+  principalAmount: string;
+
   @Column({ type: 'boolean', default: false })
   penaltyApplied: boolean;
+
+  // How many days' worth of penaltyPercentPerDay have already been folded
+  // into `amount` — lets applyOverduePenalties top up exactly the owed
+  // difference each run instead of double-applying, regardless of how many
+  // days have passed since the last sweep.
+  @Column({ type: 'smallint', default: 0 })
+  penaltyDaysApplied: number;
 
   // The day this installment was generated (WalletType.installmentDate).
   @Column({ type: 'date' })

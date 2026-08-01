@@ -31,8 +31,12 @@ interface WalletType {
   // shared billing rules for every wallet of this type.
   installmentDate: number | null;
   paymentDeadlineDate: number | null;
-  fee: string | null;
-  penalty: string | null;
+  // Percentage (0-100, up to 3 decimals), not a currency amount — see
+  // InstallmentsService. feePercent applies once per installment at
+  // generation, penaltyPercentPerDay accrues once for every day an
+  // installment stays unpaid past its deadline.
+  feePercent: string | null;
+  penaltyPercentPerDay: string | null;
   unblockFee: string | null;
   installmentCount: number | null;
   // UI-only: whether the credit-line fields section is expanded for this
@@ -45,16 +49,16 @@ interface WalletType {
 function hasCreditLineFields(type: {
   installmentDate: number | null;
   paymentDeadlineDate: number | null;
-  fee: string | null;
-  penalty: string | null;
+  feePercent: string | null;
+  penaltyPercentPerDay: string | null;
   unblockFee: string | null;
   installmentCount: number | null;
 }): boolean {
   return (
     type.installmentDate != null ||
     type.paymentDeadlineDate != null ||
-    type.fee != null ||
-    type.penalty != null ||
+    type.feePercent != null ||
+    type.penaltyPercentPerDay != null ||
     type.unblockFee != null ||
     type.installmentCount != null
   );
@@ -89,8 +93,8 @@ const newType = reactive({
   enableCreditLine: false,
   installmentDate: '',
   paymentDeadlineDate: '',
-  fee: '',
-  penalty: '',
+  feePercent: '',
+  penaltyPercentPerDay: '',
   unblockFee: '',
   installmentCount: '',
 });
@@ -111,7 +115,7 @@ function onCreditLimitInput(type: WalletType, event: Event) {
   type.creditLimit = String(toMinorUnits(raw, type.currency));
 }
 
-function moneyFieldDisplay(type: WalletType, field: 'fee' | 'penalty' | 'unblockFee'): string {
+function moneyFieldDisplay(type: WalletType, field: 'unblockFee'): string {
   const value = type[field];
   if (!value) return '';
   return (Number(value) / 10 ** type.currency.decimalPlaces).toFixed(
@@ -119,13 +123,18 @@ function moneyFieldDisplay(type: WalletType, field: 'fee' | 'penalty' | 'unblock
   );
 }
 
-function onMoneyFieldInput(
+function onMoneyFieldInput(type: WalletType, field: 'unblockFee', event: Event) {
+  const raw = (event.target as HTMLInputElement).value;
+  type[field] = raw ? String(toMinorUnits(raw, type.currency)) : null;
+}
+
+function onPercentFieldInput(
   type: WalletType,
-  field: 'fee' | 'penalty' | 'unblockFee',
+  field: 'feePercent' | 'penaltyPercentPerDay',
   event: Event,
 ) {
   const raw = (event.target as HTMLInputElement).value;
-  type[field] = raw ? String(toMinorUnits(raw, type.currency)) : null;
+  type[field] = raw ? raw : null;
 }
 
 // autoWithdrawTimes: 3 fills -> send as-is, 0 fills -> send [] to clear,
@@ -178,8 +187,12 @@ async function save(type: WalletType) {
         paymentDeadlineDate: type.enableCreditLine
           ? type.paymentDeadlineDate ?? undefined
           : undefined,
-        fee: type.enableCreditLine && type.fee ? Number(type.fee) : undefined,
-        penalty: type.enableCreditLine && type.penalty ? Number(type.penalty) : undefined,
+        feePercent:
+          type.enableCreditLine && type.feePercent ? Number(type.feePercent) : undefined,
+        penaltyPercentPerDay:
+          type.enableCreditLine && type.penaltyPercentPerDay
+            ? Number(type.penaltyPercentPerDay)
+            : undefined,
         unblockFee:
           type.enableCreditLine && type.unblockFee ? Number(type.unblockFee) : undefined,
         installmentCount: type.enableCreditLine
@@ -241,13 +254,13 @@ async function createType() {
           newType.enableCreditLine && newType.paymentDeadlineDate
             ? Number(newType.paymentDeadlineDate)
             : undefined,
-        fee:
-          newType.enableCreditLine && newType.fee && currency
-            ? toMinorUnits(newType.fee, currency)
+        feePercent:
+          newType.enableCreditLine && newType.feePercent
+            ? Number(newType.feePercent)
             : undefined,
-        penalty:
-          newType.enableCreditLine && newType.penalty && currency
-            ? toMinorUnits(newType.penalty, currency)
+        penaltyPercentPerDay:
+          newType.enableCreditLine && newType.penaltyPercentPerDay
+            ? Number(newType.penaltyPercentPerDay)
             : undefined,
         unblockFee:
           newType.enableCreditLine && newType.unblockFee && currency
@@ -276,8 +289,8 @@ async function createType() {
     newType.enableCreditLine = false;
     newType.installmentDate = '';
     newType.paymentDeadlineDate = '';
-    newType.fee = '';
-    newType.penalty = '';
+    newType.feePercent = '';
+    newType.penaltyPercentPerDay = '';
     newType.unblockFee = '';
     newType.installmentCount = '';
     await loadTypes();
@@ -353,12 +366,12 @@ loadTypes();
               <input v-model.number="wt.installmentCount" type="number" min="1" class="admin-input" :disabled="!auth.isSuperAdmin" />
             </label>
             <label>
-              {{ t('admin.walletTypes.feeLabel', { code: wt.currency.code }) }}
-              <input :value="moneyFieldDisplay(wt, 'fee')" type="number" min="0" :step="amountStep(wt.currency)" class="admin-input" :disabled="!auth.isSuperAdmin" @input="onMoneyFieldInput(wt, 'fee', $event)" />
+              {{ t('admin.walletTypes.feeLabel') }}
+              <input :value="wt.feePercent ?? ''" type="number" min="0" max="100" step="0.001" class="admin-input" :disabled="!auth.isSuperAdmin" @input="onPercentFieldInput(wt, 'feePercent', $event)" />
             </label>
             <label>
-              {{ t('admin.walletTypes.penaltyLabel', { code: wt.currency.code }) }}
-              <input :value="moneyFieldDisplay(wt, 'penalty')" type="number" min="0" :step="amountStep(wt.currency)" class="admin-input" :disabled="!auth.isSuperAdmin" @input="onMoneyFieldInput(wt, 'penalty', $event)" />
+              {{ t('admin.walletTypes.penaltyLabel') }}
+              <input :value="wt.penaltyPercentPerDay ?? ''" type="number" min="0" max="100" step="0.001" class="admin-input" :disabled="!auth.isSuperAdmin" @input="onPercentFieldInput(wt, 'penaltyPercentPerDay', $event)" />
             </label>
             <label>
               {{ t('admin.walletTypes.unblockFeeLabel', { code: wt.currency.code }) }}
@@ -450,12 +463,12 @@ loadTypes();
           <input v-model="newType.installmentCount" type="number" min="1" class="admin-input" />
         </label>
         <label>
-          {{ t('admin.walletTypes.feeLabel', { code: newType.currencyCode || '…' }) }}
-          <input v-model="newType.fee" type="number" min="0" :step="newTypeCurrency ? amountStep(newTypeCurrency) : '0.01'" class="admin-input" />
+          {{ t('admin.walletTypes.feeLabel') }}
+          <input v-model="newType.feePercent" type="number" min="0" max="100" step="0.001" class="admin-input" />
         </label>
         <label>
-          {{ t('admin.walletTypes.penaltyLabel', { code: newType.currencyCode || '…' }) }}
-          <input v-model="newType.penalty" type="number" min="0" :step="newTypeCurrency ? amountStep(newTypeCurrency) : '0.01'" class="admin-input" />
+          {{ t('admin.walletTypes.penaltyLabel') }}
+          <input v-model="newType.penaltyPercentPerDay" type="number" min="0" max="100" step="0.001" class="admin-input" />
         </label>
         <label>
           {{ t('admin.walletTypes.unblockFeeLabel', { code: newType.currencyCode || '…' }) }}
