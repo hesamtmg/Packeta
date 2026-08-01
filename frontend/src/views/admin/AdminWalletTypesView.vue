@@ -24,6 +24,9 @@ interface WalletType {
   allowPurchaseOut: boolean;
   allowPurchaseIn: boolean;
   depositable: boolean;
+  // Whether wallets of this type may carry a manually-set virtual balance at
+  // creation (e.g. a REPOSITORY wallet's funding pool).
+  hasVirtualBalance: boolean;
   // Credit-line / installment fields (repository/credit wallet feature) —
   // shared billing rules for every wallet of this type.
   installmentDate: number | null;
@@ -82,6 +85,7 @@ const newType = reactive({
   allowPurchaseOut: false,
   allowPurchaseIn: false,
   depositable: true,
+  hasVirtualBalance: false,
   enableCreditLine: false,
   installmentDate: '',
   paymentDeadlineDate: '',
@@ -169,6 +173,7 @@ async function save(type: WalletType) {
         allowPurchaseOut: type.allowPurchaseOut,
         allowPurchaseIn: type.allowPurchaseIn,
         depositable: type.depositable,
+        hasVirtualBalance: type.hasVirtualBalance,
         installmentDate: type.enableCreditLine ? type.installmentDate ?? undefined : undefined,
         paymentDeadlineDate: type.enableCreditLine
           ? type.paymentDeadlineDate ?? undefined
@@ -227,6 +232,7 @@ async function createType() {
         allowPurchaseOut: newType.allowPurchaseOut,
         allowPurchaseIn: newType.allowPurchaseIn,
         depositable: newType.depositable,
+        hasVirtualBalance: newType.hasVirtualBalance,
         installmentDate:
           newType.enableCreditLine && newType.installmentDate
             ? Number(newType.installmentDate)
@@ -266,6 +272,7 @@ async function createType() {
     newType.allowPurchaseOut = false;
     newType.allowPurchaseIn = false;
     newType.depositable = true;
+    newType.hasVirtualBalance = false;
     newType.enableCreditLine = false;
     newType.installmentDate = '';
     newType.paymentDeadlineDate = '';
@@ -325,6 +332,7 @@ loadTypes();
           <label class="checkbox-label"><input v-model="wt.allowPurchaseOut" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.canPurchaseLabel') }}</label>
           <label class="checkbox-label"><input v-model="wt.allowPurchaseIn" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.canReceivePurchaseLabel') }}</label>
           <label class="checkbox-label"><input v-model="wt.depositable" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.depositableLabel') }}</label>
+          <label class="checkbox-label"><input v-model="wt.hasVirtualBalance" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.hasVirtualBalanceLabel') }}</label>
 
           <span class="section-label">{{ t('admin.walletTypes.creditLineHeading') }}</span>
           <label class="checkbox-label">
@@ -421,6 +429,7 @@ loadTypes();
       <label class="checkbox-label"><input v-model="newType.allowPurchaseOut" type="checkbox" /> {{ t('admin.walletTypes.canPurchaseLabel') }}</label>
       <label class="checkbox-label"><input v-model="newType.allowPurchaseIn" type="checkbox" /> {{ t('admin.walletTypes.canReceivePurchaseLabel') }}</label>
       <label class="checkbox-label"><input v-model="newType.depositable" type="checkbox" /> {{ t('admin.walletTypes.depositableLabel') }}</label>
+      <label class="checkbox-label"><input v-model="newType.hasVirtualBalance" type="checkbox" /> {{ t('admin.walletTypes.hasVirtualBalanceLabel') }}</label>
 
       <span class="section-label">{{ t('admin.walletTypes.creditLineHeading') }}</span>
       <label class="checkbox-label">

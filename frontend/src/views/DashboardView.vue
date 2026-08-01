@@ -45,6 +45,7 @@ const newWalletCategory = ref('');
 const newWalletSubCategory = ref('');
 const newWalletRailType = ref('');
 const newWalletRailScheduleTimes = ref('');
+const newWalletVirtualAmount = ref('');
 
 const editingWalletId = ref<string | null>(null);
 const editRestrictedCounterparties = ref('');
@@ -146,6 +147,9 @@ const showAutoWithdrawFields = computed(
 );
 const showPurchaseTimeoutField = computed(
   () => selectedNewWalletType.value?.allowPurchaseIn ?? false,
+);
+const showVirtualAmountField = computed(
+  () => selectedNewWalletType.value?.hasVirtualBalance ?? false,
 );
 
 const walletsById = computed(() => {
@@ -523,6 +527,9 @@ function onAddWallet() {
       if (newWalletCategory.value) options.category = newWalletCategory.value;
       if (newWalletSubCategory.value) options.subCategory = newWalletSubCategory.value;
     }
+    if (showVirtualAmountField.value && newWalletVirtualAmount.value) {
+      options.virtualAmount = toMinorUnits(newWalletVirtualAmount.value, selectedNewWalletType.value!.currency);
+    }
     await wallet.createWallet(newWalletType.value, options);
     newWalletType.value = '';
     newWalletPurchaseTimeoutMinutes.value = '';
@@ -540,6 +547,7 @@ function onAddWallet() {
     newWalletSubCategory.value = '';
     newWalletRailType.value = '';
     newWalletRailScheduleTimes.value = '';
+    newWalletVirtualAmount.value = '';
   });
 }
 
@@ -1009,6 +1017,18 @@ async function onPayInstallment(installment: Installment) {
             type="number"
             min="0"
             :step="selectedNewWalletType ? amountStep(selectedNewWalletType.currency) : '0.01'"
+            class="admin-input"
+          />
+        </label>
+
+        <label v-if="showVirtualAmountField" class="market-field">
+          {{ t('dashboard.wallets.virtualAmountLabel') }}
+          <input
+            v-model="newWalletVirtualAmount"
+            type="number"
+            min="0"
+            :step="selectedNewWalletType ? amountStep(selectedNewWalletType.currency) : '0.01'"
+            :placeholder="t('dashboard.wallets.virtualAmountPlaceholder')"
             class="admin-input"
           />
         </label>

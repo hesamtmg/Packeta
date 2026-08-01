@@ -101,6 +101,7 @@ export class WalletsController {
     this.assertPurchaseInCapable(dto.callbackUrl, walletType, 'a callback URL');
     this.assertPurchaseInCapable(dto.category, walletType, 'a category');
     this.assertPurchaseInCapable(dto.subCategory, walletType, 'a sub-category');
+    this.assertVirtualBalanceCapable(dto.virtualAmount, walletType);
     if (dto.settlementAccounts) {
       this.settlementService.validateWalletDefaults(dto.settlementAccounts);
     }
@@ -190,6 +191,7 @@ export class WalletsController {
     this.assertPurchaseInCapable(dto.callbackUrl, walletType, 'a callback URL');
     this.assertPurchaseInCapable(dto.category, walletType, 'a category');
     this.assertPurchaseInCapable(dto.subCategory, walletType, 'a sub-category');
+    this.assertVirtualBalanceCapable(dto.virtualAmount, walletType);
 
     const wallet = await this.dataSource.transaction((manager) =>
       this.walletsService.updateForUser(manager, user.userId, id, {
@@ -247,6 +249,17 @@ export class WalletsController {
     if (value !== undefined && !walletType.allowPurchaseIn) {
       throw new BadRequestException(
         `This wallet type does not accept purchases, so ${label} is not applicable`,
+      );
+    }
+  }
+
+  private assertVirtualBalanceCapable(
+    value: unknown,
+    walletType: { hasVirtualBalance: boolean },
+  ): void {
+    if (value !== undefined && !walletType.hasVirtualBalance) {
+      throw new BadRequestException(
+        'This wallet type does not support a virtual balance',
       );
     }
   }
