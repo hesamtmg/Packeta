@@ -1,10 +1,13 @@
 import {
+  BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { TransactionsService } from './transactions.service';
 import { TransactionType } from './entities/transaction.entity';
+import { SettlementRailType } from '../rail-settlements/entities/rail-settlement.entity';
 
 interface WalletTypeFixture {
   name: string;
@@ -18,6 +21,7 @@ interface WalletTypeFixture {
   allowPurchaseOut?: boolean;
   allowPurchaseIn?: boolean;
   depositable?: boolean;
+  unblockFee?: string | null;
 }
 
 interface WalletFixture {
@@ -26,20 +30,33 @@ interface WalletFixture {
   balance: string;
   walletType: WalletTypeFixture;
   purchaseTimeoutSeconds?: number | null;
+  repositoryWalletId?: string | null;
+  blockedAt?: Date | null;
 }
 
 function buildService(options: {
   senderWallet: WalletFixture;
   recipientWallet?: WalletFixture | null;
+  repositoryWallet?: WalletFixture | null;
   ipgOverrides?: Record<string, jest.Mock>;
+  installmentsService?: Record<string, jest.Mock>;
 }) {
-  const { senderWallet, recipientWallet, ipgOverrides } = options;
+  const {
+    senderWallet,
+    recipientWallet,
+    repositoryWallet,
+    ipgOverrides,
+    installmentsService,
+  } = options;
   const lockCalls: string[] = [];
 
   const walletsById = new Map<string, WalletFixture>([
     [senderWallet.id, senderWallet],
     ...(recipientWallet
       ? [[recipientWallet.id, recipientWallet] as const]
+      : []),
+    ...(repositoryWallet
+      ? [[repositoryWallet.id, repositoryWallet] as const]
       : []),
   ]);
 
@@ -133,6 +150,10 @@ function buildService(options: {
     computeAmounts: jest.fn(),
   };
 
+  const railSettlementsService = {
+    createForSweep: jest.fn(),
+  };
+
   const service = new TransactionsService(
     dataSource as any,
     walletsService as any,
@@ -142,6 +163,8 @@ function buildService(options: {
     configService as any,
     {} as any,
     settlementService as any,
+    (installmentsService ?? {}) as any,
+    railSettlementsService as any,
     {} as any,
   );
 
@@ -179,17 +202,25 @@ describe('TransactionsService.deposit', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('allows a deposit into a wallet whose type accepts deposits', async () => {
+  it('initiates a walletless IPG payment for a wallet whose type accepts deposits', async () => {
     const wallet: WalletFixture = {
       id: 'wallet-1',
       balance: '0',
       walletType: walletType({ depositable: true }),
     };
-    const { service } = buildService({ senderWallet: wallet });
+    const { service, manager } = buildService({ senderWallet: wallet });
 
     const result = await service.deposit('user-1', 'wallet-1', 250, 'idem-2');
 
-    expect(result.balance).toBe('250');
+    expect(result.redirectUrl).toBe('http://ipg/pay/auth-1');
+    expect(manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: TransactionType.DEPOSIT,
+        fromWalletId: null,
+        toWalletId: 'wallet-1',
+        amount: '250',
+      }),
+    );
   });
 });
 
@@ -542,6 +573,69 @@ describe('TransactionsService.withdraw', () => {
       service.withdraw('sender', senderWallet.id, 501, 'idem-9'),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
+
+  it('also debits the linked repository when withdrawing from a repository-backed credit wallet', async () => {
+    const repositoryWallet: WalletFixture = {
+      id: 'repo-1',
+      balance: '5000',
+      walletType: walletType({ name: 'Repository' }),
+    };
+    const senderWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '1000',
+      walletType: walletType({ name: 'Credit' }),
+      repositoryWalletId: 'repo-1',
+    };
+    const { service, manager } = buildService({
+      senderWallet,
+      repositoryWallet,
+    });
+
+    const result = await service.withdraw(
+      'sender',
+      senderWallet.id,
+      300,
+      'idem-repo-1',
+    );
+
+    expect(result.balance).toBe('700');
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'repo-1', {
+      balance: '4700',
+    });
+  });
+
+  it('rejects a withdrawal when the linked repository lacks enough real balance to fund it', async () => {
+    const repositoryWallet: WalletFixture = {
+      id: 'repo-1',
+      balance: '100',
+      walletType: walletType({ name: 'Repository' }),
+    };
+    const senderWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '1000',
+      walletType: walletType({ name: 'Credit' }),
+      repositoryWalletId: 'repo-1',
+    };
+    const { service } = buildService({ senderWallet, repositoryWallet });
+
+    await expect(
+      service.withdraw('sender', senderWallet.id, 300, 'idem-repo-2'),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+  });
+
+  it('rejects a withdrawal from a wallet blocked by an overdue installment', async () => {
+    const senderWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '500',
+      walletType: walletType({ name: 'Credit' }),
+      blockedAt: new Date(),
+    };
+    const { service } = buildService({ senderWallet });
+
+    await expect(
+      service.withdraw('sender', senderWallet.id, 100, 'idem-blocked-1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
 });
 
 describe('TransactionsService.adjust', () => {
@@ -717,21 +811,32 @@ function buildSweepService(options: {
   unsettledPurchases: any[];
   overridesByPurchase: Map<string, any[]>;
   computeAmountsImpl?: (rows: any[], amount: string) => any[];
+  railType?: SettlementRailType;
 }) {
-  const wallet = { id: 'wallet-1', balance: options.walletBalance };
+  const wallet = {
+    id: 'wallet-1',
+    balance: options.walletBalance,
+    railType: options.railType ?? null,
+  };
   const savedTransactions: any[] = [];
   const savedPurchases: any[] = [];
   const updatedBalances: string[] = [];
+  const railSettlementLinks: any[] = [];
+  let idCounter = 0;
 
   const walletsService = { lockById: jest.fn(async () => wallet) };
 
   const manager = {
     update: jest.fn(async (_entity: unknown, _id: string, patch: any) => {
       if (patch.balance !== undefined) updatedBalances.push(patch.balance);
+      if (patch.railSettlementId !== undefined) {
+        railSettlementLinks.push({ id: _id, ...patch });
+      }
     }),
     create: jest.fn((_entity: unknown, data: unknown) => data),
     save: jest.fn(async (data: any) => {
       if (data.type === TransactionType.WITHDRAW) {
+        data.id = data.id ?? `withdraw-${++idCounter}`;
         savedTransactions.push(data);
       } else {
         savedPurchases.push(data);
@@ -768,6 +873,15 @@ function buildSweepService(options: {
     ),
   };
 
+  let railSettlementCounter = 0;
+  const railSettlementsCreated: any[] = [];
+  const railSettlementsService = {
+    createForSweep: jest.fn(async (_manager: unknown, input: any) => {
+      railSettlementsCreated.push(input);
+      return { id: `rail-settlement-${++railSettlementCounter}`, ...input };
+    }),
+  };
+
   const service = new TransactionsService(
     dataSource as any,
     walletsService as any,
@@ -778,9 +892,18 @@ function buildSweepService(options: {
     {} as any,
     settlementService as any,
     {} as any,
+    railSettlementsService as any,
+    {} as any,
   );
 
-  return { service, savedTransactions, savedPurchases, updatedBalances };
+  return {
+    service,
+    savedTransactions,
+    savedPurchases,
+    updatedBalances,
+    railSettlementsCreated,
+    railSettlementLinks,
+  };
 }
 
 describe('TransactionsService.sweepAutoWithdraw', () => {
@@ -867,5 +990,202 @@ describe('TransactionsService.sweepAutoWithdraw', () => {
       relatedTransactionId: 'purchase-3',
       destinationIban: null,
     });
+  });
+});
+
+describe('TransactionsService.sweepAutoWithdraw rail-aware behavior', () => {
+  it('does not create a RailSettlement for a wallet with no railType configured', async () => {
+    const { service, railSettlementsCreated } = buildSweepService({
+      walletBalance: '5000',
+      walletDefaults: [],
+      unsettledPurchases: [],
+      overridesByPurchase: new Map(),
+    });
+
+    await service.sweepAutoWithdraw('wallet-1');
+
+    expect(railSettlementsCreated).toHaveLength(0);
+  });
+
+  it('records a RailSettlement and links it back to the WITHDRAW for the legacy (no-split) path', async () => {
+    const {
+      service,
+      savedTransactions,
+      railSettlementsCreated,
+      railSettlementLinks,
+    } = buildSweepService({
+      walletBalance: '5000',
+      walletDefaults: [],
+      unsettledPurchases: [],
+      overridesByPurchase: new Map(),
+      railType: SettlementRailType.SATNA,
+    });
+
+    await service.sweepAutoWithdraw('wallet-1');
+
+    expect(savedTransactions).toHaveLength(1);
+    expect(railSettlementsCreated).toHaveLength(1);
+    expect(railSettlementsCreated[0]).toMatchObject({
+      walletId: 'wallet-1',
+      railType: SettlementRailType.SATNA,
+      amount: '5000',
+      transactionId: savedTransactions[0].id,
+    });
+    expect(railSettlementLinks).toHaveLength(1);
+    expect(railSettlementLinks[0]).toMatchObject({
+      id: savedTransactions[0].id,
+      railSettlementId: 'rail-settlement-1',
+    });
+  });
+
+  it('records one RailSettlement per generated WITHDRAW slice in split-settlement mode', async () => {
+    const purchase = { id: 'purchase-1', amount: '1000', settledAt: null };
+    const { service, savedTransactions, railSettlementsCreated } =
+      buildSweepService({
+        walletBalance: '1000',
+        walletDefaults: [{ iban: 'default-iban', label: null }],
+        unsettledPurchases: [purchase],
+        overridesByPurchase: new Map(),
+        railType: SettlementRailType.PAYA,
+      });
+
+    await service.sweepAutoWithdraw('wallet-1');
+
+    expect(savedTransactions).toHaveLength(1);
+    expect(railSettlementsCreated).toHaveLength(1);
+    expect(railSettlementsCreated[0]).toMatchObject({
+      railType: SettlementRailType.PAYA,
+      destinationIban: 'default-iban',
+      amount: '1000',
+    });
+  });
+});
+
+describe('TransactionsService.payInstallment', () => {
+  const repositoryWallet: WalletFixture = {
+    id: 'repo-1',
+    balance: '1000',
+    walletType: walletType({ name: 'Repository', allowPurchaseIn: true }),
+  };
+
+  const fromWallet: WalletFixture = {
+    id: 'payer-1',
+    userId: 'personnel-1',
+    balance: '5000',
+    walletType: walletType({ name: 'Buy', allowPurchaseOut: true }),
+  };
+
+  function baseInstallment(overrides: Record<string, any> = {}) {
+    return {
+      id: 'installment-1',
+      amount: '400',
+      status: 'PENDING',
+      wallet: {
+        id: 'credit-1',
+        userId: 'personnel-1',
+        repositoryWalletId: 'repo-1',
+        blockedAt: null,
+        walletType: { unblockFee: '50' },
+      },
+      ...overrides,
+    };
+  }
+
+  function buildPayService(installment: any) {
+    const installmentsService = {
+      getByIdForUser: jest.fn(async () => installment),
+      markPaid: jest.fn(async () => undefined),
+    };
+    return buildService({
+      senderWallet: fromWallet,
+      repositoryWallet,
+      installmentsService: installmentsService as any,
+    });
+  }
+
+  it('rejects paying an already-PAID installment', async () => {
+    const { service } = buildPayService(baseInstallment({ status: 'PAID' }));
+
+    await expect(
+      service.payInstallment('personnel-1', 'installment-1', 'idem-inst-1'),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('rejects when the credit wallet has no linked repository', async () => {
+    const { service } = buildPayService(
+      baseInstallment({
+        wallet: {
+          id: 'credit-1',
+          userId: 'personnel-1',
+          repositoryWalletId: null,
+          blockedAt: null,
+          walletType: { unblockFee: '50' },
+        },
+      }),
+    );
+
+    await expect(
+      service.payInstallment('personnel-1', 'installment-1', 'idem-inst-2'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects when the repository does not accept purchases', async () => {
+    const closedRepository: WalletFixture = {
+      ...repositoryWallet,
+      walletType: walletType({ name: 'Repository', allowPurchaseIn: false }),
+    };
+    const installmentsService = {
+      getByIdForUser: jest.fn(async () => baseInstallment()),
+      markPaid: jest.fn(async () => undefined),
+    };
+    const { service } = buildService({
+      senderWallet: fromWallet,
+      repositoryWallet: closedRepository,
+      installmentsService: installmentsService as any,
+    });
+
+    await expect(
+      service.payInstallment('personnel-1', 'installment-1', 'idem-inst-3'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('initiates a walletless repayment for exactly the installment amount when not blocked', async () => {
+    const { service, manager } = buildPayService(baseInstallment());
+
+    const result = await service.payInstallment(
+      'personnel-1',
+      'installment-1',
+      'idem-inst-5',
+    );
+
+    expect(result.redirectUrl).toBe('http://ipg/pay/auth-1');
+    expect(manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toWalletId: 'repo-1',
+        fromWalletId: null,
+        amount: '400',
+        installmentId: 'installment-1',
+      }),
+    );
+  });
+
+  it('folds the unblockFee into the charge when the credit wallet is blocked', async () => {
+    const { service, manager } = buildPayService(
+      baseInstallment({
+        wallet: {
+          id: 'credit-1',
+          userId: 'personnel-1',
+          repositoryWalletId: 'repo-1',
+          blockedAt: new Date(),
+          walletType: { unblockFee: '50' },
+        },
+      }),
+    );
+
+    await service.payInstallment('personnel-1', 'installment-1', 'idem-inst-6');
+
+    expect(manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: '450' }),
+    );
   });
 });

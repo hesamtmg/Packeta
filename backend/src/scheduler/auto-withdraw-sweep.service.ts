@@ -3,10 +3,10 @@ import { Cron } from '@nestjs/schedule';
 import { WalletsService } from '../wallets/wallets.service';
 import { TransactionsService } from '../transactions/transactions.service';
 
-// Merchant wallets configure up to 3 "HH:MM" (server-local) times at which
-// their full balance auto-sweeps out via a plain WITHDRAW. Runs once a
-// minute and only acts on wallets whose schedule matches the current
-// minute, so it's a no-op almost every tick.
+// Merchant wallet types configure exactly 3 "HH:MM" (server-local) times at
+// which every wallet of that type has its full balance auto-swept out via a
+// plain WITHDRAW. Runs once a minute and only acts on wallets whose type's
+// schedule matches the current minute, so it's a no-op almost every tick.
 @Injectable()
 export class AutoWithdrawSweepService {
   private readonly logger = new Logger(AutoWithdrawSweepService.name);
@@ -25,7 +25,7 @@ export class AutoWithdrawSweepService {
 
     const candidates = await this.walletsService.listWithAutoWithdrawDue();
     const due = candidates.filter((wallet) =>
-      wallet.autoWithdrawTimes?.includes(currentTime),
+      wallet.walletType.autoWithdrawTimes?.includes(currentTime),
     );
 
     for (const wallet of due) {

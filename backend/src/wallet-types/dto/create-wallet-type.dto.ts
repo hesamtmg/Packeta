@@ -1,9 +1,12 @@
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
   IsBoolean,
   IsInt,
   IsOptional,
   IsString,
   Matches,
+  Max,
   Min,
 } from 'class-validator';
 
@@ -43,6 +46,14 @@ export class CreateWalletTypeDto {
   @IsBoolean()
   supportsAutoWithdraw?: boolean;
 
+  // Only meaningful when supportsAutoWithdraw is true: exactly 3 "HH:MM"
+  // (24h, server-local) times every wallet of this type sweeps out at.
+  @IsOptional()
+  @ArrayMinSize(3)
+  @ArrayMaxSize(3)
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { each: true })
+  autoWithdrawTimes?: string[];
+
   @IsOptional()
   @IsBoolean()
   allowPurchaseOut?: boolean;
@@ -54,4 +65,40 @@ export class CreateWalletTypeDto {
   @IsOptional()
   @IsBoolean()
   depositable?: boolean;
+
+  // Credit-line fields (repository/credit wallet feature). All optional and
+  // only meaningful on the CREDIT-style types this feature applies to —
+  // the shared billing rules; the actual virtualAmount granted and the
+  // holder's nationalCode are per-wallet (see CreateWalletDto).
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(31)
+  installmentDate?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(31)
+  paymentDeadlineDate?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  fee?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  penalty?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  unblockFee?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  installmentCount?: number;
 }

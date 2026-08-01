@@ -20,9 +20,18 @@ interface WalletType {
   allowP2pOut: boolean;
   allowP2pIn: boolean;
   supportsAutoWithdraw: boolean;
+  autoWithdrawTimes: string[] | null;
   allowPurchaseOut: boolean;
   allowPurchaseIn: boolean;
   depositable: boolean;
+  // Credit-line / installment fields (repository/credit wallet feature) —
+  // shared billing rules for every wallet of this type.
+  installmentDate: number | null;
+  paymentDeadlineDate: number | null;
+  fee: string | null;
+  penalty: string | null;
+  unblockFee: string | null;
+  installmentCount: number | null;
 }
 
 const types = ref<WalletType[]>([]);
@@ -40,9 +49,16 @@ const newType = reactive({
   allowP2pOut: false,
   allowP2pIn: false,
   supportsAutoWithdraw: false,
+  autoWithdrawTimes: ['', '', ''] as string[],
   allowPurchaseOut: false,
   allowPurchaseIn: false,
   depositable: true,
+  installmentDate: '',
+  paymentDeadlineDate: '',
+  fee: '',
+  penalty: '',
+  unblockFee: '',
+  installmentCount: '',
 });
 
 const newTypeCurrency = computed(
@@ -61,13 +77,42 @@ function onCreditLimitInput(type: WalletType, event: Event) {
   type.creditLimit = String(toMinorUnits(raw, type.currency));
 }
 
+function moneyFieldDisplay(type: WalletType, field: 'fee' | 'penalty' | 'unblockFee'): string {
+  const value = type[field];
+  if (!value) return '';
+  return (Number(value) / 10 ** type.currency.decimalPlaces).toFixed(
+    type.currency.decimalPlaces,
+  );
+}
+
+function onMoneyFieldInput(
+  type: WalletType,
+  field: 'fee' | 'penalty' | 'unblockFee',
+  event: Event,
+) {
+  const raw = (event.target as HTMLInputElement).value;
+  type[field] = raw ? String(toMinorUnits(raw, type.currency)) : null;
+}
+
+// autoWithdrawTimes: 3 fills -> send as-is, 0 fills -> send [] to clear,
+// same "empty clears" convention the backend expects.
+function autoWithdrawTimesPayload(times: string[] | null): string[] | undefined {
+  const filled = (times ?? []).filter(Boolean);
+  return filled.length ? (times ?? []) : [];
+}
+
 async function loadTypes() {
   error.value = '';
   try {
-    [types.value, currencies.value] = await Promise.all([
+    const [loaded, loadedCurrencies] = await Promise.all([
       apiRequest<WalletType[]>('/wallet-types'),
       apiRequest<CurrencyInfo[]>('/currencies'),
     ]);
+    types.value = loaded.map((type) => ({
+      ...type,
+      autoWithdrawTimes: type.autoWithdrawTimes ?? ['', '', ''],
+    }));
+    currencies.value = loadedCurrencies;
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : t('admin.walletTypes.loadFailed');
   }
@@ -89,9 +134,16 @@ async function save(type: WalletType) {
         allowP2pOut: type.allowP2pOut,
         allowP2pIn: type.allowP2pIn,
         supportsAutoWithdraw: type.supportsAutoWithdraw,
+        autoWithdrawTimes: autoWithdrawTimesPayload(type.autoWithdrawTimes),
         allowPurchaseOut: type.allowPurchaseOut,
         allowPurchaseIn: type.allowPurchaseIn,
         depositable: type.depositable,
+        installmentDate: type.installmentDate ?? undefined,
+        paymentDeadlineDate: type.paymentDeadlineDate ?? undefined,
+        fee: type.fee ? Number(type.fee) : undefined,
+        penalty: type.penalty ? Number(type.penalty) : undefined,
+        unblockFee: type.unblockFee ? Number(type.unblockFee) : undefined,
+        installmentCount: type.installmentCount ?? undefined,
       },
     });
     await loadTypes();
@@ -135,9 +187,26 @@ async function createType() {
         allowP2pOut: newType.allowP2pOut,
         allowP2pIn: newType.allowP2pIn,
         supportsAutoWithdraw: newType.supportsAutoWithdraw,
+        autoWithdrawTimes: autoWithdrawTimesPayload(newType.autoWithdrawTimes),
         allowPurchaseOut: newType.allowPurchaseOut,
         allowPurchaseIn: newType.allowPurchaseIn,
         depositable: newType.depositable,
+        installmentDate: newType.installmentDate
+          ? Number(newType.installmentDate)
+          : undefined,
+        paymentDeadlineDate: newType.paymentDeadlineDate
+          ? Number(newType.paymentDeadlineDate)
+          : undefined,
+        fee: newType.fee && currency ? toMinorUnits(newType.fee, currency) : undefined,
+        penalty:
+          newType.penalty && currency ? toMinorUnits(newType.penalty, currency) : undefined,
+        unblockFee:
+          newType.unblockFee && currency
+            ? toMinorUnits(newType.unblockFee, currency)
+            : undefined,
+        installmentCount: newType.installmentCount
+          ? Number(newType.installmentCount)
+          : undefined,
       },
     });
     newType.code = '';
@@ -149,9 +218,16 @@ async function createType() {
     newType.allowP2pOut = false;
     newType.allowP2pIn = false;
     newType.supportsAutoWithdraw = false;
+    newType.autoWithdrawTimes = ['', '', ''];
     newType.allowPurchaseOut = false;
     newType.allowPurchaseIn = false;
     newType.depositable = true;
+    newType.installmentDate = '';
+    newType.paymentDeadlineDate = '';
+    newType.fee = '';
+    newType.penalty = '';
+    newType.unblockFee = '';
+    newType.installmentCount = '';
     await loadTypes();
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : t('admin.walletTypes.createFailed');
@@ -193,9 +269,44 @@ loadTypes();
           <label class="checkbox-label"><input v-model="wt.allowP2pOut" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.canSendLabel') }}</label>
           <label class="checkbox-label"><input v-model="wt.allowP2pIn" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.canReceiveLabel') }}</label>
           <label class="checkbox-label"><input v-model="wt.supportsAutoWithdraw" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.autoWithdrawLabel') }}</label>
+          <label v-if="wt.supportsAutoWithdraw">
+            {{ t('admin.walletTypes.autoWithdrawTimesLabel') }}
+            <div class="time-row">
+              <input v-model="wt.autoWithdrawTimes![0]" type="time" class="admin-input" :disabled="!auth.isSuperAdmin" />
+              <input v-model="wt.autoWithdrawTimes![1]" type="time" class="admin-input" :disabled="!auth.isSuperAdmin" />
+              <input v-model="wt.autoWithdrawTimes![2]" type="time" class="admin-input" :disabled="!auth.isSuperAdmin" />
+            </div>
+          </label>
           <label class="checkbox-label"><input v-model="wt.allowPurchaseOut" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.canPurchaseLabel') }}</label>
           <label class="checkbox-label"><input v-model="wt.allowPurchaseIn" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.canReceivePurchaseLabel') }}</label>
           <label class="checkbox-label"><input v-model="wt.depositable" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.depositableLabel') }}</label>
+
+          <span class="section-label">{{ t('admin.walletTypes.creditLineHeading') }}</span>
+          <label>
+            {{ t('admin.walletTypes.installmentDateLabel') }}
+            <input v-model.number="wt.installmentDate" type="number" min="1" max="31" class="admin-input" :disabled="!auth.isSuperAdmin" />
+          </label>
+          <label>
+            {{ t('admin.walletTypes.paymentDeadlineDateLabel') }}
+            <input v-model.number="wt.paymentDeadlineDate" type="number" min="1" max="31" class="admin-input" :disabled="!auth.isSuperAdmin" />
+          </label>
+          <label>
+            {{ t('admin.walletTypes.installmentCountLabel') }}
+            <input v-model.number="wt.installmentCount" type="number" min="1" class="admin-input" :disabled="!auth.isSuperAdmin" />
+          </label>
+          <label>
+            {{ t('admin.walletTypes.feeLabel', { code: wt.currency.code }) }}
+            <input :value="moneyFieldDisplay(wt, 'fee')" type="number" min="0" :step="amountStep(wt.currency)" class="admin-input" :disabled="!auth.isSuperAdmin" @input="onMoneyFieldInput(wt, 'fee', $event)" />
+          </label>
+          <label>
+            {{ t('admin.walletTypes.penaltyLabel', { code: wt.currency.code }) }}
+            <input :value="moneyFieldDisplay(wt, 'penalty')" type="number" min="0" :step="amountStep(wt.currency)" class="admin-input" :disabled="!auth.isSuperAdmin" @input="onMoneyFieldInput(wt, 'penalty', $event)" />
+          </label>
+          <label>
+            {{ t('admin.walletTypes.unblockFeeLabel', { code: wt.currency.code }) }}
+            <input :value="moneyFieldDisplay(wt, 'unblockFee')" type="number" min="0" :step="amountStep(wt.currency)" class="admin-input" :disabled="!auth.isSuperAdmin" @input="onMoneyFieldInput(wt, 'unblockFee', $event)" />
+          </label>
+
           <div v-if="auth.isSuperAdmin" class="type-card-actions">
             <button class="admin-btn admin-btn-primary" :disabled="busy" @click="save(wt)">{{ t('admin.walletTypes.save') }}</button>
             <button class="admin-btn admin-btn-danger" :disabled="busy" @click="remove(wt)">{{ t('admin.walletTypes.delete') }}</button>
@@ -235,9 +346,44 @@ loadTypes();
       <label class="checkbox-label"><input v-model="newType.allowP2pOut" type="checkbox" /> {{ t('admin.walletTypes.canSendLabel') }}</label>
       <label class="checkbox-label"><input v-model="newType.allowP2pIn" type="checkbox" /> {{ t('admin.walletTypes.canReceiveLabel') }}</label>
       <label class="checkbox-label"><input v-model="newType.supportsAutoWithdraw" type="checkbox" /> {{ t('admin.walletTypes.autoWithdrawLabel') }}</label>
+      <label v-if="newType.supportsAutoWithdraw">
+        {{ t('admin.walletTypes.autoWithdrawTimesLabel') }}
+        <div class="time-row">
+          <input v-model="newType.autoWithdrawTimes[0]" type="time" class="admin-input" />
+          <input v-model="newType.autoWithdrawTimes[1]" type="time" class="admin-input" />
+          <input v-model="newType.autoWithdrawTimes[2]" type="time" class="admin-input" />
+        </div>
+      </label>
       <label class="checkbox-label"><input v-model="newType.allowPurchaseOut" type="checkbox" /> {{ t('admin.walletTypes.canPurchaseLabel') }}</label>
       <label class="checkbox-label"><input v-model="newType.allowPurchaseIn" type="checkbox" /> {{ t('admin.walletTypes.canReceivePurchaseLabel') }}</label>
       <label class="checkbox-label"><input v-model="newType.depositable" type="checkbox" /> {{ t('admin.walletTypes.depositableLabel') }}</label>
+
+      <span class="section-label">{{ t('admin.walletTypes.creditLineHeading') }}</span>
+      <label>
+        {{ t('admin.walletTypes.installmentDateLabel') }}
+        <input v-model="newType.installmentDate" type="number" min="1" max="31" class="admin-input" />
+      </label>
+      <label>
+        {{ t('admin.walletTypes.paymentDeadlineDateLabel') }}
+        <input v-model="newType.paymentDeadlineDate" type="number" min="1" max="31" class="admin-input" />
+      </label>
+      <label>
+        {{ t('admin.walletTypes.installmentCountLabel') }}
+        <input v-model="newType.installmentCount" type="number" min="1" class="admin-input" />
+      </label>
+      <label>
+        {{ t('admin.walletTypes.feeLabel', { code: newType.currencyCode || '…' }) }}
+        <input v-model="newType.fee" type="number" min="0" :step="newTypeCurrency ? amountStep(newTypeCurrency) : '0.01'" class="admin-input" />
+      </label>
+      <label>
+        {{ t('admin.walletTypes.penaltyLabel', { code: newType.currencyCode || '…' }) }}
+        <input v-model="newType.penalty" type="number" min="0" :step="newTypeCurrency ? amountStep(newTypeCurrency) : '0.01'" class="admin-input" />
+      </label>
+      <label>
+        {{ t('admin.walletTypes.unblockFeeLabel', { code: newType.currencyCode || '…' }) }}
+        <input v-model="newType.unblockFee" type="number" min="0" :step="newTypeCurrency ? amountStep(newTypeCurrency) : '0.01'" class="admin-input" />
+      </label>
+
       <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('admin.walletTypes.create') }}</button>
     </form>
   </AdminLayout>
@@ -274,6 +420,22 @@ loadTypes();
   flex-direction: row !important;
   align-items: center;
   gap: 8px !important;
+}
+.section-label {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-top: 4px;
+  border-top: 1px solid var(--card-border);
+  padding-top: 10px;
+}
+.time-row {
+  display: flex;
+  gap: 6px;
+}
+.time-row .admin-input {
+  flex: 1;
 }
 .type-card-actions {
   display: flex;
