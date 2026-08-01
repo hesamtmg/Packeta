@@ -67,12 +67,9 @@ export class CreateWalletTypeDto {
   depositable?: boolean;
 
   // Credit-line fields (repository/credit wallet feature). All optional and
-  // only meaningful on the CREDIT-style types this feature applies to.
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  virtualAmount?: number;
-
+  // only meaningful on the CREDIT-style types this feature applies to —
+  // the shared billing rules; the actual virtualAmount granted and the
+  // holder's nationalCode are per-wallet (see CreateWalletDto).
   @IsOptional()
   @IsInt()
   @Min(1)
@@ -99,11 +96,6 @@ export class CreateWalletTypeDto {
   @IsInt()
   @Min(0)
   unblockFee?: number;
-
-  @IsOptional()
-  @IsString()
-  @Matches(/^\d{10}$/, { message: 'nationalCode must be 10 digits' })
-  nationalCode?: string;
 
   @IsOptional()
   @IsInt()

@@ -116,6 +116,21 @@ export class Wallet {
   @Column({ type: 'varchar', length: 100, nullable: true })
   subCategory: string | null;
 
+  // Credit-line fields (repository/credit wallet feature). Only meaningful
+  // on wallets of a credit-style type — the shared billing rules (fee,
+  // penalty, installment schedule, etc.) live on WalletType instead, since
+  // those are the same for every wallet of the type; these two differ per
+  // person.
+  //
+  // The virtual (allocatable, not directly spendable) balance a repository
+  // owner has granted this specific wallet, in minor units.
+  @Column({ type: 'bigint', nullable: true })
+  virtualAmount: string | null;
+
+  // Iranian national ID of this wallet's holder.
+  @Column({ type: 'varchar', length: 10, nullable: true })
+  nationalCode: string | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

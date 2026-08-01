@@ -102,6 +102,8 @@ export class WalletsController {
         callbackUrl: dto.callbackUrl,
         category: dto.category,
         subCategory: dto.subCategory,
+        virtualAmount: dto.virtualAmount,
+        nationalCode: dto.nationalCode,
       }),
     );
     const settlementAccounts = await this.settlementService.findForWallet(
@@ -154,6 +156,8 @@ export class WalletsController {
         callbackUrl: dto.callbackUrl,
         category: dto.category,
         subCategory: dto.subCategory,
+        virtualAmount: dto.virtualAmount,
+        nationalCode: dto.nationalCode,
       }),
     );
     const settlementAccounts = await this.settlementService.findForWallet(

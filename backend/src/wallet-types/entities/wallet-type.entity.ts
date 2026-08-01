@@ -94,13 +94,11 @@ export class WalletType {
 
   // Credit-line fields (repository/credit wallet feature). All nullable and
   // only meaningful on the CREDIT-style types this feature applies to —
-  // unused on every other type.
+  // unused on every other type. The actual virtual balance granted and the
+  // holder's national code are per-wallet (see Wallet entity), since they
+  // differ per person — these are the shared billing rules every wallet of
+  // the type follows.
   //
-  // Ceiling on the virtual (allocatable, not directly spendable) balance a
-  // wallet of this type can be granted, in minor units.
-  @Column({ type: 'bigint', nullable: true })
-  virtualAmount: string | null;
-
   // Day of month (1-31) each billing cycle's installment is generated.
   @Column({ type: 'smallint', nullable: true })
   installmentDate: number | null;
@@ -122,10 +120,6 @@ export class WalletType {
   // units.
   @Column({ type: 'bigint', nullable: true })
   unblockFee: string | null;
-
-  // Iranian national ID required of the wallet holder.
-  @Column({ type: 'varchar', length: 10, nullable: true })
-  nationalCode: string | null;
 
   // How many installments each credit line is split into.
   @Column({ type: 'smallint', nullable: true })

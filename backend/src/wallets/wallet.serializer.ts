@@ -30,6 +30,8 @@ export function serializeWallet(
     callbackUrl: wallet.callbackUrl,
     category: wallet.category,
     subCategory: wallet.subCategory,
+    virtualAmount: wallet.virtualAmount,
+    nationalCode: wallet.nationalCode,
     settlementAccounts: settlementAccounts?.map(serializeSettlementAccount),
     walletType: {
       id: wallet.walletType.id,
@@ -45,13 +47,11 @@ export function serializeWallet(
       allowPurchaseOut: wallet.walletType.allowPurchaseOut,
       allowPurchaseIn: wallet.walletType.allowPurchaseIn,
       depositable: wallet.walletType.depositable,
-      virtualAmount: wallet.walletType.virtualAmount,
       installmentDate: wallet.walletType.installmentDate,
       paymentDeadlineDate: wallet.walletType.paymentDeadlineDate,
       fee: wallet.walletType.fee,
       penalty: wallet.walletType.penalty,
       unblockFee: wallet.walletType.unblockFee,
-      nationalCode: wallet.walletType.nationalCode,
       installmentCount: wallet.walletType.installmentCount,
       currency: {
         code: wallet.walletType.currency.code,

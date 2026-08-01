@@ -8,6 +8,7 @@ import {
   IsString,
   IsUUID,
   IsUrl,
+  Matches,
   MaxLength,
   Min,
   ValidateIf,
@@ -104,4 +105,18 @@ export class CreateWalletDto {
   @IsString()
   @MaxLength(100)
   subCategory?: string;
+
+  // Credit-line fields (repository/credit wallet feature). Only meaningful
+  // on wallets of a credit-style type — per-person, unlike the shared
+  // billing rules on WalletType (fee, penalty, installment schedule, etc.).
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  virtualAmount?: number;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{10}$/, { message: 'nationalCode must be 10 digits' })
+  nationalCode?: string;
 }

@@ -44,6 +44,8 @@ export class WalletsService {
       callbackUrl?: string;
       category?: string;
       subCategory?: string;
+      virtualAmount?: number;
+      nationalCode?: string;
     },
   ): Promise<Wallet> {
     this.assertValidLimits(
@@ -67,6 +69,8 @@ export class WalletsService {
       callbackUrl: options?.callbackUrl ?? null,
       category: options?.category ?? null,
       subCategory: options?.subCategory ?? null,
+      virtualAmount: options?.virtualAmount?.toString() ?? null,
+      nationalCode: options?.nationalCode ?? null,
     });
     await manager.save(wallet);
 
@@ -102,6 +106,8 @@ export class WalletsService {
       callbackUrl?: string;
       category?: string;
       subCategory?: string;
+      virtualAmount?: number;
+      nationalCode?: string;
     },
   ): Promise<Wallet> {
     const wallet = await this.getById(userId, walletId);
@@ -165,6 +171,14 @@ export class WalletsService {
     if (options.subCategory !== undefined) {
       patch.subCategory = options.subCategory.length
         ? options.subCategory
+        : null;
+    }
+    if (options.virtualAmount !== undefined) {
+      patch.virtualAmount = options.virtualAmount.toString();
+    }
+    if (options.nationalCode !== undefined) {
+      patch.nationalCode = options.nationalCode.length
+        ? options.nationalCode
         : null;
     }
     if (Object.keys(patch).length) {
