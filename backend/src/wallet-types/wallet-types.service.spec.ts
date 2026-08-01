@@ -83,6 +83,49 @@ describe('WalletTypesService.create — autoWithdrawTimes', () => {
     expect(created.autoWithdrawTimes).toEqual(['06:00', '12:00', '18:00']);
     expect(walletTypesRepository.save).toHaveBeenCalled();
   });
+
+  it('allows creating with supportsAutoWithdraw true and no times set yet (empty array)', async () => {
+    const { service, walletTypesRepository } = build();
+
+    const created = await service.create({
+      code: 'MERCHANT',
+      name: 'Merchant',
+      currencyCode: 'USD',
+      supportsAutoWithdraw: true,
+      autoWithdrawTimes: [],
+    } as any);
+
+    expect(created.autoWithdrawTimes).toBeNull();
+    expect(walletTypesRepository.save).toHaveBeenCalled();
+  });
+
+  it('allows creating with supportsAutoWithdraw true and autoWithdrawTimes omitted entirely', async () => {
+    const { service, walletTypesRepository } = build();
+
+    const created = await service.create({
+      code: 'MERCHANT',
+      name: 'Merchant',
+      currencyCode: 'USD',
+      supportsAutoWithdraw: true,
+    } as any);
+
+    expect(created.autoWithdrawTimes).toBeNull();
+    expect(walletTypesRepository.save).toHaveBeenCalled();
+  });
+
+  it('rejects a non-empty autoWithdrawTimes that is not exactly 3 entries', async () => {
+    const { service } = build();
+
+    await expect(
+      service.create({
+        code: 'MERCHANT',
+        name: 'Merchant',
+        currencyCode: 'USD',
+        supportsAutoWithdraw: true,
+        autoWithdrawTimes: ['06:00', '12:00'],
+      } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
 });
 
 describe('WalletTypesService.update — autoWithdrawTimes', () => {

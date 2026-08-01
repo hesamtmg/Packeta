@@ -56,6 +56,11 @@ export class WalletTypesService {
         'creditLimit is required when allowNegativeBalance is true',
       );
     }
+    if (dto.autoWithdrawTimes?.length && dto.autoWithdrawTimes.length !== 3) {
+      throw new BadRequestException(
+        'autoWithdrawTimes must be exactly 3 times, or omitted/empty to leave the schedule unset',
+      );
+    }
     if (dto.autoWithdrawTimes?.length && !dto.supportsAutoWithdraw) {
       throw new BadRequestException(
         'supportsAutoWithdraw must be true to set autoWithdrawTimes',
@@ -72,7 +77,9 @@ export class WalletTypesService {
       allowP2pOut: dto.allowP2pOut,
       allowP2pIn: dto.allowP2pIn,
       supportsAutoWithdraw: dto.supportsAutoWithdraw ?? false,
-      autoWithdrawTimes: dto.autoWithdrawTimes ?? null,
+      autoWithdrawTimes: dto.autoWithdrawTimes?.length
+        ? dto.autoWithdrawTimes
+        : null,
       allowPurchaseOut: dto.allowPurchaseOut ?? false,
       allowPurchaseIn: dto.allowPurchaseIn ?? false,
       depositable: dto.depositable ?? true,
