@@ -144,6 +144,7 @@ export class TransactionsService {
         await manager.update(Wallet, wallet.id, {
           balance: newBalance.toString(),
         });
+        await this.debitLinkedRepository(manager, walletRef, BigInt(amount));
 
         const transaction = manager.create(Transaction, {
           type: TransactionType.WITHDRAW,
@@ -255,6 +256,11 @@ export class TransactionsService {
           balance: newFromBalance.toString(),
         });
         await manager.update(Wallet, toWallet.id, { balance: newToBalance });
+        await this.debitLinkedRepository(
+          manager,
+          fromWalletRef,
+          BigInt(amount),
+        );
 
         const transaction = manager.create(Transaction, {
           type: TransactionType.TRANSFER,
@@ -717,6 +723,17 @@ export class TransactionsService {
       await manager.update(Wallet, toWallet.id, {
         balance: newToBalance.toString(),
       });
+      // Unlike the floor check above, an insufficient-repository-funds
+      // rejection here rolls back this whole DB transaction (including the
+      // two balance updates just above) rather than persisting REVERSED —
+      // the purchase stays PENDING and the timeout sweep will eventually
+      // reverse it. Safe either way (nothing moves on a throw), just less
+      // immediate than the floor-check case.
+      await this.debitLinkedRepository(
+        manager,
+        fromWalletRef,
+        BigInt(transaction.amount),
+      );
 
       transaction.status = TransactionStatus.COMPLETED;
       await manager.save(transaction);
@@ -991,6 +1008,36 @@ export class TransactionsService {
       await manager.update(Wallet, wallet.id, {
         balance: remainingBalance.toString(),
       });
+    });
+  }
+
+  // A repository-backed CREDIT wallet's own balance/floor mechanics are
+  // completely unchanged by this — it only additionally debits the linked
+  // REPOSITORY's real balance by the same amount, since that's the real
+  // money actually funding the personnel's spend (see
+  // WalletsService.grantCredit). No-op for every wallet without a
+  // repositoryWalletId. Applies to withdraw/transfer-out/purchase-out only
+  // (the organic "spend" paths) — admin adjustments and purchase refunds
+  // intentionally don't cascade here.
+  private async debitLinkedRepository(
+    manager: EntityManager,
+    fromWalletRef: Wallet,
+    amount: bigint,
+  ): Promise<void> {
+    if (!fromWalletRef.repositoryWalletId) return;
+
+    const repository = await this.walletsService.lockById(
+      manager,
+      fromWalletRef.repositoryWalletId,
+    );
+    const newRepositoryBalance = BigInt(repository.balance) - amount;
+    if (newRepositoryBalance < 0n) {
+      throw new UnprocessableEntityException(
+        'The backing repository does not have enough real balance to fund this transaction',
+      );
+    }
+    await manager.update(Wallet, repository.id, {
+      balance: newRepositoryBalance.toString(),
     });
   }
 

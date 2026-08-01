@@ -248,21 +248,26 @@ export class WalletsService {
       );
     }
 
-    const availablePool = repository.virtualAmount
-      ? BigInt(repository.virtualAmount)
+    const personnel = await this.usersService.findByPhoneNumber(
+      dto.personnelPhoneNumber,
+    );
+    if (!personnel) {
+      throw new NotFoundException('No account found with that phone number');
+    }
+
+    // Locked right before the pool check/mutation (rather than off the
+    // earlier unlocked `repository` read) so two concurrent grants against
+    // the same repository can't both read the same pool and double-spend
+    // it — the second grant blocks here until the first commits.
+    const lockedRepository = await this.lockById(manager, repository.id);
+    const availablePool = lockedRepository.virtualAmount
+      ? BigInt(lockedRepository.virtualAmount)
       : 0n;
     const requested = BigInt(dto.virtualAmount);
     if (requested > availablePool) {
       throw new UnprocessableEntityException(
         'This repository does not have enough unallocated virtual balance for that amount',
       );
-    }
-
-    const personnel = await this.usersService.findByPhoneNumber(
-      dto.personnelPhoneNumber,
-    );
-    if (!personnel) {
-      throw new NotFoundException('No account found with that phone number');
     }
 
     const creditWallet = await this.createForUser(

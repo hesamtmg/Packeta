@@ -26,20 +26,26 @@ interface WalletFixture {
   balance: string;
   walletType: WalletTypeFixture;
   purchaseTimeoutSeconds?: number | null;
+  repositoryWalletId?: string | null;
 }
 
 function buildService(options: {
   senderWallet: WalletFixture;
   recipientWallet?: WalletFixture | null;
+  repositoryWallet?: WalletFixture | null;
   ipgOverrides?: Record<string, jest.Mock>;
 }) {
-  const { senderWallet, recipientWallet, ipgOverrides } = options;
+  const { senderWallet, recipientWallet, repositoryWallet, ipgOverrides } =
+    options;
   const lockCalls: string[] = [];
 
   const walletsById = new Map<string, WalletFixture>([
     [senderWallet.id, senderWallet],
     ...(recipientWallet
       ? [[recipientWallet.id, recipientWallet] as const]
+      : []),
+    ...(repositoryWallet
+      ? [[repositoryWallet.id, repositoryWallet] as const]
       : []),
   ]);
 
@@ -540,6 +546,55 @@ describe('TransactionsService.withdraw', () => {
 
     await expect(
       service.withdraw('sender', senderWallet.id, 501, 'idem-9'),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+  });
+
+  it('also debits the linked repository when withdrawing from a repository-backed credit wallet', async () => {
+    const repositoryWallet: WalletFixture = {
+      id: 'repo-1',
+      balance: '5000',
+      walletType: walletType({ name: 'Repository' }),
+    };
+    const senderWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '1000',
+      walletType: walletType({ name: 'Credit' }),
+      repositoryWalletId: 'repo-1',
+    };
+    const { service, manager } = buildService({
+      senderWallet,
+      repositoryWallet,
+    });
+
+    const result = await service.withdraw(
+      'sender',
+      senderWallet.id,
+      300,
+      'idem-repo-1',
+    );
+
+    expect(result.balance).toBe('700');
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'repo-1', {
+      balance: '4700',
+    });
+  });
+
+  it('rejects a withdrawal when the linked repository lacks enough real balance to fund it', async () => {
+    const repositoryWallet: WalletFixture = {
+      id: 'repo-1',
+      balance: '100',
+      walletType: walletType({ name: 'Repository' }),
+    };
+    const senderWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '1000',
+      walletType: walletType({ name: 'Credit' }),
+      repositoryWalletId: 'repo-1',
+    };
+    const { service } = buildService({ senderWallet, repositoryWallet });
+
+    await expect(
+      service.withdraw('sender', senderWallet.id, 300, 'idem-repo-2'),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 });

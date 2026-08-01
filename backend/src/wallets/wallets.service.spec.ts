@@ -270,6 +270,11 @@ describe('WalletsService.grantCredit', () => {
       save: jest.fn(async () => undefined),
       update: jest.fn(async () => undefined),
       findOne: jest.fn(async () => created),
+      createQueryBuilder: jest.fn(() => ({
+        setLock: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getOne: jest.fn(async () => options.repository),
+      })),
     };
     return { service, manager, walletTypesService, usersService };
   }
