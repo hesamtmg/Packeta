@@ -8,8 +8,17 @@ import { EntityManager, Repository } from 'typeorm';
 import { Installment, InstallmentStatus } from './entities/installment.entity';
 import { Wallet } from '../wallets/entities/wallet.entity';
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
 function toDateOnly(date: Date): string {
   return date.toISOString().slice(0, 10);
+}
+
+// Whole days between two date-only ("YYYY-MM-DD") strings. Both parse as UTC
+// midnight, so the subtraction is exact with no timezone drift.
+function daysBetween(earlier: string, later: string): number {
+  const ms = Date.parse(later) - Date.parse(earlier);
+  return Math.floor(ms / MS_PER_DAY);
 }
 
 // Adds `months` calendar months to `date`, clamped to `day` (1-31, clamped
@@ -29,19 +38,29 @@ export class InstallmentsService {
     private readonly walletsRepository: Repository<Wallet>,
   ) {}
 
-  // Splits a granted virtualAmount into installmentCount equal shares (the
+  // Splits a granted virtualAmount into installmentCount equal shares — the
   // remainder, if any, folds into the last installment so the total always
-  // reconciles exactly), plus the type's flat fee on every installment.
-  computeInstallmentAmount(
+  // reconciles exactly. This is the fee/penalty percentage base
+  // (Installment.principalAmount), fixed at generation time.
+  computeInstallmentPrincipal(
     virtualAmount: bigint,
     installmentCount: number,
     sequenceNumber: number,
-    fee: bigint,
   ): bigint {
     const share = virtualAmount / BigInt(installmentCount);
     const remainder = virtualAmount % BigInt(installmentCount);
     const isLast = sequenceNumber === installmentCount;
-    return share + (isLast ? remainder : 0n) + fee;
+    return share + (isLast ? remainder : 0n);
+  }
+
+  // `percent` is a decimal string (up to 3 decimal places, e.g. "2.500" for
+  // 2.5%) as stored on WalletType.feePercent/penaltyPercentPerDay — scaled
+  // through milli-percent (x1000) so the whole computation stays in BigInt,
+  // same convention as SettlementService.computeAmounts.
+  private percentOf(amount: bigint, percent: string | null): bigint {
+    if (!percent) return 0n;
+    const milliPercent = BigInt(Math.round(Number(percent) * 1000));
+    return (amount * milliPercent) / 100_000n;
   }
 
   // The next unpaid-schedule installment's deadline: the type's
@@ -92,13 +111,13 @@ export class InstallmentsService {
       if (existing.some((i) => i.dueDate === todayDate)) continue;
 
       const sequenceNumber = existing.length + 1;
-      const fee = wallet.walletType.fee ? BigInt(wallet.walletType.fee) : 0n;
-      const amount = this.computeInstallmentAmount(
+      const principal = this.computeInstallmentPrincipal(
         BigInt(wallet.virtualAmount!),
         installmentCount,
         sequenceNumber,
-        fee,
       );
+      const fee = this.percentOf(principal, wallet.walletType.feePercent);
+      const amount = principal + fee;
       const deadlineDate = wallet.walletType.paymentDeadlineDate
         ? this.computeDeadlineDate(today, wallet.walletType.paymentDeadlineDate)
         : today;
@@ -107,6 +126,7 @@ export class InstallmentsService {
         walletId: wallet.id,
         sequenceNumber,
         amount: amount.toString(),
+        principalAmount: principal.toString(),
         dueDate: todayDate,
         deadlineDate: toDateOnly(deadlineDate),
         status: InstallmentStatus.PENDING,
@@ -116,29 +136,49 @@ export class InstallmentsService {
     return created;
   }
 
-  // Every still-PENDING installment past its deadline: adds the type's flat
-  // penalty, marks it OVERDUE, and blocks its wallet from further outgoing
-  // money movement until repaid.
+  // Every still-unpaid installment past its deadline (PENDING transitioning
+  // to OVERDUE, or already OVERDUE and still accruing): tops up `amount` by
+  // penaltyPercentPerDay x principalAmount for each day elapsed since the
+  // last time this ran that hasn't already been charged (penaltyDaysApplied
+  // tracks that), marks it OVERDUE, and blocks its wallet from further
+  // outgoing money movement until repaid. Safe to run more or less than once
+  // a day — it always converges to "penaltyDaysApplied days worth of
+  // penalty", never double-charging a day twice.
   async applyOverduePenalties(today: Date = new Date()): Promise<number> {
     const todayDate = toDateOnly(today);
-    const overdue = await this.installmentsRepository
+    const unpaid = await this.installmentsRepository
       .createQueryBuilder('installment')
       .innerJoinAndSelect('installment.wallet', 'wallet')
       .innerJoinAndSelect('wallet.walletType', 'walletType')
-      .where('installment.status = :status', {
-        status: InstallmentStatus.PENDING,
+      .where('installment.status IN (:...statuses)', {
+        statuses: [InstallmentStatus.PENDING, InstallmentStatus.OVERDUE],
       })
       .andWhere('installment.deadlineDate < :todayDate', { todayDate })
       .getMany();
 
-    for (const installment of overdue) {
-      const penalty = installment.wallet.walletType.penalty
-        ? BigInt(installment.wallet.walletType.penalty)
-        : 0n;
-      installment.amount = (BigInt(installment.amount) + penalty).toString();
+    let affected = 0;
+    for (const installment of unpaid) {
+      const daysOverdue = daysBetween(installment.deadlineDate, todayDate);
+      const owedDays = daysOverdue - installment.penaltyDaysApplied;
+      if (owedDays <= 0 && installment.status === InstallmentStatus.OVERDUE) {
+        continue;
+      }
+
+      if (owedDays > 0) {
+        const dailyPenalty = this.percentOf(
+          BigInt(installment.principalAmount),
+          installment.wallet.walletType.penaltyPercentPerDay,
+        );
+        installment.amount = (
+          BigInt(installment.amount) +
+          dailyPenalty * BigInt(owedDays)
+        ).toString();
+        installment.penaltyDaysApplied = daysOverdue;
+      }
       installment.penaltyApplied = true;
       installment.status = InstallmentStatus.OVERDUE;
       await this.installmentsRepository.save(installment);
+      affected++;
 
       if (!installment.wallet.blockedAt) {
         await this.walletsRepository.update(installment.wallet.id, {
@@ -146,7 +186,7 @@ export class InstallmentsService {
         });
       }
     }
-    return overdue.length;
+    return affected;
   }
 
   async findForWallet(

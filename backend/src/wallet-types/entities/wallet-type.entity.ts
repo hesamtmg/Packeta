@@ -111,14 +111,18 @@ export class WalletType {
   @Column({ type: 'smallint', nullable: true })
   paymentDeadlineDate: number | null;
 
-  // Flat fee charged per installment, in minor units.
-  @Column({ type: 'bigint', nullable: true })
-  fee: string | null;
+  // Fee charged per installment, as a percentage (0-100, up to 3 decimal
+  // places) of that installment's principal share — computed once at
+  // generation time (see InstallmentsService.generateDue).
+  @Column({ type: 'numeric', precision: 6, scale: 3, nullable: true })
+  feePercent: string | null;
 
-  // Flat penalty charged when an installment misses its payment deadline, in
-  // minor units.
-  @Column({ type: 'bigint', nullable: true })
-  penalty: string | null;
+  // Penalty accrued for every day an installment stays unpaid past its
+  // deadline, as a percentage (0-100, up to 3 decimal places) of that
+  // installment's principal share — applied once per elapsed day, not
+  // compounding on itself (see InstallmentsService.applyOverduePenalties).
+  @Column({ type: 'numeric', precision: 6, scale: 3, nullable: true })
+  penaltyPercentPerDay: string | null;
 
   // Flat fee charged to unblock a wallet frozen for missed payment, in minor
   // units.

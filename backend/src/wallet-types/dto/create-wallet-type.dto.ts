@@ -1,6 +1,7 @@
 import {
   IsBoolean,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   Matches,
@@ -89,14 +90,16 @@ export class CreateWalletTypeDto {
   paymentDeadlineDate?: number;
 
   @IsOptional()
-  @IsInt()
+  @IsNumber({ maxDecimalPlaces: 3 })
   @Min(0)
-  fee?: number;
+  @Max(100)
+  feePercent?: number;
 
   @IsOptional()
-  @IsInt()
+  @IsNumber({ maxDecimalPlaces: 3 })
   @Min(0)
-  penalty?: number;
+  @Max(100)
+  penaltyPercentPerDay?: number;
 
   @IsOptional()
   @IsInt()
