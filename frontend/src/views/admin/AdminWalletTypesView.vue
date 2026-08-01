@@ -39,6 +39,12 @@ const currencies = ref<CurrencyInfo[]>([]);
 const error = ref('');
 const busy = ref(false);
 
+// The seeded built-in codes (see backend WalletTypeCode) — surfaced as
+// datalist suggestions so an admin creating a type sees REPOSITORY/CREDIT/
+// etc. rather than having to know the exact string to type. Still free text
+// underneath, since a custom code (e.g. a one-off promo type) is valid too.
+const KNOWN_WALLET_TYPE_CODES = ['BUY', 'SELL', 'CREDIT', 'GIFT', 'MERCHANT', 'REPOSITORY'];
+
 const newType = reactive({
   code: '',
   name: '',
@@ -317,7 +323,20 @@ loadTypes();
 
     <form v-if="auth.isSuperAdmin" class="admin-card new-type" @submit.prevent="createType">
       <h2>{{ t('admin.walletTypes.addHeading') }}</h2>
-      <label>{{ t('admin.walletTypes.codeLabel') }} <input v-model="newType.code" type="text" class="admin-input" required :placeholder="t('admin.walletTypes.codePlaceholder')" /></label>
+      <label>
+        {{ t('admin.walletTypes.codeLabel') }}
+        <input
+          v-model="newType.code"
+          type="text"
+          class="admin-input"
+          required
+          list="wallet-type-codes"
+          :placeholder="t('admin.walletTypes.codePlaceholder')"
+        />
+        <datalist id="wallet-type-codes">
+          <option v-for="code in KNOWN_WALLET_TYPE_CODES" :key="code" :value="code" />
+        </datalist>
+      </label>
       <label>{{ t('admin.walletTypes.nameLabel') }} <input v-model="newType.name" type="text" class="admin-input" required /></label>
       <label>
         {{ t('admin.walletTypes.currencyLabel') }}
