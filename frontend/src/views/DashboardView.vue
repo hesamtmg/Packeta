@@ -83,7 +83,6 @@ const grantBusy = ref(false);
 const grantError = ref('');
 const grantSuccess = ref('');
 
-const payFromWalletId = ref('');
 const payBusy = ref<string | null>(null);
 const payError = ref('');
 
@@ -520,8 +519,11 @@ function onDeposit() {
   runAction(async () => {
     const w = findWallet(depositWalletId.value);
     if (!w) return;
-    await wallet.deposit(w.id, toMinorUnits(depositAmount.value, w.walletType.currency));
-    depositAmount.value = '';
+    const result = await wallet.deposit(
+      w.id,
+      toMinorUnits(depositAmount.value, w.walletType.currency),
+    );
+    window.location.href = result.redirectUrl;
   });
 }
 
@@ -594,10 +596,9 @@ function installmentStatusLabel(status: Installment['status']): string {
 
 async function onPayInstallment(installment: Installment) {
   payError.value = '';
-  if (!payFromWalletId.value) return;
   payBusy.value = installment.id;
   try {
-    const result = await wallet.payInstallment(installment.id, payFromWalletId.value);
+    const result = await wallet.payInstallment(installment.id);
     window.location.href = result.redirectUrl;
   } catch (err) {
     payError.value = err instanceof ApiError ? err.message : t('dashboard.actions.error');
@@ -777,13 +778,6 @@ async function onPayInstallment(installment: Installment) {
     <div v-if="sortedInstallments.length" class="admin-card">
       <h2>{{ t('dashboard.installments.title') }}</h2>
       <p class="hint">{{ t('dashboard.installments.hint') }}</p>
-      <label class="pay-from-label">
-        {{ t('dashboard.installments.payFromLabel') }}
-        <select v-model="payFromWalletId" class="admin-input">
-          <option value="" disabled>{{ t('dashboard.installments.payFromPlaceholder') }}</option>
-          <option v-for="w in purchaseWallets" :key="w.id" :value="w.id">{{ walletLabel(w) }}</option>
-        </select>
-      </label>
       <table class="admin-table">
         <thead>
           <tr>
@@ -809,7 +803,7 @@ async function onPayInstallment(installment: Installment) {
                 v-if="i.status !== 'PAID'"
                 type="button"
                 class="admin-btn admin-btn-primary"
-                :disabled="!payFromWalletId || payBusy === i.id"
+                :disabled="payBusy === i.id"
                 @click="onPayInstallment(i)"
               >
                 {{ t('dashboard.installments.pay') }}
@@ -1200,15 +1194,6 @@ async function onPayInstallment(installment: Installment) {
   margin-top: 4px;
 }
 
-.pay-from-label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 0.85rem;
-  color: var(--text-dim);
-  max-width: 320px;
-  margin-bottom: 14px;
-}
 .installment-status-paid {
   color: var(--accent, #4ade80);
 }

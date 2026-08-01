@@ -22,7 +22,6 @@ import { TransferDto } from './dto/transfer.dto';
 import { InitiatePurchaseDto } from './dto/initiate-purchase.dto';
 import { InitiateChargeDto } from './dto/initiate-charge.dto';
 import { ReverseTransactionDto } from './dto/reverse-transaction.dto';
-import { PayInstallmentDto } from './dto/pay-installment.dto';
 
 @Controller('transactions')
 @UseGuards(JwtAuthGuard)
@@ -91,13 +90,11 @@ export class TransactionsController {
   payInstallment(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
-    @Body() dto: PayInstallmentDto,
     @Headers('idempotency-key') idempotencyKey: string,
   ) {
     return this.transactionsService.payInstallment(
       user.userId,
       id,
-      dto.fromWalletId,
       idempotencyKey,
     );
   }

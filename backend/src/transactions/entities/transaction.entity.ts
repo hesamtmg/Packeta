@@ -14,13 +14,15 @@ export enum TransactionType {
   PURCHASE = 'PURCHASE',
 }
 
-// Every DEPOSIT/WITHDRAW/TRANSFER/ADJUSTMENT row is COMPLETED the instant
-// it's inserted (the ledger's original guarantee: only successfully applied
+// Every WITHDRAW/TRANSFER/ADJUSTMENT row is COMPLETED the instant it's
+// inserted (the ledger's original guarantee: only successfully applied
 // operations are written here, failed attempts go to the Mongo activity log
-// instead). PURCHASE is the one type that can sit PENDING — funds are held
-// from the customer at initiate time but not yet credited to the merchant
-// until /verify — and can end as REVERSED if the merchant never verifies
-// before purchaseTimeoutSeconds, or via an explicit refund.
+// instead). DEPOSIT and PURCHASE are the two types that can sit PENDING —
+// both now go through the real-money IPG flow: a row is created PENDING,
+// the payer is redirected to the IPG, and money only moves once /verify
+// confirms the gateway authorized it — and can end as REVERSED if the payer
+// never completes/verifies before the timeout, or via an explicit refund
+// (PURCHASE only).
 export enum TransactionStatus {
   PENDING = 'PENDING',
   COMPLETED = 'COMPLETED',
@@ -76,9 +78,10 @@ export class Transaction {
   @Column({ type: 'uuid', nullable: true })
   relatedTransactionId: string | null;
 
-  // Only set for PURCHASE rows: the external IPG's payment intent id and
-  // the payment page URL the customer was redirected to. No balance moves
-  // when these are set — only once /verify confirms the IPG authorized it.
+  // Only set for PURCHASE and DEPOSIT rows: the external IPG's payment
+  // intent id and the payment page URL the customer was redirected to. No
+  // balance moves when these are set — only once /verify confirms the IPG
+  // authorized it.
   @Index()
   @Column({ type: 'varchar', length: 100, nullable: true })
   ipgAuthority: string | null;

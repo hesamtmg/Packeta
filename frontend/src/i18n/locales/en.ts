@@ -104,9 +104,7 @@ export default {
     },
     installments: {
       title: 'Installments',
-      hint: 'Scheduled repayments for your credit wallets — pick a wallet to pay from, then pay any due or overdue installment.',
-      payFromLabel: 'Pay from',
-      payFromPlaceholder: 'Choose a wallet',
+      hint: 'Scheduled repayments for your credit wallets — pay any due or overdue installment with real money via the payment gateway.',
       dueDate: 'Due',
       deadlineDate: 'Deadline',
       amount: 'Amount',

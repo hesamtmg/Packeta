@@ -196,17 +196,25 @@ describe('TransactionsService.deposit', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('allows a deposit into a wallet whose type accepts deposits', async () => {
+  it('initiates a walletless IPG payment for a wallet whose type accepts deposits', async () => {
     const wallet: WalletFixture = {
       id: 'wallet-1',
       balance: '0',
       walletType: walletType({ depositable: true }),
     };
-    const { service } = buildService({ senderWallet: wallet });
+    const { service, manager } = buildService({ senderWallet: wallet });
 
     const result = await service.deposit('user-1', 'wallet-1', 250, 'idem-2');
 
-    expect(result.balance).toBe('250');
+    expect(result.redirectUrl).toBe('http://ipg/pay/auth-1');
+    expect(manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: TransactionType.DEPOSIT,
+        fromWalletId: null,
+        toWalletId: 'wallet-1',
+        amount: '250',
+      }),
+    );
   });
 });
 
@@ -997,12 +1005,7 @@ describe('TransactionsService.payInstallment', () => {
     const { service } = buildPayService(baseInstallment({ status: 'PAID' }));
 
     await expect(
-      service.payInstallment(
-        'personnel-1',
-        'installment-1',
-        'payer-1',
-        'idem-inst-1',
-      ),
+      service.payInstallment('personnel-1', 'installment-1', 'idem-inst-1'),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
@@ -1020,12 +1023,7 @@ describe('TransactionsService.payInstallment', () => {
     );
 
     await expect(
-      service.payInstallment(
-        'personnel-1',
-        'installment-1',
-        'payer-1',
-        'idem-inst-2',
-      ),
+      service.payInstallment('personnel-1', 'installment-1', 'idem-inst-2'),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -1045,51 +1043,16 @@ describe('TransactionsService.payInstallment', () => {
     });
 
     await expect(
-      service.payInstallment(
-        'personnel-1',
-        'installment-1',
-        'payer-1',
-        'idem-inst-3',
-      ),
+      service.payInstallment('personnel-1', 'installment-1', 'idem-inst-3'),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it("rejects when the paying wallet's currency does not match the repository's", async () => {
-    const otherCurrencyWallet: WalletFixture = {
-      ...fromWallet,
-      walletType: walletType({
-        name: 'Buy',
-        allowPurchaseOut: true,
-        currencyId: 'irr-currency-id',
-      }),
-    };
-    const installmentsService = {
-      getByIdForUser: jest.fn(async () => baseInstallment()),
-      markPaid: jest.fn(async () => undefined),
-    };
-    const { service } = buildService({
-      senderWallet: otherCurrencyWallet,
-      repositoryWallet,
-      installmentsService: installmentsService as any,
-    });
-
-    await expect(
-      service.payInstallment(
-        'personnel-1',
-        'installment-1',
-        'payer-1',
-        'idem-inst-4',
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
-
-  it('initiates a repayment purchase for exactly the installment amount when not blocked', async () => {
+  it('initiates a walletless repayment for exactly the installment amount when not blocked', async () => {
     const { service, manager } = buildPayService(baseInstallment());
 
     const result = await service.payInstallment(
       'personnel-1',
       'installment-1',
-      'payer-1',
       'idem-inst-5',
     );
 
@@ -1097,7 +1060,7 @@ describe('TransactionsService.payInstallment', () => {
     expect(manager.save).toHaveBeenCalledWith(
       expect.objectContaining({
         toWalletId: 'repo-1',
-        fromWalletId: 'payer-1',
+        fromWalletId: null,
         amount: '400',
         installmentId: 'installment-1',
       }),
@@ -1117,12 +1080,7 @@ describe('TransactionsService.payInstallment', () => {
       }),
     );
 
-    await service.payInstallment(
-      'personnel-1',
-      'installment-1',
-      'payer-1',
-      'idem-inst-6',
-    );
+    await service.payInstallment('personnel-1', 'installment-1', 'idem-inst-6');
 
     expect(manager.save).toHaveBeenCalledWith(
       expect.objectContaining({ amount: '450' }),

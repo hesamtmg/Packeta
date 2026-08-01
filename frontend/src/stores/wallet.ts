@@ -143,12 +143,11 @@ export const useWalletStore = defineStore('wallet', {
     async fetchInstallments() {
       this.installments = await apiRequest<Installment[]>('/installments');
     },
-    async payInstallment(installmentId: string, fromWalletId: string) {
+    async payInstallment(installmentId: string) {
       return apiRequest<{ transactionId: string; redirectUrl: string; expiresAt: string }>(
         `/transactions/installments/${installmentId}/pay`,
         {
           method: 'POST',
-          body: { fromWalletId },
           idempotent: true,
         },
       );
@@ -179,12 +178,14 @@ export const useWalletStore = defineStore('wallet', {
       await this.fetchWallets();
     },
     async deposit(walletId: string, amount: number) {
-      await apiRequest('/transactions/deposit', {
-        method: 'POST',
-        body: { walletId, amount },
-        idempotent: true,
-      });
-      await Promise.all([this.fetchWallets(), this.fetchTransactions()]);
+      return apiRequest<{ transactionId: string; redirectUrl: string; expiresAt: string }>(
+        '/transactions/deposit',
+        {
+          method: 'POST',
+          body: { walletId, amount },
+          idempotent: true,
+        },
+      );
     },
     async withdraw(walletId: string, amount: number) {
       await apiRequest('/transactions/withdraw', {
