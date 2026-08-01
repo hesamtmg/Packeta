@@ -34,6 +34,8 @@ export function serializeWallet(
     virtualAmount: wallet.virtualAmount,
     nationalCode: wallet.nationalCode,
     repositoryWalletId: wallet.repositoryWalletId,
+    railType: wallet.railType,
+    railScheduleTimes: wallet.railScheduleTimes,
     settlementAccounts: settlementAccounts?.map(serializeSettlementAccount),
     walletType: {
       id: wallet.walletType.id,

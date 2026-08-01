@@ -72,6 +72,16 @@ export class WalletsController {
       walletType,
       'settlement accounts',
     );
+    this.assertAutoWithdrawCapable(
+      dto.railType,
+      walletType,
+      'a withdrawal rail',
+    );
+    this.assertAutoWithdrawCapable(
+      dto.railScheduleTimes,
+      walletType,
+      'a withdrawal rail schedule',
+    );
     this.assertPurchaseInCapable(dto.terminalId, walletType, 'a terminal id');
     this.assertPurchaseInCapable(
       dto.acceptorCode,
@@ -105,6 +115,8 @@ export class WalletsController {
         subCategory: dto.subCategory,
         virtualAmount: dto.virtualAmount,
         nationalCode: dto.nationalCode,
+        railType: dto.railType,
+        railScheduleTimes: dto.railScheduleTimes,
       }),
     );
     const settlementAccounts = await this.settlementService.findForWallet(
@@ -142,6 +154,16 @@ export class WalletsController {
       walletType,
       'settlement accounts',
     );
+    this.assertAutoWithdrawCapable(
+      dto.railType,
+      walletType,
+      'a withdrawal rail',
+    );
+    this.assertAutoWithdrawCapable(
+      dto.railScheduleTimes,
+      walletType,
+      'a withdrawal rail schedule',
+    );
     this.assertPurchaseInCapable(dto.terminalId, walletType, 'a terminal id');
     this.assertPurchaseInCapable(
       dto.acceptorCode,
@@ -172,6 +194,8 @@ export class WalletsController {
         subCategory: dto.subCategory,
         virtualAmount: dto.virtualAmount,
         nationalCode: dto.nationalCode,
+        railType: dto.railType,
+        railScheduleTimes: dto.railScheduleTimes,
       }),
     );
     const settlementAccounts = await this.settlementService.findForWallet(

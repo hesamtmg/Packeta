@@ -11,6 +11,7 @@ import { Transaction } from './transactions/entities/transaction.entity';
 import { IdempotencyKey } from './idempotency/entities/idempotency-key.entity';
 import { SettlementSplit } from './settlement/entities/settlement-split.entity';
 import { Installment } from './installments/entities/installment.entity';
+import { RailSettlement } from './rail-settlements/entities/rail-settlement.entity';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { WalletsModule } from './wallets/wallets.module';
@@ -23,6 +24,7 @@ import { AdminModule } from './admin/admin.module';
 import { SchedulerModule } from './scheduler/scheduler.module';
 import { PurchaseGatewayModule } from './purchase-gateway/purchase-gateway.module';
 import { SettlementModule } from './settlement/settlement.module';
+import { RailSettlementsModule } from './rail-settlements/rail-settlements.module';
 
 @Module({
   imports: [
@@ -45,6 +47,7 @@ import { SettlementModule } from './settlement/settlement.module';
           IdempotencyKey,
           SettlementSplit,
           Installment,
+          RailSettlement,
         ],
         synchronize: false,
       }),
@@ -67,6 +70,7 @@ import { SettlementModule } from './settlement/settlement.module';
     SchedulerModule,
     PurchaseGatewayModule,
     SettlementModule,
+    RailSettlementsModule,
   ],
 })
 export class AppModule {}

@@ -126,6 +126,18 @@ export default {
       addAccount: 'Add settlement account',
       addSplit: 'Add split destination',
       remove: 'Remove',
+      railLabel: 'Withdrawal rail (optional)',
+      railPlaceholder: 'Use the default schedule',
+      railScheduleLabel: 'Custom schedule (optional)',
+      railSchedulePlaceholder: '09:00, 13:00, 17:00',
+      railScheduleHint: 'Comma-separated 24h times. Leave blank to use this rail’s built-in schedule.',
+      railScheduleRequiredHint: 'Bank transfer has no built-in schedule — enter comma-separated 24h times.',
+      rail: {
+        POL_PAY: 'Pol Pay',
+        PAYA: 'Paya',
+        SATNA: 'Satna',
+        BANK_TRANSFER: 'Bank transfer',
+      },
     },
     wallets: {
       title: 'Wallets',

@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsEmail,
+  IsEnum,
   IsIP,
   IsInt,
   IsOptional,
@@ -15,6 +16,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { SettlementAccountDto } from '../../settlement/dto/settlement-account.dto';
+import { SettlementRailType } from '../../rail-settlements/entities/rail-settlement.entity';
 
 export class CreateWalletDto {
   @IsUUID()
@@ -119,4 +121,19 @@ export class CreateWalletDto {
   @IsString()
   @Matches(/^\d{10}$/, { message: 'nationalCode must be 10 digits' })
   nationalCode?: string;
+
+  // Withdrawal-schedule rail (only meaningful when the wallet type's
+  // supportsAutoWithdraw is true) — which of Iran's interbank rails the
+  // auto-withdraw sweep pays this wallet out over. See the Wallet entity.
+  @IsOptional()
+  @IsEnum(SettlementRailType)
+  railType?: SettlementRailType;
+
+  // Optional "HH:MM" schedule override for the chosen rail — required when
+  // railType is BANK_TRANSFER (no sensible built-in default exists), falls
+  // back to the rail's built-in default for every other rail when omitted.
+  @IsOptional()
+  @ArrayMinSize(1)
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { each: true })
+  railScheduleTimes?: string[];
 }

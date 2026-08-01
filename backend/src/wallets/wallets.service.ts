@@ -16,6 +16,7 @@ import { WalletTypesService } from '../wallet-types/wallet-types.service';
 import { SettlementService } from '../settlement/settlement.service';
 import { SettlementAccountDto } from '../settlement/dto/settlement-account.dto';
 import { UsersService } from '../users/users.service';
+import { SettlementRailType } from '../rail-settlements/entities/rail-settlement.entity';
 
 const WALLET_RELATIONS = { walletType: { currency: true } } as const;
 const WALLET_RELATIONS_WITH_OWNER = {
@@ -53,12 +54,15 @@ export class WalletsService {
       subCategory?: string;
       virtualAmount?: number;
       nationalCode?: string;
+      railType?: SettlementRailType;
+      railScheduleTimes?: string[];
     },
   ): Promise<Wallet> {
     this.assertValidLimits(
       options?.minTransactionAmount,
       options?.maxTransactionAmount,
     );
+    this.assertValidRailConfig(options?.railType, options?.railScheduleTimes);
 
     const wallet = manager.create(Wallet, {
       userId,
@@ -78,6 +82,8 @@ export class WalletsService {
       subCategory: options?.subCategory ?? null,
       virtualAmount: options?.virtualAmount?.toString() ?? null,
       nationalCode: options?.nationalCode ?? null,
+      railType: options?.railType ?? null,
+      railScheduleTimes: options?.railScheduleTimes ?? null,
     });
     await manager.save(wallet);
 
@@ -115,6 +121,8 @@ export class WalletsService {
       subCategory?: string;
       virtualAmount?: number;
       nationalCode?: string;
+      railType?: SettlementRailType;
+      railScheduleTimes?: string[];
     },
   ): Promise<Wallet> {
     const wallet = await this.getById(userId, walletId);
@@ -133,6 +141,12 @@ export class WalletsService {
         : wallet.maxTransactionAmount
           ? Number(wallet.maxTransactionAmount)
           : undefined,
+    );
+    this.assertValidRailConfig(
+      options.railType !== undefined ? options.railType : wallet.railType,
+      options.railScheduleTimes !== undefined
+        ? options.railScheduleTimes
+        : wallet.railScheduleTimes,
     );
 
     const patch: Partial<Wallet> = {};
@@ -186,6 +200,14 @@ export class WalletsService {
     if (options.nationalCode !== undefined) {
       patch.nationalCode = options.nationalCode.length
         ? options.nationalCode
+        : null;
+    }
+    if (options.railType !== undefined) {
+      patch.railType = options.railType;
+    }
+    if (options.railScheduleTimes !== undefined) {
+      patch.railScheduleTimes = options.railScheduleTimes.length
+        ? options.railScheduleTimes
         : null;
     }
     if (Object.keys(patch).length) {
@@ -327,6 +349,25 @@ export class WalletsService {
     }
   }
 
+  // BANK_TRANSFER has no built-in default schedule (see
+  // RAIL_DEFAULT_SCHEDULE_TIMES) — a direct bank transfer's timing is
+  // entirely bank-specific, so a wallet choosing that rail must supply its
+  // own railScheduleTimes explicitly. Every other rail is fine unconfigured
+  // (falls back to its built-in default at sweep time).
+  private assertValidRailConfig(
+    railType?: SettlementRailType | null,
+    scheduleTimes?: string[] | null,
+  ): void {
+    if (
+      railType === SettlementRailType.BANK_TRANSFER &&
+      !scheduleTimes?.length
+    ) {
+      throw new BadRequestException(
+        'BANK_TRANSFER has no default schedule — railScheduleTimes must be set explicitly for this wallet',
+      );
+    }
+  }
+
   // Every wallet may configure an optional per-transaction amount band
   // (minor units) — used by TransactionsService wherever an amount is about
   // to move into or out of a wallet.
@@ -373,6 +414,9 @@ export class WalletsService {
 
   // Merchant wallets whose type supports the auto-withdraw sweep and have a
   // schedule configured. Used by the scheduler to find sweep candidates.
+  // Excludes wallets with a rail configured (Wallet.railType) — those are
+  // swept on their rail's own schedule instead (see
+  // listWithRailSettlementDue), never both.
   async listWithAutoWithdrawDue(): Promise<Wallet[]> {
     return this.walletsRepository
       .createQueryBuilder('wallet')
@@ -380,6 +424,24 @@ export class WalletsService {
       .innerJoinAndSelect('walletType.currency', 'currency')
       .where('walletType.supportsAutoWithdraw = true')
       .andWhere('walletType.autoWithdrawTimes IS NOT NULL')
+      .andWhere('wallet."railType" IS NULL')
+      .andWhere('wallet.balance <> 0')
+      .andWhere('wallet.closedAt IS NULL')
+      .getMany();
+  }
+
+  // Merchant wallets configured with a withdrawal-schedule rail (Pol Pay /
+  // Paya / Satna / bank transfer). Used by SettlementRailSweepService to
+  // find sweep candidates — the actual "is it this rail's window right now"
+  // check happens in the scheduler, same division of labor as
+  // listWithAutoWithdrawDue.
+  async listWithRailSettlementDue(): Promise<Wallet[]> {
+    return this.walletsRepository
+      .createQueryBuilder('wallet')
+      .innerJoinAndSelect('wallet.walletType', 'walletType')
+      .innerJoinAndSelect('walletType.currency', 'currency')
+      .where('walletType.supportsAutoWithdraw = true')
+      .andWhere('wallet."railType" IS NOT NULL')
       .andWhere('wallet.balance <> 0')
       .andWhere('wallet.closedAt IS NULL')
       .getMany();

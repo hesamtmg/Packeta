@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { TransactionsService } from './transactions.service';
 import { TransactionType } from './entities/transaction.entity';
+import { SettlementRailType } from '../rail-settlements/entities/rail-settlement.entity';
 
 interface WalletTypeFixture {
   name: string;
@@ -149,6 +150,10 @@ function buildService(options: {
     computeAmounts: jest.fn(),
   };
 
+  const railSettlementsService = {
+    createForSweep: jest.fn(),
+  };
+
   const service = new TransactionsService(
     dataSource as any,
     walletsService as any,
@@ -159,6 +164,7 @@ function buildService(options: {
     {} as any,
     settlementService as any,
     (installmentsService ?? {}) as any,
+    railSettlementsService as any,
     {} as any,
   );
 
@@ -805,21 +811,32 @@ function buildSweepService(options: {
   unsettledPurchases: any[];
   overridesByPurchase: Map<string, any[]>;
   computeAmountsImpl?: (rows: any[], amount: string) => any[];
+  railType?: SettlementRailType;
 }) {
-  const wallet = { id: 'wallet-1', balance: options.walletBalance };
+  const wallet = {
+    id: 'wallet-1',
+    balance: options.walletBalance,
+    railType: options.railType ?? null,
+  };
   const savedTransactions: any[] = [];
   const savedPurchases: any[] = [];
   const updatedBalances: string[] = [];
+  const railSettlementLinks: any[] = [];
+  let idCounter = 0;
 
   const walletsService = { lockById: jest.fn(async () => wallet) };
 
   const manager = {
     update: jest.fn(async (_entity: unknown, _id: string, patch: any) => {
       if (patch.balance !== undefined) updatedBalances.push(patch.balance);
+      if (patch.railSettlementId !== undefined) {
+        railSettlementLinks.push({ id: _id, ...patch });
+      }
     }),
     create: jest.fn((_entity: unknown, data: unknown) => data),
     save: jest.fn(async (data: any) => {
       if (data.type === TransactionType.WITHDRAW) {
+        data.id = data.id ?? `withdraw-${++idCounter}`;
         savedTransactions.push(data);
       } else {
         savedPurchases.push(data);
@@ -856,6 +873,15 @@ function buildSweepService(options: {
     ),
   };
 
+  let railSettlementCounter = 0;
+  const railSettlementsCreated: any[] = [];
+  const railSettlementsService = {
+    createForSweep: jest.fn(async (_manager: unknown, input: any) => {
+      railSettlementsCreated.push(input);
+      return { id: `rail-settlement-${++railSettlementCounter}`, ...input };
+    }),
+  };
+
   const service = new TransactionsService(
     dataSource as any,
     walletsService as any,
@@ -866,10 +892,18 @@ function buildSweepService(options: {
     {} as any,
     settlementService as any,
     {} as any,
+    railSettlementsService as any,
     {} as any,
   );
 
-  return { service, savedTransactions, savedPurchases, updatedBalances };
+  return {
+    service,
+    savedTransactions,
+    savedPurchases,
+    updatedBalances,
+    railSettlementsCreated,
+    railSettlementLinks,
+  };
 }
 
 describe('TransactionsService.sweepAutoWithdraw', () => {
@@ -955,6 +989,74 @@ describe('TransactionsService.sweepAutoWithdraw', () => {
       amount: '500',
       relatedTransactionId: 'purchase-3',
       destinationIban: null,
+    });
+  });
+});
+
+describe('TransactionsService.sweepAutoWithdraw rail-aware behavior', () => {
+  it('does not create a RailSettlement for a wallet with no railType configured', async () => {
+    const { service, railSettlementsCreated } = buildSweepService({
+      walletBalance: '5000',
+      walletDefaults: [],
+      unsettledPurchases: [],
+      overridesByPurchase: new Map(),
+    });
+
+    await service.sweepAutoWithdraw('wallet-1');
+
+    expect(railSettlementsCreated).toHaveLength(0);
+  });
+
+  it('records a RailSettlement and links it back to the WITHDRAW for the legacy (no-split) path', async () => {
+    const {
+      service,
+      savedTransactions,
+      railSettlementsCreated,
+      railSettlementLinks,
+    } = buildSweepService({
+      walletBalance: '5000',
+      walletDefaults: [],
+      unsettledPurchases: [],
+      overridesByPurchase: new Map(),
+      railType: SettlementRailType.SATNA,
+    });
+
+    await service.sweepAutoWithdraw('wallet-1');
+
+    expect(savedTransactions).toHaveLength(1);
+    expect(railSettlementsCreated).toHaveLength(1);
+    expect(railSettlementsCreated[0]).toMatchObject({
+      walletId: 'wallet-1',
+      railType: SettlementRailType.SATNA,
+      amount: '5000',
+      transactionId: savedTransactions[0].id,
+    });
+    expect(railSettlementLinks).toHaveLength(1);
+    expect(railSettlementLinks[0]).toMatchObject({
+      id: savedTransactions[0].id,
+      railSettlementId: 'rail-settlement-1',
+    });
+  });
+
+  it('records one RailSettlement per generated WITHDRAW slice in split-settlement mode', async () => {
+    const purchase = { id: 'purchase-1', amount: '1000', settledAt: null };
+    const { service, savedTransactions, railSettlementsCreated } =
+      buildSweepService({
+        walletBalance: '1000',
+        walletDefaults: [{ iban: 'default-iban', label: null }],
+        unsettledPurchases: [purchase],
+        overridesByPurchase: new Map(),
+        railType: SettlementRailType.PAYA,
+      });
+
+    await service.sweepAutoWithdraw('wallet-1');
+
+    expect(savedTransactions).toHaveLength(1);
+    expect(railSettlementsCreated).toHaveLength(1);
+    expect(railSettlementsCreated[0]).toMatchObject({
+      railType: SettlementRailType.PAYA,
+      destinationIban: 'default-iban',
+      amount: '1000',
     });
   });
 });

@@ -29,6 +29,7 @@ import { SettlementService } from '../settlement/settlement.service';
 import { SettlementSplitDto } from '../settlement/dto/settlement-split.dto';
 import { InstallmentsService } from '../installments/installments.service';
 import { InstallmentStatus } from '../installments/entities/installment.entity';
+import { RailSettlementsService } from '../rail-settlements/rail-settlements.service';
 
 export interface MoneyResult {
   transactionId: string;
@@ -63,6 +64,7 @@ export class TransactionsService {
     private readonly currenciesService: CurrenciesService,
     private readonly settlementService: SettlementService,
     private readonly installmentsService: InstallmentsService,
+    private readonly railSettlementsService: RailSettlementsService,
     @InjectRepository(Transaction)
     private readonly transactionsRepository: Repository<Transaction>,
   ) {}
@@ -1099,6 +1101,14 @@ export class TransactionsService {
   //     older purchase with neither) a single plain WITHDRAW for just that
   //     purchase's amount — so a per-charge split can never be diluted by
   //     being aggregated together with other purchases' money.
+  //
+  // Rail-aware: when the wallet has a Wallet.railType configured (see
+  // rail-schedule.ts/SettlementRailSweepService — this is what decides
+  // *when* this method gets called, not this method itself), every WITHDRAW
+  // this sweep produces also gets a linked RailSettlement row recording
+  // which rail (Pol Pay/Paya/Satna/bank transfer) it went out over — the
+  // WITHDRAW still carries the actual ledger movement, exactly as it does
+  // for a non-rail wallet.
   async sweepAutoWithdraw(walletId: string): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
       const wallet = await this.walletsService.lockById(manager, walletId);
@@ -1106,11 +1116,39 @@ export class TransactionsService {
         return;
       }
 
-      const minuteKey = new Date().toISOString().slice(0, 16);
+      const now = new Date();
+      const minuteKey = now.toISOString().slice(0, 16);
+      const keyPrefix = wallet.railType
+        ? `rail-settlement:${wallet.railType.toLowerCase()}`
+        : 'auto-withdraw';
       const walletDefaults = await this.settlementService.findForWallet(
         manager,
         wallet.id,
       );
+
+      const recordRailSettlement = async (
+        transaction: Transaction,
+        amount: string,
+        destinationIban: string | null,
+        label: string | null,
+      ): Promise<void> => {
+        if (!wallet.railType) return;
+        const settlement = await this.railSettlementsService.createForSweep(
+          manager,
+          {
+            walletId: wallet.id,
+            railType: wallet.railType,
+            amount,
+            destinationIban,
+            label,
+            transactionId: transaction.id,
+            scheduledFor: now,
+          },
+        );
+        await manager.update(Transaction, transaction.id, {
+          railSettlementId: settlement.id,
+        });
+      };
 
       const unsettledPurchases = await manager
         .createQueryBuilder(Transaction, 't')
@@ -1138,9 +1176,10 @@ export class TransactionsService {
           fromWalletId: wallet.id,
           toWalletId: null,
           amount: wallet.balance,
-          idempotencyKey: `auto-withdraw:${wallet.id}:${minuteKey}`,
+          idempotencyKey: `${keyPrefix}:${wallet.id}:${minuteKey}`,
         });
         await manager.save(transaction);
+        await recordRailSettlement(transaction, wallet.balance, null, null);
         return;
       }
 
@@ -1168,12 +1207,18 @@ export class TransactionsService {
             fromWalletId: wallet.id,
             toWalletId: null,
             amount: item.amount.toString(),
-            idempotencyKey: `auto-withdraw:${wallet.id}:${purchase.id}:${index}:${minuteKey}`,
+            idempotencyKey: `${keyPrefix}:${wallet.id}:${purchase.id}:${index}:${minuteKey}`,
             relatedTransactionId: purchase.id,
             destinationIban: item.iban,
             note: item.label,
           });
           await manager.save(withdrawal);
+          await recordRailSettlement(
+            withdrawal,
+            item.amount.toString(),
+            item.iban,
+            item.label,
+          );
         }
 
         purchase.settledAt = new Date();

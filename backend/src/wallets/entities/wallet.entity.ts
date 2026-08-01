@@ -10,6 +10,7 @@ import {
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { WalletType } from '../../wallet-types/entities/wallet-type.entity';
+import { SettlementRailType } from '../../rail-settlements/entities/rail-settlement.entity';
 
 // balance is stored in minor units (e.g. cents) as a bigint to avoid float
 // rounding errors; typeorm maps postgres bigint to a JS string. A user can
@@ -152,6 +153,22 @@ export class Wallet {
   @ManyToOne(() => Wallet, { nullable: true })
   @JoinColumn({ name: 'repositoryWalletId' })
   repositoryWallet: Wallet | null;
+
+  // Withdrawal-schedule rail (Pol Pay / Paya / Satna / bank transfer) this
+  // merchant wallet's auto-withdraw sweep pays out over — see
+  // TransactionsService.sweepAutoWithdraw and rail-schedule.ts. Only
+  // meaningful when walletType.supportsAutoWithdraw is true. One rail per
+  // wallet, chosen by the merchant — unlike settlementAccounts (the IBAN
+  // split), which this rail governs the *timing* of, not the destination.
+  @Column({ type: 'enum', enum: SettlementRailType, nullable: true })
+  railType: SettlementRailType | null;
+
+  // Optional "HH:MM" (server-local) schedule override for the chosen rail —
+  // falls back to that rail's built-in default when unset. Required (no
+  // sensible default exists) when railType is BANK_TRANSFER, since a direct
+  // bank transfer's timing is entirely bank-specific.
+  @Column({ type: 'varchar', length: 5, array: true, nullable: true })
+  railScheduleTimes: string[] | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

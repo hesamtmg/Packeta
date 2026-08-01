@@ -10,6 +10,7 @@ import { IpgModule } from '../ipg/ipg.module';
 import { CurrenciesModule } from '../currencies/currencies.module';
 import { SettlementModule } from '../settlement/settlement.module';
 import { InstallmentsModule } from '../installments/installments.module';
+import { RailSettlementsModule } from '../rail-settlements/rail-settlements.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { InstallmentsModule } from '../installments/installments.module';
     CurrenciesModule,
     SettlementModule,
     InstallmentsModule,
+    RailSettlementsModule,
   ],
   controllers: [TransactionsController],
   providers: [TransactionsService],

@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsEmail,
+  IsEnum,
   IsIP,
   IsInt,
   IsOptional,
@@ -14,6 +15,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { SettlementAccountDto } from '../../settlement/dto/settlement-account.dto';
+import { SettlementRailType } from '../../rail-settlements/entities/rail-settlement.entity';
 
 // Same fields as CreateWalletDto minus walletTypeId (fixed for the life of
 // the wallet) — every field here fully replaces its current value when
@@ -100,4 +102,14 @@ export class UpdateWalletDto {
   @IsString()
   @Matches(/^\d{10}$/, { message: 'nationalCode must be 10 digits' })
   nationalCode?: string;
+
+  // Withdrawal-schedule rail — see CreateWalletDto.
+  @IsOptional()
+  @IsEnum(SettlementRailType)
+  railType?: SettlementRailType;
+
+  @IsOptional()
+  @ArrayMinSize(1)
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { each: true })
+  railScheduleTimes?: string[];
 }

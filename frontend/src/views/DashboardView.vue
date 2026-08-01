@@ -43,6 +43,8 @@ const newWalletAllowedIps = ref('');
 const newWalletCallbackUrl = ref('');
 const newWalletCategory = ref('');
 const newWalletSubCategory = ref('');
+const newWalletRailType = ref('');
+const newWalletRailScheduleTimes = ref('');
 
 const editingWalletId = ref<string | null>(null);
 const editRestrictedCounterparties = ref('');
@@ -58,6 +60,8 @@ const editAllowedIps = ref('');
 const editCallbackUrl = ref('');
 const editCategory = ref('');
 const editSubCategory = ref('');
+const editRailType = ref('');
+const editRailScheduleTimes = ref('');
 const chargeSettlementSplits = ref<
   { iban: string; label: string; type: 'PERCENT' | 'FIXED'; value: string }[]
 >([]);
@@ -206,6 +210,7 @@ function badges(w: Wallet): string[] {
   }
   if (w.repositoryWalletId) list.push(t('dashboard.wallets.repositoryBackedBadge'));
   if (w.blockedAt) list.push(t('dashboard.wallets.blockedBadge'));
+  if (w.railType) list.push(t(`dashboard.settlement.rail.${w.railType}`));
   return list;
 }
 
@@ -400,6 +405,8 @@ function toggleEditWallet(w: Wallet) {
   editCallbackUrl.value = w.callbackUrl ?? '';
   editCategory.value = w.category ?? '';
   editSubCategory.value = w.subCategory ?? '';
+  editRailType.value = w.railType ?? '';
+  editRailScheduleTimes.value = (w.railScheduleTimes ?? []).join(', ');
 }
 
 function parseIpList(raw: string): string[] {
@@ -407,6 +414,13 @@ function parseIpList(raw: string): string[] {
     .split(',')
     .map((ip) => ip.trim())
     .filter((ip) => ip.length > 0);
+}
+
+function parseTimeList(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((time) => time.trim())
+    .filter((time) => time.length > 0);
 }
 
 function onSaveWalletEdit(w: Wallet) {
@@ -432,6 +446,12 @@ function onSaveWalletEdit(w: Wallet) {
             percent: Number(row.percent),
           }))
         : undefined;
+      if (editRailType.value) {
+        options.railType = editRailType.value as WalletOptionsInput['railType'];
+        options.railScheduleTimes = editRailScheduleTimes.value
+          ? parseTimeList(editRailScheduleTimes.value)
+          : undefined;
+      }
     }
     if (w.walletType.allowPurchaseIn) {
       options.purchaseTimeoutSeconds = editPurchaseTimeoutMinutes.value
@@ -480,6 +500,12 @@ function onAddWallet() {
           percent: Number(row.percent),
         }));
       }
+      if (newWalletRailType.value) {
+        options.railType = newWalletRailType.value as WalletOptionsInput['railType'];
+        if (newWalletRailScheduleTimes.value) {
+          options.railScheduleTimes = parseTimeList(newWalletRailScheduleTimes.value);
+        }
+      }
     }
     if (showPurchaseTimeoutField.value) {
       if (newWalletPurchaseTimeoutMinutes.value) {
@@ -512,6 +538,8 @@ function onAddWallet() {
     newWalletCallbackUrl.value = '';
     newWalletCategory.value = '';
     newWalletSubCategory.value = '';
+    newWalletRailType.value = '';
+    newWalletRailScheduleTimes.value = '';
   });
 }
 
@@ -878,6 +906,29 @@ async function onPayInstallment(installment: Installment) {
                   {{ t('dashboard.settlement.addAccount') }}
                 </button>
               </div>
+
+              <label>
+                {{ t('dashboard.settlement.railLabel') }}
+                <select v-model="editRailType" class="admin-input">
+                  <option value="">{{ t('dashboard.settlement.railPlaceholder') }}</option>
+                  <option value="POL_PAY">{{ t('dashboard.settlement.rail.POL_PAY') }}</option>
+                  <option value="PAYA">{{ t('dashboard.settlement.rail.PAYA') }}</option>
+                  <option value="SATNA">{{ t('dashboard.settlement.rail.SATNA') }}</option>
+                  <option value="BANK_TRANSFER">{{ t('dashboard.settlement.rail.BANK_TRANSFER') }}</option>
+                </select>
+              </label>
+              <label v-if="editRailType">
+                {{ t('dashboard.settlement.railScheduleLabel') }}
+                <input
+                  v-model="editRailScheduleTimes"
+                  type="text"
+                  :placeholder="t('dashboard.settlement.railSchedulePlaceholder')"
+                  class="admin-input"
+                />
+                <span class="hint">
+                  {{ editRailType === 'BANK_TRANSFER' ? t('dashboard.settlement.railScheduleRequiredHint') : t('dashboard.settlement.railScheduleHint') }}
+                </span>
+              </label>
             </template>
 
             <template v-if="w.walletType.allowPurchaseIn">
@@ -975,6 +1026,29 @@ async function onPayInstallment(installment: Installment) {
               {{ t('dashboard.settlement.addAccount') }}
             </button>
           </div>
+
+          <label class="market-field">
+            {{ t('dashboard.settlement.railLabel') }}
+            <select v-model="newWalletRailType" class="admin-input">
+              <option value="">{{ t('dashboard.settlement.railPlaceholder') }}</option>
+              <option value="POL_PAY">{{ t('dashboard.settlement.rail.POL_PAY') }}</option>
+              <option value="PAYA">{{ t('dashboard.settlement.rail.PAYA') }}</option>
+              <option value="SATNA">{{ t('dashboard.settlement.rail.SATNA') }}</option>
+              <option value="BANK_TRANSFER">{{ t('dashboard.settlement.rail.BANK_TRANSFER') }}</option>
+            </select>
+          </label>
+          <label v-if="newWalletRailType" class="market-field">
+            {{ t('dashboard.settlement.railScheduleLabel') }}
+            <input
+              v-model="newWalletRailScheduleTimes"
+              type="text"
+              :placeholder="t('dashboard.settlement.railSchedulePlaceholder')"
+              class="admin-input"
+            />
+            <span class="hint">
+              {{ newWalletRailType === 'BANK_TRANSFER' ? t('dashboard.settlement.railScheduleRequiredHint') : t('dashboard.settlement.railScheduleHint') }}
+            </span>
+          </label>
         </template>
 
         <template v-if="showPurchaseTimeoutField">

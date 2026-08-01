@@ -6,6 +6,7 @@ import { InstallmentsModule } from '../installments/installments.module';
 import { PurchaseTimeoutSweepService } from './purchase-timeout-sweep.service';
 import { AutoWithdrawSweepService } from './auto-withdraw-sweep.service';
 import { InstallmentSweepService } from './installment-sweep.service';
+import { SettlementRailSweepService } from './settlement-rail-sweep.service';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { InstallmentSweepService } from './installment-sweep.service';
     PurchaseTimeoutSweepService,
     AutoWithdrawSweepService,
     InstallmentSweepService,
+    SettlementRailSweepService,
   ],
 })
 export class SchedulerModule {}

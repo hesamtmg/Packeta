@@ -4,6 +4,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { WalletsService } from './wallets.service';
+import { SettlementRailType } from '../rail-settlements/entities/rail-settlement.entity';
 
 function buildService(wallet: {
   id: string;
@@ -222,6 +223,111 @@ describe('WalletsService.createForUser / updateForUser limit validation', () => 
         maxTransactionAmount: 100,
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('WalletsService.createForUser / updateForUser rail validation', () => {
+  it('rejects a BANK_TRANSFER rail with no railScheduleTimes at creation', async () => {
+    const manager = { create: jest.fn(), save: jest.fn() };
+    const service = new WalletsService(
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await expect(
+      service.createForUser(manager as any, 'user-1', 'type-1', {
+        railType: SettlementRailType.BANK_TRANSFER,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(manager.create).not.toHaveBeenCalled();
+  });
+
+  it('allows a BANK_TRANSFER rail when railScheduleTimes is supplied', async () => {
+    const manager = {
+      create: jest.fn((_entity: unknown, data: unknown) => data),
+      save: jest.fn(async (data: any) => data),
+    };
+    const service = new WalletsService(
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await expect(
+      service.createForUser(manager as any, 'user-1', 'type-1', {
+        railType: SettlementRailType.BANK_TRANSFER,
+        railScheduleTimes: ['09:00'],
+      }),
+    ).resolves.toBeDefined();
+    expect(manager.create).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        railType: SettlementRailType.BANK_TRANSFER,
+        railScheduleTimes: ['09:00'],
+      }),
+    );
+  });
+
+  it('allows a PAYA rail with no railScheduleTimes (falls back to the built-in default at sweep time)', async () => {
+    const manager = {
+      create: jest.fn((_entity: unknown, data: unknown) => data),
+      save: jest.fn(async (data: any) => data),
+    };
+    const service = new WalletsService(
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await expect(
+      service.createForUser(manager as any, 'user-1', 'type-1', {
+        railType: SettlementRailType.PAYA,
+      }),
+    ).resolves.toBeDefined();
+  });
+
+  it('rejects switching an existing wallet to BANK_TRANSFER without supplying a schedule', async () => {
+    const { service } = buildService({
+      id: 'wallet-1',
+      userId: 'user-1',
+      balance: '0',
+      closedAt: null,
+      railType: null,
+      railScheduleTimes: null,
+    } as any);
+
+    await expect(
+      service.updateForUser({} as any, 'user-1', 'wallet-1', {
+        railType: SettlementRailType.BANK_TRANSFER,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('allows switching to BANK_TRANSFER when the same request also supplies a schedule', async () => {
+    const { service } = buildService({
+      id: 'wallet-1',
+      userId: 'user-1',
+      balance: '0',
+      closedAt: null,
+      railType: null,
+      railScheduleTimes: null,
+      walletType: {},
+    } as any);
+    const manager = {
+      update: jest.fn(async () => undefined),
+      findOne: jest.fn(async () => ({ id: 'wallet-1' })),
+    };
+
+    await expect(
+      service.updateForUser(manager as any, 'user-1', 'wallet-1', {
+        railType: SettlementRailType.BANK_TRANSFER,
+        railScheduleTimes: ['10:00'],
+      }),
+    ).resolves.toBeDefined();
   });
 });
 

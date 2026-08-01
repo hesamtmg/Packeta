@@ -126,6 +126,18 @@ export default {
       addAccount: 'افزودن حساب تسویه',
       addSplit: 'افزودن مقصد تقسیم',
       remove: 'حذف',
+      railLabel: 'ریل برداشت (اختیاری)',
+      railPlaceholder: 'استفاده از زمان‌بندی پیش‌فرض',
+      railScheduleLabel: 'زمان‌بندی سفارشی (اختیاری)',
+      railSchedulePlaceholder: '۰۹:۰۰، ۱۳:۰۰، ۱۷:۰۰',
+      railScheduleHint: 'زمان‌های ۲۴ ساعته با کاما جدا شوند. برای استفاده از زمان‌بندی پیش‌فرض این ریل، خالی بگذارید.',
+      railScheduleRequiredHint: 'انتقال بانکی زمان‌بندی پیش‌فرض ندارد — زمان‌های ۲۴ ساعته را با کاما وارد کنید.',
+      rail: {
+        POL_PAY: 'پل پی',
+        PAYA: 'پایا',
+        SATNA: 'ساتنا',
+        BANK_TRANSFER: 'انتقال بانکی',
+      },
     },
     wallets: {
       title: 'کیف‌پول‌ها',

@@ -34,6 +34,24 @@ export interface SettlementAccount {
   percent: string;
 }
 
+// Withdrawal-schedule rail: which of Iran's interbank rails the
+// auto-withdraw sweep pays this wallet out over, and when.
+export type SettlementRailType = 'POL_PAY' | 'PAYA' | 'SATNA' | 'BANK_TRANSFER';
+
+export interface RailSettlement {
+  id: string;
+  walletId: string;
+  railType: SettlementRailType;
+  amount: string;
+  destinationIban: string | null;
+  label: string | null;
+  status: 'PENDING' | 'COMPLETED' | 'FAILED';
+  scheduledFor: string;
+  processedAt: string | null;
+  transactionId: string | null;
+  createdAt: string;
+}
+
 export interface Wallet {
   id: string;
   balance: string;
@@ -56,6 +74,8 @@ export interface Wallet {
   virtualAmount: string | null;
   nationalCode: string | null;
   repositoryWalletId: string | null;
+  railType: SettlementRailType | null;
+  railScheduleTimes: string[] | null;
   settlementAccounts?: SettlementAccount[];
   walletType: WalletType;
   createdAt: string;
@@ -77,6 +97,8 @@ export interface WalletOptionsInput {
   subCategory?: string;
   virtualAmount?: number;
   nationalCode?: string;
+  railType?: SettlementRailType;
+  railScheduleTimes?: string[];
 }
 
 export interface GrantCreditInput {
