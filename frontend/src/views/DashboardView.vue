@@ -25,7 +25,6 @@ const chargeResult = ref<{ redirectUrl: string; expiresAt: string } | null>(null
 const chargeLinkCopied = ref(false);
 
 const newWalletType = ref('');
-const newWalletAutoWithdrawTimes = ref(['', '', '']);
 const newWalletPurchaseTimeoutMinutes = ref('');
 const newWalletSettlementAccounts = ref<{ iban: string; label: string; percent: string }[]>([]);
 const newWalletRestrictedCounterparties = ref('');
@@ -42,7 +41,6 @@ const newWalletSubCategory = ref('');
 
 const editingWalletId = ref<string | null>(null);
 const editRestrictedCounterparties = ref('');
-const editAutoWithdrawTimes = ref(['', '', '']);
 const editPurchaseTimeoutMinutes = ref('');
 const editSettlementAccounts = ref<{ iban: string; label: string; percent: string }[]>([]);
 const editTerminalId = ref('');
@@ -326,7 +324,6 @@ function toggleEditWallet(w: Wallet) {
   }
   editingWalletId.value = w.id;
   editRestrictedCounterparties.value = (w.restrictedCounterparties ?? []).join(', ');
-  editAutoWithdrawTimes.value = w.autoWithdrawTimes ? [...w.autoWithdrawTimes] : ['', '', ''];
   editPurchaseTimeoutMinutes.value = w.purchaseTimeoutSeconds
     ? String(Math.round(w.purchaseTimeoutSeconds / 60))
     : '';
@@ -371,8 +368,6 @@ function onSaveWalletEdit(w: Wallet) {
       options.maxTransactionAmount = Math.round(Number(editMaxAmount.value) * scale);
     }
     if (w.walletType.supportsAutoWithdraw) {
-      const filledTimes = editAutoWithdrawTimes.value.filter((time) => time);
-      options.autoWithdrawTimes = filledTimes.length ? editAutoWithdrawTimes.value : [];
       const filledAccounts = editSettlementAccounts.value.filter(
         (row) => row.iban && row.percent,
       );
@@ -421,7 +416,6 @@ function onAddWallet() {
       options.maxTransactionAmount = Math.round(Number(newWalletMaxAmount.value) * scale);
     }
     if (showAutoWithdrawFields.value) {
-      options.autoWithdrawTimes = newWalletAutoWithdrawTimes.value;
       const filledAccounts = newWalletSettlementAccounts.value.filter(
         (row) => row.iban && row.percent,
       );
@@ -451,7 +445,6 @@ function onAddWallet() {
     }
     await wallet.createWallet(newWalletType.value, options);
     newWalletType.value = '';
-    newWalletAutoWithdrawTimes.value = ['', '', ''];
     newWalletPurchaseTimeoutMinutes.value = '';
     newWalletSettlementAccounts.value = [];
     newWalletRestrictedCounterparties.value = '';
@@ -691,11 +684,6 @@ function onPurchase() {
             </label>
 
             <template v-if="w.walletType.supportsAutoWithdraw">
-              <span class="hint">{{ t('dashboard.wallets.autoWithdrawLabel') }}</span>
-              <input v-model="editAutoWithdrawTimes[0]" type="time" class="admin-input" />
-              <input v-model="editAutoWithdrawTimes[1]" type="time" class="admin-input" />
-              <input v-model="editAutoWithdrawTimes[2]" type="time" class="admin-input" />
-
               <div class="settlement-rows">
                 <span class="hint">{{ t('dashboard.settlement.walletHint') }}</span>
                 <div v-for="(row, i) in editSettlementAccounts" :key="i" class="settlement-row">
@@ -793,11 +781,6 @@ function onPurchase() {
         </label>
 
         <template v-if="showAutoWithdrawFields">
-          <span class="hint">{{ t('dashboard.wallets.autoWithdrawLabel') }}</span>
-          <input v-model="newWalletAutoWithdrawTimes[0]" type="time" class="admin-input" required />
-          <input v-model="newWalletAutoWithdrawTimes[1]" type="time" class="admin-input" required />
-          <input v-model="newWalletAutoWithdrawTimes[2]" type="time" class="admin-input" required />
-
           <div class="settlement-rows">
             <span class="hint">{{ t('dashboard.settlement.walletHint') }}</span>
             <div v-for="(row, i) in newWalletSettlementAccounts" :key="i" class="settlement-row">

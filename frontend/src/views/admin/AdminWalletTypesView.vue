@@ -20,6 +20,7 @@ interface WalletType {
   allowP2pOut: boolean;
   allowP2pIn: boolean;
   supportsAutoWithdraw: boolean;
+  autoWithdrawTimes: string[] | null;
   allowPurchaseOut: boolean;
   allowPurchaseIn: boolean;
   depositable: boolean;
@@ -40,6 +41,7 @@ const newType = reactive({
   allowP2pOut: false,
   allowP2pIn: false,
   supportsAutoWithdraw: false,
+  autoWithdrawTimes: ['', '', ''] as string[],
   allowPurchaseOut: false,
   allowPurchaseIn: false,
   depositable: true,
@@ -61,13 +63,25 @@ function onCreditLimitInput(type: WalletType, event: Event) {
   type.creditLimit = String(toMinorUnits(raw, type.currency));
 }
 
+// autoWithdrawTimes: 3 fills -> send as-is, 0 fills -> send [] to clear,
+// same "empty clears" convention the backend expects.
+function autoWithdrawTimesPayload(times: string[] | null): string[] | undefined {
+  const filled = (times ?? []).filter(Boolean);
+  return filled.length ? (times ?? []) : [];
+}
+
 async function loadTypes() {
   error.value = '';
   try {
-    [types.value, currencies.value] = await Promise.all([
+    const [loaded, loadedCurrencies] = await Promise.all([
       apiRequest<WalletType[]>('/wallet-types'),
       apiRequest<CurrencyInfo[]>('/currencies'),
     ]);
+    types.value = loaded.map((type) => ({
+      ...type,
+      autoWithdrawTimes: type.autoWithdrawTimes ?? ['', '', ''],
+    }));
+    currencies.value = loadedCurrencies;
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : t('admin.walletTypes.loadFailed');
   }
@@ -89,6 +103,7 @@ async function save(type: WalletType) {
         allowP2pOut: type.allowP2pOut,
         allowP2pIn: type.allowP2pIn,
         supportsAutoWithdraw: type.supportsAutoWithdraw,
+        autoWithdrawTimes: autoWithdrawTimesPayload(type.autoWithdrawTimes),
         allowPurchaseOut: type.allowPurchaseOut,
         allowPurchaseIn: type.allowPurchaseIn,
         depositable: type.depositable,
@@ -135,6 +150,7 @@ async function createType() {
         allowP2pOut: newType.allowP2pOut,
         allowP2pIn: newType.allowP2pIn,
         supportsAutoWithdraw: newType.supportsAutoWithdraw,
+        autoWithdrawTimes: autoWithdrawTimesPayload(newType.autoWithdrawTimes),
         allowPurchaseOut: newType.allowPurchaseOut,
         allowPurchaseIn: newType.allowPurchaseIn,
         depositable: newType.depositable,
@@ -149,6 +165,7 @@ async function createType() {
     newType.allowP2pOut = false;
     newType.allowP2pIn = false;
     newType.supportsAutoWithdraw = false;
+    newType.autoWithdrawTimes = ['', '', ''];
     newType.allowPurchaseOut = false;
     newType.allowPurchaseIn = false;
     newType.depositable = true;
@@ -193,6 +210,14 @@ loadTypes();
           <label class="checkbox-label"><input v-model="wt.allowP2pOut" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.canSendLabel') }}</label>
           <label class="checkbox-label"><input v-model="wt.allowP2pIn" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.canReceiveLabel') }}</label>
           <label class="checkbox-label"><input v-model="wt.supportsAutoWithdraw" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.autoWithdrawLabel') }}</label>
+          <label v-if="wt.supportsAutoWithdraw">
+            {{ t('admin.walletTypes.autoWithdrawTimesLabel') }}
+            <div class="time-row">
+              <input v-model="wt.autoWithdrawTimes![0]" type="time" class="admin-input" :disabled="!auth.isSuperAdmin" />
+              <input v-model="wt.autoWithdrawTimes![1]" type="time" class="admin-input" :disabled="!auth.isSuperAdmin" />
+              <input v-model="wt.autoWithdrawTimes![2]" type="time" class="admin-input" :disabled="!auth.isSuperAdmin" />
+            </div>
+          </label>
           <label class="checkbox-label"><input v-model="wt.allowPurchaseOut" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.canPurchaseLabel') }}</label>
           <label class="checkbox-label"><input v-model="wt.allowPurchaseIn" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.canReceivePurchaseLabel') }}</label>
           <label class="checkbox-label"><input v-model="wt.depositable" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.depositableLabel') }}</label>
@@ -235,6 +260,14 @@ loadTypes();
       <label class="checkbox-label"><input v-model="newType.allowP2pOut" type="checkbox" /> {{ t('admin.walletTypes.canSendLabel') }}</label>
       <label class="checkbox-label"><input v-model="newType.allowP2pIn" type="checkbox" /> {{ t('admin.walletTypes.canReceiveLabel') }}</label>
       <label class="checkbox-label"><input v-model="newType.supportsAutoWithdraw" type="checkbox" /> {{ t('admin.walletTypes.autoWithdrawLabel') }}</label>
+      <label v-if="newType.supportsAutoWithdraw">
+        {{ t('admin.walletTypes.autoWithdrawTimesLabel') }}
+        <div class="time-row">
+          <input v-model="newType.autoWithdrawTimes[0]" type="time" class="admin-input" />
+          <input v-model="newType.autoWithdrawTimes[1]" type="time" class="admin-input" />
+          <input v-model="newType.autoWithdrawTimes[2]" type="time" class="admin-input" />
+        </div>
+      </label>
       <label class="checkbox-label"><input v-model="newType.allowPurchaseOut" type="checkbox" /> {{ t('admin.walletTypes.canPurchaseLabel') }}</label>
       <label class="checkbox-label"><input v-model="newType.allowPurchaseIn" type="checkbox" /> {{ t('admin.walletTypes.canReceivePurchaseLabel') }}</label>
       <label class="checkbox-label"><input v-model="newType.depositable" type="checkbox" /> {{ t('admin.walletTypes.depositableLabel') }}</label>
@@ -274,6 +307,13 @@ loadTypes();
   flex-direction: row !important;
   align-items: center;
   gap: 8px !important;
+}
+.time-row {
+  display: flex;
+  gap: 6px;
+}
+.time-row .admin-input {
+  flex: 1;
 }
 .type-card-actions {
   display: flex;

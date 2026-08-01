@@ -107,7 +107,6 @@ export default {
     wallets: {
       title: 'کیف‌پول‌ها',
       addPlaceholder: 'افزودن کیف پول…',
-      autoWithdrawLabel: 'زمان‌های برداشت خودکار (۳ مورد):',
       verifyTimeoutLabel: 'مهلت تأیید (دقیقه):',
       terminalIdLabel: 'شناسه ترمینال (اختیاری)',
       acceptorCodeLabel: 'کد پذیرنده (اختیاری)',
@@ -306,6 +305,7 @@ export default {
       canSendLabel: 'امکان ارسال انتقال',
       canReceiveLabel: 'امکان دریافت انتقال',
       autoWithdrawLabel: 'پشتیبانی از برنامه برداشت خودکار',
+      autoWithdrawTimesLabel: 'زمان‌های برداشت خودکار (۳ مورد):',
       canPurchaseLabel: 'امکان خرید (مشتری)',
       canReceivePurchaseLabel: 'امکان دریافت خرید (فروشنده)',
       depositableLabel: 'امکان واریز',

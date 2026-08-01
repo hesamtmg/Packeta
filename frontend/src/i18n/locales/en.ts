@@ -107,7 +107,6 @@ export default {
     wallets: {
       title: 'Wallets',
       addPlaceholder: 'Add a wallet…',
-      autoWithdrawLabel: 'Auto-withdraw times (3):',
       verifyTimeoutLabel: 'Verify timeout (minutes):',
       terminalIdLabel: 'Terminal ID (optional)',
       acceptorCodeLabel: 'Acceptor code (optional)',
@@ -306,6 +305,7 @@ export default {
       canSendLabel: 'Can send transfers',
       canReceiveLabel: 'Can receive transfers',
       autoWithdrawLabel: 'Supports auto-withdraw schedule',
+      autoWithdrawTimesLabel: 'Auto-withdraw times (3):',
       canPurchaseLabel: 'Can make purchases (customer)',
       canReceivePurchaseLabel: 'Can receive purchases (merchant)',
       depositableLabel: 'Accepts deposits',

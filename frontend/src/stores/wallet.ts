@@ -13,9 +13,18 @@ export interface WalletType {
   allowP2pOut: boolean;
   allowP2pIn: boolean;
   supportsAutoWithdraw: boolean;
+  autoWithdrawTimes: string[] | null;
   allowPurchaseOut: boolean;
   allowPurchaseIn: boolean;
   depositable: boolean;
+  // Credit-line fields (repository/credit wallet feature) — shared billing
+  // rules for every wallet of this type.
+  installmentDate: number | null;
+  paymentDeadlineDate: number | null;
+  fee: string | null;
+  penalty: string | null;
+  unblockFee: string | null;
+  installmentCount: number | null;
 }
 
 export interface SettlementAccount {
@@ -28,7 +37,6 @@ export interface SettlementAccount {
 export interface Wallet {
   id: string;
   balance: string;
-  autoWithdrawTimes: string[] | null;
   purchaseTimeoutSeconds: number | null;
   restrictedCounterparties: string[] | null;
   closedAt: string | null;
@@ -42,13 +50,17 @@ export interface Wallet {
   callbackUrl: string | null;
   category: string | null;
   subCategory: string | null;
+  // Credit-line fields (repository/credit wallet feature) — per-wallet,
+  // unlike the shared billing rules on WalletType.
+  virtualAmount: string | null;
+  nationalCode: string | null;
+  repositoryWalletId: string | null;
   settlementAccounts?: SettlementAccount[];
   walletType: WalletType;
   createdAt: string;
 }
 
 export interface WalletOptionsInput {
-  autoWithdrawTimes?: string[];
   purchaseTimeoutSeconds?: number;
   settlementAccounts?: SettlementAccountInput[];
   restrictedCounterparties?: string[];
@@ -62,6 +74,16 @@ export interface WalletOptionsInput {
   callbackUrl?: string;
   category?: string;
   subCategory?: string;
+  virtualAmount?: number;
+  nationalCode?: string;
+}
+
+export interface GrantCreditInput {
+  repositoryWalletId: string;
+  personnelPhoneNumber: string;
+  walletTypeId: string;
+  virtualAmount: number;
+  nationalCode?: string;
 }
 
 export interface SettlementAccountInput {
@@ -118,6 +140,13 @@ export const useWalletStore = defineStore('wallet', {
     },
     async closeWallet(walletId: string) {
       await apiRequest(`/wallets/${walletId}`, { method: 'DELETE' });
+      await this.fetchWallets();
+    },
+    async grantCredit(input: GrantCreditInput) {
+      await apiRequest('/wallets/credit-grant', {
+        method: 'POST',
+        body: input,
+      });
       await this.fetchWallets();
     },
     async deposit(walletId: string, amount: number) {
