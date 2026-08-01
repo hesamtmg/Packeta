@@ -115,6 +115,16 @@ function buildService(options: {
     ...ipgOverrides,
   };
 
+  const zarinpalClientService = {
+    createPayment: jest.fn().mockResolvedValue({
+      authority: 'zarinpal-auth-1',
+      paymentUrl: 'https://sandbox.zarinpal.com/pg/StartPay/zarinpal-auth-1',
+    }),
+    verifyPayment: jest
+      .fn()
+      .mockResolvedValue({ success: true, refId: 'zarinpal-ref-1' }),
+  };
+
   const configService = {
     get: jest.fn(() => 'http://localhost:5173'),
   };
@@ -160,6 +170,7 @@ function buildService(options: {
     idempotencyService as any,
     loggingService as any,
     ipgClientService as any,
+    zarinpalClientService as any,
     configService as any,
     {} as any,
     settlementService as any,
@@ -168,7 +179,13 @@ function buildService(options: {
     {} as any,
   );
 
-  return { service, lockCalls, manager, ipgClientService };
+  return {
+    service,
+    lockCalls,
+    manager,
+    ipgClientService,
+    zarinpalClientService,
+  };
 }
 
 function walletType(
@@ -202,17 +219,22 @@ describe('TransactionsService.deposit', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('initiates a walletless IPG payment for a wallet whose type accepts deposits', async () => {
+  it('initiates a walletless ZarinPal payment for a wallet whose type accepts deposits', async () => {
     const wallet: WalletFixture = {
       id: 'wallet-1',
       balance: '0',
       walletType: walletType({ depositable: true }),
     };
-    const { service, manager } = buildService({ senderWallet: wallet });
+    const { service, manager, zarinpalClientService, ipgClientService } =
+      buildService({ senderWallet: wallet });
 
     const result = await service.deposit('user-1', 'wallet-1', 250, 'idem-2');
 
-    expect(result.redirectUrl).toBe('http://ipg/pay/auth-1');
+    expect(result.redirectUrl).toBe(
+      'https://sandbox.zarinpal.com/pg/StartPay/zarinpal-auth-1',
+    );
+    expect(zarinpalClientService.createPayment).toHaveBeenCalled();
+    expect(ipgClientService.createPayment).not.toHaveBeenCalled();
     expect(manager.save).toHaveBeenCalledWith(
       expect.objectContaining({
         type: TransactionType.DEPOSIT,
@@ -885,6 +907,7 @@ function buildSweepService(options: {
   const service = new TransactionsService(
     dataSource as any,
     walletsService as any,
+    {} as any,
     {} as any,
     {} as any,
     {} as any,

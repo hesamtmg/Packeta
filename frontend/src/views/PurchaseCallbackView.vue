@@ -30,9 +30,12 @@ const displayMessage = computed(() => {
 onMounted(async () => {
   const transactionId = route.params.id as string;
   const ipgStatus = route.query.status as string | undefined;
+  // ZarinPal (used for deposits) redirects back with its own `Status=NOK`
+  // query param instead of the in-house sandbox IPG's `status=canceled`.
+  const zarinpalStatus = route.query.Status as string | undefined;
 
   try {
-    if (ipgStatus === 'canceled') {
+    if (ipgStatus === 'canceled' || zarinpalStatus === 'NOK') {
       await apiRequest(`/transactions/purchase/${transactionId}/cancel`, {
         method: 'POST',
       });

@@ -22,6 +22,7 @@ import { IdempotencyService } from '../idempotency/idempotency.service';
 import { LoggingService } from '../logging/logging.service';
 import { serializeWallet } from '../wallets/wallet.serializer';
 import { IpgClientService } from '../ipg/ipg-client.service';
+import { ZarinpalClientService } from '../ipg/zarinpal-client.service';
 import { CurrenciesService } from '../currencies/currencies.service';
 import { formatAmount } from '../common/format-amount';
 import { displayIdentity } from '../common/synthetic-email';
@@ -60,6 +61,7 @@ export class TransactionsService {
     private readonly idempotencyService: IdempotencyService,
     private readonly loggingService: LoggingService,
     private readonly ipgClientService: IpgClientService,
+    private readonly zarinpalClientService: ZarinpalClientService,
     private readonly configService: ConfigService,
     private readonly currenciesService: CurrenciesService,
     private readonly settlementService: SettlementService,
@@ -70,10 +72,12 @@ export class TransactionsService {
   ) {}
 
   // Step 1 of the two-phase, IPG-style deposit: creates a PENDING ledger row
-  // with no balance change yet, then asks the sandbox IPG for a payment page
-  // to redirect the depositor to. Real money only lands in the wallet once
-  // /verify confirms the gateway authorized it — see verifyPurchase, which
-  // credits fromWalletId-less rows like this one straight to toWallet.
+  // with no balance change yet, then asks ZarinPal — a real payment gateway,
+  // not the in-house sandbox IPG used by purchase/installment flows — for a
+  // payment page to redirect the depositor to. Real money only lands in the
+  // wallet once /verify confirms ZarinPal actually authorized it — see
+  // verifyPurchase, which credits fromWalletId-less rows like this one
+  // straight to toWallet.
   async deposit(
     userId: string,
     walletId: string,
@@ -113,7 +117,7 @@ export class TransactionsService {
 
         const frontendUrl = this.configService.get<string>('frontendUrl');
         const { authority, paymentUrl } =
-          await this.ipgClientService.createPayment({
+          await this.zarinpalClientService.createPayment({
             merchantName: 'Deposit',
             amount: transaction.amount,
             displayAmount: formatAmount(amount, walletRef.walletType.currency),
@@ -801,7 +805,14 @@ export class TransactionsService {
         );
       }
 
-      const verifyResult = await this.ipgClientService.verifyPayment(
+      // Deposits were paid through ZarinPal (a real gateway), not the
+      // in-house sandbox IPG every other flow here uses — see deposit()
+      // above.
+      const verifyClient =
+        transaction.type === TransactionType.DEPOSIT
+          ? this.zarinpalClientService
+          : this.ipgClientService;
+      const verifyResult = await verifyClient.verifyPayment(
         transaction.ipgAuthority!,
         transaction.amount,
       );

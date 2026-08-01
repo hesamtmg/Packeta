@@ -26,12 +26,14 @@ function buildService(wallet: {
     settlementService as any,
     walletTypesService as any,
     usersService as any,
+    {} as any,
   );
   return { service, walletsRepository };
 }
 
 describe('WalletsService.isCounterpartyAllowed', () => {
   const service = new WalletsService(
+    {} as any,
     {} as any,
     {} as any,
     {} as any,
@@ -146,6 +148,7 @@ describe('WalletsService.assertWithinTransactionLimits', () => {
     {} as any,
     {} as any,
     {} as any,
+    {} as any,
   );
 
   function wallet(min: string | null, max: string | null) {
@@ -197,6 +200,7 @@ describe('WalletsService.createForUser / updateForUser limit validation', () => 
       {} as any,
       {} as any,
       {} as any,
+      {} as any,
     );
 
     await expect(
@@ -234,6 +238,7 @@ describe('WalletsService.createForUser / updateForUser rail validation', () => {
       {} as any,
       {} as any,
       {} as any,
+      {} as any,
     );
 
     await expect(
@@ -250,6 +255,7 @@ describe('WalletsService.createForUser / updateForUser rail validation', () => {
       save: jest.fn(async (data: any) => data),
     };
     const service = new WalletsService(
+      {} as any,
       {} as any,
       {} as any,
       {} as any,
@@ -277,6 +283,7 @@ describe('WalletsService.createForUser / updateForUser rail validation', () => {
       save: jest.fn(async (data: any) => data),
     };
     const service = new WalletsService(
+      {} as any,
       {} as any,
       {} as any,
       {} as any,
@@ -364,25 +371,50 @@ describe('WalletsService.grantCredit', () => {
       ),
     };
     const settlementService = {};
+    const idempotencyService = {
+      claim: jest.fn(async () => ({ replay: false }) as const),
+      complete: jest.fn(async () => undefined),
+    };
     const service = new WalletsService(
       walletsRepository as any,
       settlementService as any,
       walletTypesService as any,
       usersService as any,
+      idempotencyService as any,
     );
     const created = { id: 'credit-wallet-1' };
+    const found = {
+      id: 'credit-wallet-1',
+      balance: '400',
+      walletType: {
+        id: 'credit-type-1',
+        code: 'CREDIT',
+        currency: {
+          code: 'USD',
+          symbol: '$',
+          symbolPosition: 'BEFORE',
+          decimalPlaces: 2,
+        },
+      },
+    };
     const manager = {
       create: jest.fn(() => created),
       save: jest.fn(async () => undefined),
       update: jest.fn(async () => undefined),
-      findOne: jest.fn(async () => created),
+      findOne: jest.fn(async () => found),
       createQueryBuilder: jest.fn(() => ({
         setLock: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         getOne: jest.fn(async () => options.repository),
       })),
     };
-    return { service, manager, walletTypesService, usersService };
+    return {
+      service,
+      manager,
+      walletTypesService,
+      usersService,
+      idempotencyService,
+    };
   }
 
   const baseRepository = {
@@ -402,12 +434,17 @@ describe('WalletsService.grantCredit', () => {
     });
 
     await expect(
-      service.grantCredit(manager as any, 'owner-1', {
-        repositoryWalletId: 'repo-1',
-        personnelPhoneNumber: '+15551234567',
-        walletTypeId: 'credit-type-1',
-        virtualAmount: 100,
-      }),
+      service.grantCredit(
+        manager as any,
+        'owner-1',
+        {
+          repositoryWalletId: 'repo-1',
+          personnelPhoneNumber: '+15551234567',
+          walletTypeId: 'credit-type-1',
+          virtualAmount: 100,
+        },
+        'idem-key-1',
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -417,12 +454,17 @@ describe('WalletsService.grantCredit', () => {
     });
 
     await expect(
-      service.grantCredit(manager as any, 'owner-1', {
-        repositoryWalletId: 'repo-1',
-        personnelPhoneNumber: '+15551234567',
-        walletTypeId: 'credit-type-1',
-        virtualAmount: 100,
-      }),
+      service.grantCredit(
+        manager as any,
+        'owner-1',
+        {
+          repositoryWalletId: 'repo-1',
+          personnelPhoneNumber: '+15551234567',
+          walletTypeId: 'credit-type-1',
+          virtualAmount: 100,
+        },
+        'idem-key-1',
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -437,12 +479,17 @@ describe('WalletsService.grantCredit', () => {
     });
 
     await expect(
-      service.grantCredit(manager as any, 'owner-1', {
-        repositoryWalletId: 'repo-1',
-        personnelPhoneNumber: '+15551234567',
-        walletTypeId: 'gift-type-1',
-        virtualAmount: 100,
-      }),
+      service.grantCredit(
+        manager as any,
+        'owner-1',
+        {
+          repositoryWalletId: 'repo-1',
+          personnelPhoneNumber: '+15551234567',
+          walletTypeId: 'gift-type-1',
+          virtualAmount: 100,
+        },
+        'idem-key-1',
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -457,12 +504,17 @@ describe('WalletsService.grantCredit', () => {
     });
 
     await expect(
-      service.grantCredit(manager as any, 'owner-1', {
-        repositoryWalletId: 'repo-1',
-        personnelPhoneNumber: '+15551234567',
-        walletTypeId: 'credit-type-1',
-        virtualAmount: 100,
-      }),
+      service.grantCredit(
+        manager as any,
+        'owner-1',
+        {
+          repositoryWalletId: 'repo-1',
+          personnelPhoneNumber: '+15551234567',
+          walletTypeId: 'credit-type-1',
+          virtualAmount: 100,
+        },
+        'idem-key-1',
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -472,12 +524,17 @@ describe('WalletsService.grantCredit', () => {
     });
 
     await expect(
-      service.grantCredit(manager as any, 'owner-1', {
-        repositoryWalletId: 'repo-1',
-        personnelPhoneNumber: '+15551234567',
-        walletTypeId: 'credit-type-1',
-        virtualAmount: 5000,
-      }),
+      service.grantCredit(
+        manager as any,
+        'owner-1',
+        {
+          repositoryWalletId: 'repo-1',
+          personnelPhoneNumber: '+15551234567',
+          walletTypeId: 'credit-type-1',
+          virtualAmount: 5000,
+        },
+        'idem-key-1',
+      ),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 
@@ -488,12 +545,17 @@ describe('WalletsService.grantCredit', () => {
     });
 
     await expect(
-      service.grantCredit(manager as any, 'owner-1', {
-        repositoryWalletId: 'repo-1',
-        personnelPhoneNumber: '+15551234567',
-        walletTypeId: 'credit-type-1',
-        virtualAmount: 100,
-      }),
+      service.grantCredit(
+        manager as any,
+        'owner-1',
+        {
+          repositoryWalletId: 'repo-1',
+          personnelPhoneNumber: '+15551234567',
+          walletTypeId: 'credit-type-1',
+          virtualAmount: 100,
+        },
+        'idem-key-1',
+      ),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
@@ -502,13 +564,18 @@ describe('WalletsService.grantCredit', () => {
       repository: baseRepository,
     });
 
-    await service.grantCredit(manager as any, 'owner-1', {
-      repositoryWalletId: 'repo-1',
-      personnelPhoneNumber: '+15551234567',
-      walletTypeId: 'credit-type-1',
-      virtualAmount: 400,
-      nationalCode: '1234567890',
-    });
+    await service.grantCredit(
+      manager as any,
+      'owner-1',
+      {
+        repositoryWalletId: 'repo-1',
+        personnelPhoneNumber: '+15551234567',
+        walletTypeId: 'credit-type-1',
+        virtualAmount: 400,
+        nationalCode: '1234567890',
+      },
+      'idem-key-1',
+    );
 
     expect(manager.create).toHaveBeenCalledWith(
       expect.anything(),
@@ -527,5 +594,41 @@ describe('WalletsService.grantCredit', () => {
     expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'repo-1', {
       virtualAmount: '600',
     });
+    expect(manager.create).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: 'TRANSFER',
+        fromWalletId: 'repo-1',
+        toWalletId: 'credit-wallet-1',
+        amount: '400',
+        idempotencyKey: 'idem-key-1',
+      }),
+    );
+  });
+
+  it('replays the cached response instead of re-running the grant on a reused idempotency key', async () => {
+    const { service, manager, idempotencyService } = buildGrantService({
+      repository: baseRepository,
+    });
+    const cached = { id: 'credit-wallet-1', balance: '400' };
+    (idempotencyService.claim as jest.Mock).mockResolvedValueOnce({
+      replay: true,
+      responseBody: cached,
+    });
+
+    const result = await service.grantCredit(
+      manager as any,
+      'owner-1',
+      {
+        repositoryWalletId: 'repo-1',
+        personnelPhoneNumber: '+15551234567',
+        walletTypeId: 'credit-type-1',
+        virtualAmount: 400,
+      },
+      'idem-key-1',
+    );
+
+    expect(result).toBe(cached);
+    expect(manager.create).not.toHaveBeenCalled();
   });
 });

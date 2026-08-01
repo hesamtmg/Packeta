@@ -17,6 +17,12 @@ import { SettlementService } from '../settlement/settlement.service';
 import { SettlementAccountDto } from '../settlement/dto/settlement-account.dto';
 import { UsersService } from '../users/users.service';
 import { SettlementRailType } from '../rail-settlements/entities/rail-settlement.entity';
+import { IdempotencyService } from '../idempotency/idempotency.service';
+import {
+  Transaction,
+  TransactionType,
+} from '../transactions/entities/transaction.entity';
+import { serializeWallet } from './wallet.serializer';
 
 const WALLET_RELATIONS = { walletType: { currency: true } } as const;
 const WALLET_RELATIONS_WITH_OWNER = {
@@ -32,6 +38,7 @@ export class WalletsService {
     private readonly settlementService: SettlementService,
     private readonly walletTypesService: WalletTypesService,
     private readonly usersService: UsersService,
+    private readonly idempotencyService: IdempotencyService,
   ) {}
 
   async createForUser(
@@ -237,8 +244,10 @@ export class WalletsService {
   // existing user (looked up by phone — personnel must already have an
   // account, same as every other wallet). The grant decrements the
   // repository's pool by the same amount and links the new wallet back to
-  // it via repositoryWalletId. Doesn't touch anyone's real balance — that
-  // only happens once the credit wallet is actually spent from.
+  // it via repositoryWalletId, and records the movement as a Transaction so
+  // it shows up in the ledger like every other money movement. Doesn't touch
+  // anyone's real balance — that only happens once the credit wallet is
+  // actually spent from.
   async grantCredit(
     manager: EntityManager,
     ownerUserId: string,
@@ -249,7 +258,21 @@ export class WalletsService {
       virtualAmount: number;
       nationalCode?: string;
     },
-  ): Promise<Wallet> {
+    idempotencyKey: string,
+  ): Promise<Record<string, any>> {
+    if (!idempotencyKey) {
+      throw new BadRequestException('Idempotency-Key header is required');
+    }
+    const claim = await this.idempotencyService.claim(manager, {
+      key: idempotencyKey,
+      userId: ownerUserId,
+      endpoint: 'wallets.credit-grant',
+      payload: dto,
+    });
+    if (claim.replay) {
+      return claim.responseBody;
+    }
+
     const repository = await this.getById(ownerUserId, dto.repositoryWalletId);
     if (repository.walletType.code !== WalletTypeCode.REPOSITORY) {
       throw new BadRequestException('That wallet is not a repository');
@@ -313,11 +336,32 @@ export class WalletsService {
       virtualAmount: (availablePool - requested).toString(),
     });
 
+    // Not a real-money transfer (nothing moves between fromWalletId's and
+    // toWalletId's spendable `balance` — the credit wallet's balance was
+    // already preloaded above), but it's still a virtual-pool movement worth
+    // a ledger entry so it's visible in the repository owner's and
+    // personnel's transaction history like any other movement.
+    const transaction = manager.create(Transaction, {
+      type: TransactionType.TRANSFER,
+      fromWalletId: repository.id,
+      toWalletId: creditWallet.id,
+      amount: requested.toString(),
+      idempotencyKey,
+      note: 'Credit grant: repository virtual balance -> credit wallet',
+    });
+    await manager.save(transaction);
+
     const updated = await manager.findOne(Wallet, {
       where: { id: creditWallet.id },
       relations: WALLET_RELATIONS,
     });
-    return updated!;
+    const responseBody = serializeWallet(updated!);
+    await this.idempotencyService.complete(
+      manager,
+      idempotencyKey,
+      responseBody,
+    );
+    return responseBody;
   }
 
   // Soft-close: a wallet with any transaction history can't be hard-deleted

@@ -83,6 +83,89 @@ describe('WalletTypesService.create — autoWithdrawTimes', () => {
     expect(created.autoWithdrawTimes).toEqual(['06:00', '12:00', '18:00']);
     expect(walletTypesRepository.save).toHaveBeenCalled();
   });
+
+  it('allows creating with supportsAutoWithdraw true and no times set yet (empty array)', async () => {
+    const { service, walletTypesRepository } = build();
+
+    const created = await service.create({
+      code: 'MERCHANT',
+      name: 'Merchant',
+      currencyCode: 'USD',
+      supportsAutoWithdraw: true,
+      autoWithdrawTimes: [],
+    } as any);
+
+    expect(created.autoWithdrawTimes).toBeNull();
+    expect(walletTypesRepository.save).toHaveBeenCalled();
+  });
+
+  it('allows creating with supportsAutoWithdraw true and autoWithdrawTimes omitted entirely', async () => {
+    const { service, walletTypesRepository } = build();
+
+    const created = await service.create({
+      code: 'MERCHANT',
+      name: 'Merchant',
+      currencyCode: 'USD',
+      supportsAutoWithdraw: true,
+    } as any);
+
+    expect(created.autoWithdrawTimes).toBeNull();
+    expect(walletTypesRepository.save).toHaveBeenCalled();
+  });
+
+  it('rejects a non-empty autoWithdrawTimes that is not exactly 3 entries', async () => {
+    const { service } = build();
+
+    await expect(
+      service.create({
+        code: 'MERCHANT',
+        name: 'Merchant',
+        currencyCode: 'USD',
+        supportsAutoWithdraw: true,
+        autoWithdrawTimes: ['06:00', '12:00'],
+      } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects creating a REPOSITORY type with allowWithdraw true', async () => {
+    const { service } = build();
+
+    await expect(
+      service.create({
+        code: 'REPOSITORY',
+        name: 'Repository',
+        currencyCode: 'USD',
+        allowWithdraw: true,
+      } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects creating a REPOSITORY type with supportsAutoWithdraw true', async () => {
+    const { service } = build();
+
+    await expect(
+      service.create({
+        code: 'REPOSITORY',
+        name: 'Repository',
+        currencyCode: 'USD',
+        supportsAutoWithdraw: true,
+      } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('allows creating a REPOSITORY type with allowWithdraw/supportsAutoWithdraw false', async () => {
+    const { service, walletTypesRepository } = build();
+
+    const created = await service.create({
+      code: 'REPOSITORY',
+      name: 'Repository',
+      currencyCode: 'USD',
+      allowWithdraw: false,
+    } as any);
+
+    expect(created).toBeDefined();
+    expect(walletTypesRepository.save).toHaveBeenCalled();
+  });
 });
 
 describe('WalletTypesService.update — autoWithdrawTimes', () => {
@@ -166,6 +249,38 @@ describe('WalletTypesService.update — autoWithdrawTimes', () => {
     } as any);
 
     expect(updated.autoWithdrawTimes).toBeNull();
+  });
+
+  it('rejects turning on allowWithdraw for a REPOSITORY type', async () => {
+    const { service } = buildServiceForAutoWithdraw({
+      id: 'type-1',
+      code: 'REPOSITORY',
+      supportsAutoWithdraw: false,
+      autoWithdrawTimes: null,
+      allowWithdraw: false,
+      allowNegativeBalance: false,
+      creditLimit: null,
+    });
+
+    await expect(
+      service.update('type-1', { allowWithdraw: true } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects turning on supportsAutoWithdraw for a REPOSITORY type', async () => {
+    const { service } = buildServiceForAutoWithdraw({
+      id: 'type-1',
+      code: 'REPOSITORY',
+      supportsAutoWithdraw: false,
+      autoWithdrawTimes: null,
+      allowWithdraw: false,
+      allowNegativeBalance: false,
+      creditLimit: null,
+    });
+
+    await expect(
+      service.update('type-1', { supportsAutoWithdraw: true } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });
 
