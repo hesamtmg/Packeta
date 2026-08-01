@@ -91,6 +91,7 @@ export class WalletTypesService {
       allowPurchaseOut: dto.allowPurchaseOut ?? false,
       allowPurchaseIn: dto.allowPurchaseIn ?? false,
       depositable: dto.depositable ?? true,
+      hasVirtualBalance: dto.hasVirtualBalance ?? false,
       installmentDate: dto.installmentDate ?? null,
       paymentDeadlineDate: dto.paymentDeadlineDate ?? null,
       fee: dto.fee !== undefined ? String(dto.fee) : null,
@@ -171,6 +172,9 @@ export class WalletTypesService {
     }
     if (dto.depositable !== undefined) {
       type.depositable = dto.depositable;
+    }
+    if (dto.hasVirtualBalance !== undefined) {
+      type.hasVirtualBalance = dto.hasVirtualBalance;
     }
     if (dto.installmentDate !== undefined) {
       type.installmentDate = dto.installmentDate;

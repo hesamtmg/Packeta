@@ -135,6 +135,14 @@ export class WalletType {
   @Column({ type: 'boolean', default: false })
   isStarterType: boolean;
 
+  // Whether a wallet of this type may carry a manually-set virtual balance
+  // (Wallet.virtualAmount) at creation — e.g. a REPOSITORY wallet's funding
+  // pool. Off by default; doesn't affect CREDIT wallets, whose virtualAmount
+  // is set internally by WalletsService.grantCredit rather than through the
+  // generic create/update endpoints this flag gates.
+  @Column({ type: 'boolean', default: false })
+  hasVirtualBalance: boolean;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

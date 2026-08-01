@@ -166,6 +166,31 @@ describe('WalletTypesService.create — autoWithdrawTimes', () => {
     expect(created).toBeDefined();
     expect(walletTypesRepository.save).toHaveBeenCalled();
   });
+
+  it('defaults hasVirtualBalance to false when omitted', async () => {
+    const { service } = build();
+
+    const created = await service.create({
+      code: 'MERCHANT',
+      name: 'Merchant',
+      currencyCode: 'USD',
+    } as any);
+
+    expect(created.hasVirtualBalance).toBe(false);
+  });
+
+  it('sets hasVirtualBalance true when requested', async () => {
+    const { service } = build();
+
+    const created = await service.create({
+      code: 'REPOSITORY',
+      name: 'Repository',
+      currencyCode: 'USD',
+      hasVirtualBalance: true,
+    } as any);
+
+    expect(created.hasVirtualBalance).toBe(true);
+  });
 });
 
 describe('WalletTypesService.update — autoWithdrawTimes', () => {

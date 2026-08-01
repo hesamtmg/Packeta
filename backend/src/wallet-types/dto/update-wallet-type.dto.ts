@@ -59,6 +59,12 @@ export class UpdateWalletTypeDto {
   @IsBoolean()
   depositable?: boolean;
 
+  // Whether wallets of this type may carry a manually-set virtual balance at
+  // creation (see WalletType.hasVirtualBalance).
+  @IsOptional()
+  @IsBoolean()
+  hasVirtualBalance?: boolean;
+
   // Credit-line fields (repository/credit wallet feature). All optional and
   // only meaningful on the CREDIT-style types this feature applies to —
   // the shared billing rules; the actual virtualAmount granted and the

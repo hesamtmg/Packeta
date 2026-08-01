@@ -17,6 +17,9 @@ export interface WalletType {
   allowPurchaseOut: boolean;
   allowPurchaseIn: boolean;
   depositable: boolean;
+  // Whether wallets of this type may carry a manually-set virtual balance at
+  // creation (see the "Add wallet" form's virtual-amount field).
+  hasVirtualBalance: boolean;
   // Credit-line fields (repository/credit wallet feature) — shared billing
   // rules for every wallet of this type.
   installmentDate: number | null;

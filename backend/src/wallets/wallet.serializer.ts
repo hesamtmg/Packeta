@@ -51,6 +51,7 @@ export function serializeWallet(
       allowPurchaseOut: wallet.walletType.allowPurchaseOut,
       allowPurchaseIn: wallet.walletType.allowPurchaseIn,
       depositable: wallet.walletType.depositable,
+      hasVirtualBalance: wallet.walletType.hasVirtualBalance,
       installmentDate: wallet.walletType.installmentDate,
       paymentDeadlineDate: wallet.walletType.paymentDeadlineDate,
       fee: wallet.walletType.fee,
