@@ -433,6 +433,7 @@ loadTypes();
 .time-row {
   display: flex;
   gap: 6px;
+  flex-wrap: wrap;
 }
 .time-row .admin-input {
   flex: 1;
