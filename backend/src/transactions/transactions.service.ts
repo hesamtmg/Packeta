@@ -27,6 +27,9 @@ import { formatAmount } from '../common/format-amount';
 import { displayIdentity } from '../common/synthetic-email';
 import { SettlementService } from '../settlement/settlement.service';
 import { SettlementSplitDto } from '../settlement/dto/settlement-split.dto';
+import { InstallmentsService } from '../installments/installments.service';
+import { InstallmentStatus } from '../installments/entities/installment.entity';
+import { RailSettlementsService } from '../rail-settlements/rail-settlements.service';
 
 export interface MoneyResult {
   transactionId: string;
@@ -60,50 +63,72 @@ export class TransactionsService {
     private readonly configService: ConfigService,
     private readonly currenciesService: CurrenciesService,
     private readonly settlementService: SettlementService,
+    private readonly installmentsService: InstallmentsService,
+    private readonly railSettlementsService: RailSettlementsService,
     @InjectRepository(Transaction)
     private readonly transactionsRepository: Repository<Transaction>,
   ) {}
 
+  // Step 1 of the two-phase, IPG-style deposit: creates a PENDING ledger row
+  // with no balance change yet, then asks the sandbox IPG for a payment page
+  // to redirect the depositor to. Real money only lands in the wallet once
+  // /verify confirms the gateway authorized it — see verifyPurchase, which
+  // credits fromWalletId-less rows like this one straight to toWallet.
   async deposit(
     userId: string,
     walletId: string,
     amount: number,
     idempotencyKey: string,
-  ): Promise<MoneyResult> {
+  ): Promise<PurchaseInitiateResult> {
     return this.run(
       'deposit',
       userId,
       { walletId, amount },
       idempotencyKey,
       async (manager) => {
-        // Ownership check; deposits are allowed on every wallet type.
         const walletRef = await this.walletsService.getById(userId, walletId);
         if (walletRef.closedAt) {
           throw new BadRequestException('This wallet is closed');
         }
-        if (!walletRef.depositable) {
-          throw new ForbiddenException('This wallet does not accept deposits');
+        if (!walletRef.walletType.depositable) {
+          throw new ForbiddenException(
+            `${walletRef.walletType.name} wallets do not accept deposits`,
+          );
         }
         this.walletsService.assertWithinTransactionLimits(walletRef, amount);
 
-        const wallet = await this.walletsService.lockById(manager, walletId);
-        const newBalance = (BigInt(wallet.balance) + BigInt(amount)).toString();
-        await manager.update(Wallet, wallet.id, { balance: newBalance });
+        const timeoutSeconds = DEFAULT_PURCHASE_TIMEOUT_SECONDS;
+        const expiresAt = new Date(Date.now() + timeoutSeconds * 1000);
 
         const transaction = manager.create(Transaction, {
           type: TransactionType.DEPOSIT,
+          status: TransactionStatus.PENDING,
           fromWalletId: null,
-          toWalletId: wallet.id,
+          toWalletId: walletRef.id,
           amount: amount.toString(),
           idempotencyKey,
+          expiresAt,
         });
+        await manager.save(transaction);
+
+        const frontendUrl = this.configService.get<string>('frontendUrl');
+        const { authority, paymentUrl } =
+          await this.ipgClientService.createPayment({
+            merchantName: 'Deposit',
+            amount: transaction.amount,
+            displayAmount: formatAmount(amount, walletRef.walletType.currency),
+            callbackUrl: `${frontendUrl}/purchase/${transaction.id}/callback`,
+            timeoutSeconds,
+          });
+
+        transaction.ipgAuthority = authority;
+        transaction.ipgPaymentUrl = paymentUrl;
         await manager.save(transaction);
 
         return {
           transactionId: transaction.id,
-          fromWalletId: null,
-          toWalletId: wallet.id,
-          balance: newBalance,
+          redirectUrl: paymentUrl,
+          expiresAt,
         };
       },
     );
@@ -125,6 +150,7 @@ export class TransactionsService {
         if (walletRef.closedAt) {
           throw new BadRequestException('This wallet is closed');
         }
+        this.assertNotBlocked(walletRef);
         if (!walletRef.walletType.allowWithdraw) {
           throw new ForbiddenException(
             `${walletRef.walletType.name} wallets do not support withdrawals`,
@@ -143,6 +169,7 @@ export class TransactionsService {
         await manager.update(Wallet, wallet.id, {
           balance: newBalance.toString(),
         });
+        await this.debitLinkedRepository(manager, walletRef, BigInt(amount));
 
         const transaction = manager.create(Transaction, {
           type: TransactionType.WITHDRAW,
@@ -183,6 +210,7 @@ export class TransactionsService {
         if (fromWalletRef.closedAt) {
           throw new BadRequestException('This wallet is closed');
         }
+        this.assertNotBlocked(fromWalletRef);
         if (!fromWalletRef.walletType.allowP2pOut) {
           throw new ForbiddenException(
             `${fromWalletRef.walletType.name} wallets cannot send transfers`,
@@ -254,6 +282,11 @@ export class TransactionsService {
           balance: newFromBalance.toString(),
         });
         await manager.update(Wallet, toWallet.id, { balance: newToBalance });
+        await this.debitLinkedRepository(
+          manager,
+          fromWalletRef,
+          BigInt(amount),
+        );
 
         const transaction = manager.create(Transaction, {
           type: TransactionType.TRANSFER,
@@ -360,6 +393,7 @@ export class TransactionsService {
         if (fromWalletRef.closedAt) {
           throw new BadRequestException('This wallet is closed');
         }
+        this.assertNotBlocked(fromWalletRef);
         if (!fromWalletRef.walletType.allowPurchaseOut) {
           throw new ForbiddenException(
             `${fromWalletRef.walletType.name} wallets cannot make purchases`,
@@ -432,6 +466,100 @@ export class TransactionsService {
             displayAmount: formatAmount(
               amount,
               fromWalletRef.walletType.currency,
+            ),
+            callbackUrl: `${frontendUrl}/purchase/${transaction.id}/callback`,
+            timeoutSeconds,
+          });
+
+        transaction.ipgAuthority = authority;
+        transaction.ipgPaymentUrl = paymentUrl;
+        await manager.save(transaction);
+
+        return {
+          transactionId: transaction.id,
+          redirectUrl: paymentUrl,
+          expiresAt,
+        };
+      },
+    );
+  }
+
+  // Repays one of a credit wallet's scheduled installments (see
+  // InstallmentsService). Unlike a regular purchase, this is always real
+  // money paid directly through the IPG — there is no "pay from another
+  // wallet" option — so the resulting row has no fromWalletId at all (see
+  // the walletless branch at the top of verifyPurchase, which credits
+  // straight to toWallet). Once verified, the amount lands in the
+  // repository's real balance and the installment is marked PAID (see the
+  // installmentId branch at the end of verifyPurchase). If the credit
+  // wallet is currently blocked (a previous installment went OVERDUE), the
+  // type's unblockFee is folded into this charge and the block is lifted on
+  // success.
+  async payInstallment(
+    userId: string,
+    installmentId: string,
+    idempotencyKey: string,
+  ): Promise<PurchaseInitiateResult> {
+    return this.run(
+      'installment_pay',
+      userId,
+      { installmentId },
+      idempotencyKey,
+      async (manager) => {
+        const installment = await this.installmentsService.getByIdForUser(
+          userId,
+          installmentId,
+        );
+        if (installment.status === InstallmentStatus.PAID) {
+          throw new ConflictException('This installment has already been paid');
+        }
+        const creditWallet = installment.wallet;
+        if (!creditWallet.repositoryWalletId) {
+          throw new BadRequestException(
+            'This wallet has no linked repository to repay',
+          );
+        }
+
+        const repository = await this.walletsService.getByIdUnscoped(
+          creditWallet.repositoryWalletId,
+        );
+        if (repository.closedAt) {
+          throw new BadRequestException('This repository wallet is closed');
+        }
+        if (!repository.walletType.allowPurchaseIn) {
+          throw new BadRequestException(
+            'This repository does not accept installment repayments',
+          );
+        }
+
+        const unblockFee = creditWallet.blockedAt
+          ? BigInt(creditWallet.walletType.unblockFee ?? '0')
+          : 0n;
+        const chargeAmount = BigInt(installment.amount) + unblockFee;
+
+        const timeoutSeconds = DEFAULT_PURCHASE_TIMEOUT_SECONDS;
+        const expiresAt = new Date(Date.now() + timeoutSeconds * 1000);
+
+        const transaction = manager.create(Transaction, {
+          type: TransactionType.PURCHASE,
+          status: TransactionStatus.PENDING,
+          fromWalletId: null,
+          toWalletId: repository.id,
+          amount: chargeAmount.toString(),
+          idempotencyKey,
+          expiresAt,
+          installmentId: installment.id,
+        });
+        await manager.save(transaction);
+
+        const frontendUrl = this.configService.get<string>('frontendUrl');
+        const { authority, paymentUrl } =
+          await this.ipgClientService.createPayment({
+            merchantName: 'Installment repayment',
+            amount: transaction.amount,
+            displayAmount: formatAmount(
+              chargeAmount.toString(),
+              repository.walletType.currency,
             ),
             callbackUrl: `${frontendUrl}/purchase/${transaction.id}/callback`,
             timeoutSeconds,
@@ -629,13 +757,25 @@ export class TransactionsService {
         .createQueryBuilder(Transaction, 't')
         .setLock('pessimistic_write')
         .where('t.id = :transactionId', { transactionId })
-        .andWhere('t.type = :type', { type: TransactionType.PURCHASE })
+        .andWhere('t.type IN (:...types)', {
+          types: [TransactionType.PURCHASE, TransactionType.DEPOSIT],
+        })
         .getOne();
       if (!transaction) {
-        throw new NotFoundException('Purchase not found');
+        throw new NotFoundException('Transaction not found');
       }
 
-      if (!transaction.fromWalletId) {
+      // A row with no fromWalletId is either genuinely walletless — a
+      // DEPOSIT (credits the depositor's own wallet) or an installment
+      // repayment (credits the repository) — both funded purely by the IPG,
+      // with nothing to debit on Packeta's side; or it's a merchant-initiated
+      // charge still waiting for the customer to identify themselves and
+      // pick a wallet at the IPG (see attachPurchaseWallet), which genuinely
+      // can't be verified yet.
+      const isRealMoneyIn =
+        transaction.type === TransactionType.DEPOSIT ||
+        !!transaction.installmentId;
+      if (!transaction.fromWalletId && !isRealMoneyIn) {
         throw new UnprocessableEntityException(
           'This purchase has no customer wallet assigned yet — the customer must identify themselves and pick a wallet at the payment page first',
         );
@@ -646,7 +786,7 @@ export class TransactionsService {
       }
       if (transaction.status === TransactionStatus.REVERSED) {
         throw new UnprocessableEntityException(
-          'This purchase was reversed and can no longer be verified',
+          'This transaction was reversed and can no longer be verified',
         );
       }
 
@@ -657,7 +797,7 @@ export class TransactionsService {
         transaction.status = TransactionStatus.REVERSED;
         await manager.save(transaction);
         throw new GoneException(
-          'The verification window for this purchase has expired',
+          'The verification window for this transaction has expired',
         );
       }
 
@@ -671,6 +811,48 @@ export class TransactionsService {
           status: transaction.status,
           reason: verifyResult.reason,
         };
+      }
+
+      if (isRealMoneyIn) {
+        const toWallet = await this.walletsService.lockById(
+          manager,
+          transaction.toWalletId!,
+        );
+        if (toWallet.closedAt) {
+          transaction.status = TransactionStatus.REVERSED;
+          await manager.save(transaction);
+          throw new UnprocessableEntityException(
+            'The receiving wallet was closed before this could be verified',
+          );
+        }
+        const newToBalance =
+          BigInt(toWallet.balance) + BigInt(transaction.amount);
+        await manager.update(Wallet, toWallet.id, {
+          balance: newToBalance.toString(),
+        });
+
+        transaction.status = TransactionStatus.COMPLETED;
+        await manager.save(transaction);
+
+        if (transaction.installmentId) {
+          await this.installmentsService.markPaid(
+            manager,
+            transaction.installmentId,
+            transaction.id,
+          );
+        }
+
+        await this.loggingService.log({
+          category: 'TRANSACTION',
+          action:
+            transaction.type === TransactionType.DEPOSIT
+              ? 'DEPOSIT_VERIFY'
+              : 'PURCHASE_VERIFY',
+          success: true,
+          metadata: { transactionId: transaction.id },
+        });
+
+        return { transactionId: transaction.id, status: transaction.status };
       }
 
       const fromWalletRef = await this.walletsService.getByIdUnscoped(
@@ -716,6 +898,17 @@ export class TransactionsService {
       await manager.update(Wallet, toWallet.id, {
         balance: newToBalance.toString(),
       });
+      // Unlike the floor check above, an insufficient-repository-funds
+      // rejection here rolls back this whole DB transaction (including the
+      // two balance updates just above) rather than persisting REVERSED —
+      // the purchase stays PENDING and the timeout sweep will eventually
+      // reverse it. Safe either way (nothing moves on a throw), just less
+      // immediate than the floor-check case.
+      await this.debitLinkedRepository(
+        manager,
+        fromWalletRef,
+        BigInt(transaction.amount),
+      );
 
       transaction.status = TransactionStatus.COMPLETED;
       await manager.save(transaction);
@@ -842,12 +1035,12 @@ export class TransactionsService {
     );
   }
 
-  // Used by the timeout sweep: every PENDING purchase past its expiresAt,
-  // never verified in time.
+  // Used by the timeout sweep: every PENDING purchase or deposit past its
+  // expiresAt, never verified in time.
   async findExpiredPendingPurchases(): Promise<Transaction[]> {
     return this.transactionsRepository.find({
       where: {
-        type: TransactionType.PURCHASE,
+        type: In([TransactionType.PURCHASE, TransactionType.DEPOSIT]),
         status: TransactionStatus.PENDING,
         expiresAt: LessThan(new Date()),
       },
@@ -878,7 +1071,9 @@ export class TransactionsService {
       .update(Transaction)
       .set({ status: TransactionStatus.REVERSED })
       .where('id = :transactionId', { transactionId })
-      .andWhere('type = :type', { type: TransactionType.PURCHASE })
+      .andWhere('type IN (:...types)', {
+        types: [TransactionType.PURCHASE, TransactionType.DEPOSIT],
+      })
       .andWhere('status = :pending', { pending: TransactionStatus.PENDING })
       .execute();
     if (!result.affected) {
@@ -906,6 +1101,14 @@ export class TransactionsService {
   //     older purchase with neither) a single plain WITHDRAW for just that
   //     purchase's amount — so a per-charge split can never be diluted by
   //     being aggregated together with other purchases' money.
+  //
+  // Rail-aware: when the wallet has a Wallet.railType configured (see
+  // rail-schedule.ts/SettlementRailSweepService — this is what decides
+  // *when* this method gets called, not this method itself), every WITHDRAW
+  // this sweep produces also gets a linked RailSettlement row recording
+  // which rail (Pol Pay/Paya/Satna/bank transfer) it went out over — the
+  // WITHDRAW still carries the actual ledger movement, exactly as it does
+  // for a non-rail wallet.
   async sweepAutoWithdraw(walletId: string): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
       const wallet = await this.walletsService.lockById(manager, walletId);
@@ -913,11 +1116,39 @@ export class TransactionsService {
         return;
       }
 
-      const minuteKey = new Date().toISOString().slice(0, 16);
+      const now = new Date();
+      const minuteKey = now.toISOString().slice(0, 16);
+      const keyPrefix = wallet.railType
+        ? `rail-settlement:${wallet.railType.toLowerCase()}`
+        : 'auto-withdraw';
       const walletDefaults = await this.settlementService.findForWallet(
         manager,
         wallet.id,
       );
+
+      const recordRailSettlement = async (
+        transaction: Transaction,
+        amount: string,
+        destinationIban: string | null,
+        label: string | null,
+      ): Promise<void> => {
+        if (!wallet.railType) return;
+        const settlement = await this.railSettlementsService.createForSweep(
+          manager,
+          {
+            walletId: wallet.id,
+            railType: wallet.railType,
+            amount,
+            destinationIban,
+            label,
+            transactionId: transaction.id,
+            scheduledFor: now,
+          },
+        );
+        await manager.update(Transaction, transaction.id, {
+          railSettlementId: settlement.id,
+        });
+      };
 
       const unsettledPurchases = await manager
         .createQueryBuilder(Transaction, 't')
@@ -945,9 +1176,10 @@ export class TransactionsService {
           fromWalletId: wallet.id,
           toWalletId: null,
           amount: wallet.balance,
-          idempotencyKey: `auto-withdraw:${wallet.id}:${minuteKey}`,
+          idempotencyKey: `${keyPrefix}:${wallet.id}:${minuteKey}`,
         });
         await manager.save(transaction);
+        await recordRailSettlement(transaction, wallet.balance, null, null);
         return;
       }
 
@@ -975,12 +1207,18 @@ export class TransactionsService {
             fromWalletId: wallet.id,
             toWalletId: null,
             amount: item.amount.toString(),
-            idempotencyKey: `auto-withdraw:${wallet.id}:${purchase.id}:${index}:${minuteKey}`,
+            idempotencyKey: `${keyPrefix}:${wallet.id}:${purchase.id}:${index}:${minuteKey}`,
             relatedTransactionId: purchase.id,
             destinationIban: item.iban,
             note: item.label,
           });
           await manager.save(withdrawal);
+          await recordRailSettlement(
+            withdrawal,
+            item.amount.toString(),
+            item.iban,
+            item.label,
+          );
         }
 
         purchase.settledAt = new Date();
@@ -990,6 +1228,36 @@ export class TransactionsService {
       await manager.update(Wallet, wallet.id, {
         balance: remainingBalance.toString(),
       });
+    });
+  }
+
+  // A repository-backed CREDIT wallet's own balance/floor mechanics are
+  // completely unchanged by this — it only additionally debits the linked
+  // REPOSITORY's real balance by the same amount, since that's the real
+  // money actually funding the personnel's spend (see
+  // WalletsService.grantCredit). No-op for every wallet without a
+  // repositoryWalletId. Applies to withdraw/transfer-out/purchase-out only
+  // (the organic "spend" paths) — admin adjustments and purchase refunds
+  // intentionally don't cascade here.
+  private async debitLinkedRepository(
+    manager: EntityManager,
+    fromWalletRef: Wallet,
+    amount: bigint,
+  ): Promise<void> {
+    if (!fromWalletRef.repositoryWalletId) return;
+
+    const repository = await this.walletsService.lockById(
+      manager,
+      fromWalletRef.repositoryWalletId,
+    );
+    const newRepositoryBalance = BigInt(repository.balance) - amount;
+    if (newRepositoryBalance < 0n) {
+      throw new UnprocessableEntityException(
+        'The backing repository does not have enough real balance to fund this transaction',
+      );
+    }
+    await manager.update(Wallet, repository.id, {
+      balance: newRepositoryBalance.toString(),
     });
   }
 
@@ -1025,6 +1293,18 @@ export class TransactionsService {
         if (error instanceof ForbiddenException) throw error;
         // Malformed Origin/Referer header — ignore rather than block.
       }
+    }
+  }
+
+  // A wallet frozen by InstallmentsService.applyOverduePenalties can't send
+  // any money out (withdraw, transfer, purchase) until the overdue
+  // installment is repaid — see payInstallment. Incoming money (deposit,
+  // being paid) is unaffected.
+  private assertNotBlocked(wallet: { blockedAt: Date | null }): void {
+    if (wallet.blockedAt) {
+      throw new ForbiddenException(
+        'This wallet is blocked pending an overdue installment payment',
+      );
     }
   }
 
@@ -1195,7 +1475,8 @@ export class TransactionsService {
       | 'adjustment'
       | 'purchase_initiate'
       | 'purchase_charge'
-      | 'purchase_reverse',
+      | 'purchase_reverse'
+      | 'installment_pay',
     userId: string,
     payload: Record<string, unknown>,
     idempotencyKey: string,

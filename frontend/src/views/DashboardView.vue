@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useWalletStore, type Wallet, type WalletOptionsInput } from '../stores/wallet';
+import {
+  useWalletStore,
+  type Wallet,
+  type WalletOptionsInput,
+  type Installment,
+} from '../stores/wallet';
 import { apiRequest, ApiError } from '../api/client';
 import { amountStep, formatAmount, toMinorUnits, type CurrencyInfo } from '../utils/currency';
 import AppLayout from '../components/AppLayout.vue';
@@ -25,7 +30,6 @@ const chargeResult = ref<{ redirectUrl: string; expiresAt: string } | null>(null
 const chargeLinkCopied = ref(false);
 
 const newWalletType = ref('');
-const newWalletAutoWithdrawTimes = ref(['', '', '']);
 const newWalletPurchaseTimeoutMinutes = ref('');
 const newWalletSettlementAccounts = ref<{ iban: string; label: string; percent: string }[]>([]);
 const newWalletRestrictedCounterparties = ref('');
@@ -33,30 +37,31 @@ const newWalletTerminalId = ref('');
 const newWalletAcceptorCode = ref('');
 const newWalletMinAmount = ref('');
 const newWalletMaxAmount = ref('');
-const newWalletDepositable = ref(true);
 const newWalletStoreName = ref('');
 const newWalletStoreSite = ref('');
 const newWalletAllowedIps = ref('');
 const newWalletCallbackUrl = ref('');
 const newWalletCategory = ref('');
 const newWalletSubCategory = ref('');
+const newWalletRailType = ref('');
+const newWalletRailScheduleTimes = ref('');
 
 const editingWalletId = ref<string | null>(null);
 const editRestrictedCounterparties = ref('');
-const editAutoWithdrawTimes = ref(['', '', '']);
 const editPurchaseTimeoutMinutes = ref('');
 const editSettlementAccounts = ref<{ iban: string; label: string; percent: string }[]>([]);
 const editTerminalId = ref('');
 const editAcceptorCode = ref('');
 const editMinAmount = ref('');
 const editMaxAmount = ref('');
-const editDepositable = ref(true);
 const editStoreName = ref('');
 const editStoreSite = ref('');
 const editAllowedIps = ref('');
 const editCallbackUrl = ref('');
 const editCategory = ref('');
 const editSubCategory = ref('');
+const editRailType = ref('');
+const editRailScheduleTimes = ref('');
 const chargeSettlementSplits = ref<
   { iban: string; label: string; type: 'PERCENT' | 'FIXED'; value: string }[]
 >([]);
@@ -73,6 +78,18 @@ const purchaseAmount = ref('');
 const actionError = ref('');
 const busy = ref(false);
 
+const grantRepositoryWalletId = ref('');
+const grantPersonnelPhone = ref('');
+const grantWalletTypeId = ref('');
+const grantVirtualAmount = ref('');
+const grantNationalCode = ref('');
+const grantBusy = ref(false);
+const grantError = ref('');
+const grantSuccess = ref('');
+
+const payBusy = ref<string | null>(null);
+const payError = ref('');
+
 const withdrawableWallets = computed(() =>
   wallet.wallets.filter((w) => w.walletType.allowWithdraw),
 );
@@ -81,6 +98,26 @@ const p2pWallets = computed(() =>
 );
 const purchaseWallets = computed(() =>
   wallet.wallets.filter((w) => w.walletType.allowPurchaseOut),
+);
+
+// Repository/credit-line feature: wallets the caller owns that can grant
+// credit (type code REPOSITORY), and the CREDIT-type wallet types available
+// to grant into.
+const repositoryWallets = computed(() =>
+  wallet.wallets.filter((w) => w.walletType.code === 'REPOSITORY' && !w.closedAt),
+);
+const creditWalletTypes = computed(() =>
+  wallet.walletTypes.filter((wt) => wt.code === 'CREDIT'),
+);
+const grantRepositoryWallet = computed(() =>
+  repositoryWallets.value.find((w) => w.id === grantRepositoryWalletId.value),
+);
+const grantAmountStep = computed(() =>
+  grantRepositoryWallet.value ? amountStep(grantRepositoryWallet.value.walletType.currency) : '0.01',
+);
+
+const sortedInstallments = computed(() =>
+  [...wallet.installments].sort((a, b) => a.deadlineDate.localeCompare(b.deadlineDate)),
 );
 
 // Currencies the user could charge a customer in (i.e. they hold at least
@@ -154,8 +191,26 @@ function badges(w: Wallet): string[] {
   if (!w.walletType.allowP2pOut && !w.walletType.allowP2pIn) {
     list.push(t('dashboard.wallets.noTransfers'));
   }
+  if (!w.walletType.depositable) list.push(t('dashboard.wallets.noDeposits'));
   if (w.restrictedCounterparties?.length) list.push(t('dashboard.wallets.marketBadge'));
   if (w.closedAt) list.push(t('dashboard.wallets.closedBadge'));
+  if (w.walletType.code === 'REPOSITORY' && w.virtualAmount !== null) {
+    list.push(
+      t('dashboard.wallets.virtualPoolBadge', {
+        amount: formatAmount(w.virtualAmount, w.walletType.currency),
+      }),
+    );
+  }
+  if (w.walletType.code === 'CREDIT' && w.virtualAmount !== null) {
+    list.push(
+      t('dashboard.wallets.creditCeilingBadge', {
+        amount: formatAmount(w.virtualAmount, w.walletType.currency),
+      }),
+    );
+  }
+  if (w.repositoryWalletId) list.push(t('dashboard.wallets.repositoryBackedBadge'));
+  if (w.blockedAt) list.push(t('dashboard.wallets.blockedBadge'));
+  if (w.railType) list.push(t(`dashboard.settlement.rail.${w.railType}`));
   return list;
 }
 
@@ -209,6 +264,7 @@ onMounted(async () => {
     wallet.fetchWallets(),
     wallet.fetchWalletTypes(),
     wallet.fetchTransactions(),
+    wallet.fetchInstallments(),
   ]);
   try {
     const me = await apiRequest<{ phoneNumber: string | null }>('/users/me');
@@ -327,7 +383,6 @@ function toggleEditWallet(w: Wallet) {
   }
   editingWalletId.value = w.id;
   editRestrictedCounterparties.value = (w.restrictedCounterparties ?? []).join(', ');
-  editAutoWithdrawTimes.value = w.autoWithdrawTimes ? [...w.autoWithdrawTimes] : ['', '', ''];
   editPurchaseTimeoutMinutes.value = w.purchaseTimeoutSeconds
     ? String(Math.round(w.purchaseTimeoutSeconds / 60))
     : '';
@@ -344,13 +399,14 @@ function toggleEditWallet(w: Wallet) {
   editMaxAmount.value = w.maxTransactionAmount
     ? String(Number(w.maxTransactionAmount) / 10 ** w.walletType.currency.decimalPlaces)
     : '';
-  editDepositable.value = w.depositable;
   editStoreName.value = w.storeName ?? '';
   editStoreSite.value = w.storeSite ?? '';
   editAllowedIps.value = (w.allowedIps ?? []).join(', ');
   editCallbackUrl.value = w.callbackUrl ?? '';
   editCategory.value = w.category ?? '';
   editSubCategory.value = w.subCategory ?? '';
+  editRailType.value = w.railType ?? '';
+  editRailScheduleTimes.value = (w.railScheduleTimes ?? []).join(', ');
 }
 
 function parseIpList(raw: string): string[] {
@@ -360,11 +416,17 @@ function parseIpList(raw: string): string[] {
     .filter((ip) => ip.length > 0);
 }
 
+function parseTimeList(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((time) => time.trim())
+    .filter((time) => time.length > 0);
+}
+
 function onSaveWalletEdit(w: Wallet) {
   runAction(async () => {
     const options: WalletOptionsInput = {
       restrictedCounterparties: parseEmailList(editRestrictedCounterparties.value),
-      depositable: editDepositable.value,
     };
     const scale = 10 ** w.walletType.currency.decimalPlaces;
     if (editMinAmount.value) {
@@ -374,8 +436,6 @@ function onSaveWalletEdit(w: Wallet) {
       options.maxTransactionAmount = Math.round(Number(editMaxAmount.value) * scale);
     }
     if (w.walletType.supportsAutoWithdraw) {
-      const filledTimes = editAutoWithdrawTimes.value.filter((time) => time);
-      options.autoWithdrawTimes = filledTimes.length ? editAutoWithdrawTimes.value : [];
       const filledAccounts = editSettlementAccounts.value.filter(
         (row) => row.iban && row.percent,
       );
@@ -386,6 +446,12 @@ function onSaveWalletEdit(w: Wallet) {
             percent: Number(row.percent),
           }))
         : undefined;
+      if (editRailType.value) {
+        options.railType = editRailType.value as WalletOptionsInput['railType'];
+        options.railScheduleTimes = editRailScheduleTimes.value
+          ? parseTimeList(editRailScheduleTimes.value)
+          : undefined;
+      }
     }
     if (w.walletType.allowPurchaseIn) {
       options.purchaseTimeoutSeconds = editPurchaseTimeoutMinutes.value
@@ -411,7 +477,7 @@ function onCloseWallet(w: Wallet) {
 
 function onAddWallet() {
   runAction(async () => {
-    const options: WalletOptionsInput = { depositable: newWalletDepositable.value };
+    const options: WalletOptionsInput = {};
     const restricted = parseEmailList(newWalletRestrictedCounterparties.value);
     if (restricted.length) {
       options.restrictedCounterparties = restricted;
@@ -424,7 +490,6 @@ function onAddWallet() {
       options.maxTransactionAmount = Math.round(Number(newWalletMaxAmount.value) * scale);
     }
     if (showAutoWithdrawFields.value) {
-      options.autoWithdrawTimes = newWalletAutoWithdrawTimes.value;
       const filledAccounts = newWalletSettlementAccounts.value.filter(
         (row) => row.iban && row.percent,
       );
@@ -434,6 +499,12 @@ function onAddWallet() {
           label: row.label || undefined,
           percent: Number(row.percent),
         }));
+      }
+      if (newWalletRailType.value) {
+        options.railType = newWalletRailType.value as WalletOptionsInput['railType'];
+        if (newWalletRailScheduleTimes.value) {
+          options.railScheduleTimes = parseTimeList(newWalletRailScheduleTimes.value);
+        }
       }
     }
     if (showPurchaseTimeoutField.value) {
@@ -454,7 +525,6 @@ function onAddWallet() {
     }
     await wallet.createWallet(newWalletType.value, options);
     newWalletType.value = '';
-    newWalletAutoWithdrawTimes.value = ['', '', ''];
     newWalletPurchaseTimeoutMinutes.value = '';
     newWalletSettlementAccounts.value = [];
     newWalletRestrictedCounterparties.value = '';
@@ -462,13 +532,14 @@ function onAddWallet() {
     newWalletAcceptorCode.value = '';
     newWalletMinAmount.value = '';
     newWalletMaxAmount.value = '';
-    newWalletDepositable.value = true;
     newWalletStoreName.value = '';
     newWalletStoreSite.value = '';
     newWalletAllowedIps.value = '';
     newWalletCallbackUrl.value = '';
     newWalletCategory.value = '';
     newWalletSubCategory.value = '';
+    newWalletRailType.value = '';
+    newWalletRailScheduleTimes.value = '';
   });
 }
 
@@ -476,8 +547,11 @@ function onDeposit() {
   runAction(async () => {
     const w = findWallet(depositWalletId.value);
     if (!w) return;
-    await wallet.deposit(w.id, toMinorUnits(depositAmount.value, w.walletType.currency));
-    depositAmount.value = '';
+    const result = await wallet.deposit(
+      w.id,
+      toMinorUnits(depositAmount.value, w.walletType.currency),
+    );
+    window.location.href = result.redirectUrl;
   });
 }
 
@@ -515,6 +589,49 @@ function onPurchase() {
     );
     window.location.href = result.redirectUrl;
   });
+}
+
+async function onGrantCredit() {
+  grantError.value = '';
+  grantSuccess.value = '';
+  const repo = grantRepositoryWallet.value;
+  if (!repo) return;
+  grantBusy.value = true;
+  try {
+    await wallet.grantCredit({
+      repositoryWalletId: repo.id,
+      personnelPhoneNumber: grantPersonnelPhone.value,
+      walletTypeId: grantWalletTypeId.value,
+      virtualAmount: toMinorUnits(grantVirtualAmount.value, repo.walletType.currency),
+      nationalCode: grantNationalCode.value || undefined,
+    });
+    grantSuccess.value = t('dashboard.grantCredit.success');
+    grantPersonnelPhone.value = '';
+    grantVirtualAmount.value = '';
+    grantNationalCode.value = '';
+  } catch (err) {
+    grantError.value = err instanceof ApiError ? err.message : t('dashboard.actions.error');
+  } finally {
+    grantBusy.value = false;
+  }
+}
+
+function installmentStatusLabel(status: Installment['status']): string {
+  if (status === 'PAID') return t('dashboard.installments.statusPaid');
+  if (status === 'OVERDUE') return t('dashboard.installments.statusOverdue');
+  return t('dashboard.installments.statusPending');
+}
+
+async function onPayInstallment(installment: Installment) {
+  payError.value = '';
+  payBusy.value = installment.id;
+  try {
+    const result = await wallet.payInstallment(installment.id);
+    window.location.href = result.redirectUrl;
+  } catch (err) {
+    payError.value = err instanceof ApiError ? err.message : t('dashboard.actions.error');
+    payBusy.value = null;
+  }
 }
 </script>
 
@@ -642,6 +759,88 @@ function onPurchase() {
           </button>
         </div>
       </div>
+
+      <div v-if="repositoryWallets.length" class="admin-card">
+        <h2>{{ t('dashboard.grantCredit.title') }}</h2>
+        <p class="hint">{{ t('dashboard.grantCredit.hint') }}</p>
+        <form class="charge-form" @submit.prevent="onGrantCredit">
+          <select v-model="grantRepositoryWalletId" class="admin-input" required>
+            <option value="" disabled>{{ t('dashboard.grantCredit.repositoryPlaceholder') }}</option>
+            <option v-for="w in repositoryWallets" :key="w.id" :value="w.id">{{ walletLabel(w) }}</option>
+          </select>
+          <input
+            v-model="grantPersonnelPhone"
+            type="tel"
+            :placeholder="t('dashboard.grantCredit.phonePlaceholder')"
+            class="admin-input"
+            required
+          />
+          <select v-model="grantWalletTypeId" class="admin-input" required>
+            <option value="" disabled>{{ t('dashboard.grantCredit.walletTypePlaceholder') }}</option>
+            <option v-for="wt in creditWalletTypes" :key="wt.id" :value="wt.id">{{ wt.name }} ({{ wt.currency.code }})</option>
+          </select>
+          <input
+            v-model="grantVirtualAmount"
+            type="number"
+            min="0"
+            :step="grantAmountStep"
+            :placeholder="t('dashboard.grantCredit.amountPlaceholder')"
+            class="admin-input"
+            required
+          />
+          <input
+            v-model="grantNationalCode"
+            type="text"
+            :placeholder="t('dashboard.grantCredit.nationalCodePlaceholder')"
+            class="admin-input"
+          />
+          <button type="submit" class="admin-btn admin-btn-primary" :disabled="grantBusy">
+            {{ t('dashboard.grantCredit.submit') }}
+          </button>
+        </form>
+        <p v-if="grantError" class="admin-error">{{ grantError }}</p>
+        <p v-if="grantSuccess" class="phone-success">{{ grantSuccess }}</p>
+      </div>
+    </div>
+
+    <div v-if="sortedInstallments.length" class="admin-card">
+      <h2>{{ t('dashboard.installments.title') }}</h2>
+      <p class="hint">{{ t('dashboard.installments.hint') }}</p>
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>{{ t('dashboard.installments.dueDate') }}</th>
+            <th>{{ t('dashboard.installments.deadlineDate') }}</th>
+            <th>{{ t('dashboard.installments.amount') }}</th>
+            <th>{{ t('dashboard.installments.status') }}</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="i in sortedInstallments" :key="i.id">
+            <td>{{ i.sequenceNumber }}</td>
+            <td>{{ i.dueDate }}</td>
+            <td>{{ i.deadlineDate }}</td>
+            <td>{{ formatAmount(i.amount, findWallet(i.walletId)?.walletType.currency ?? { code: '', symbol: '', symbolPosition: 'PREFIX', decimalPlaces: 0 }) }}</td>
+            <td>
+              <span class="admin-badge" :class="`installment-status-${i.status.toLowerCase()}`">{{ installmentStatusLabel(i.status) }}</span>
+            </td>
+            <td>
+              <button
+                v-if="i.status !== 'PAID'"
+                type="button"
+                class="admin-btn admin-btn-primary"
+                :disabled="payBusy === i.id"
+                @click="onPayInstallment(i)"
+              >
+                {{ t('dashboard.installments.pay') }}
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-if="payError" class="admin-error">{{ payError }}</p>
     </div>
 
     <div class="admin-card">
@@ -685,10 +884,6 @@ function onPurchase() {
             </label>
             <span class="hint">{{ t('dashboard.wallets.marketHint') }}</span>
 
-            <label class="checkbox-field">
-              <input v-model="editDepositable" type="checkbox" />
-              {{ t('dashboard.wallets.depositableLabel') }}
-            </label>
             <label>
               {{ t('dashboard.wallets.minAmountLabel') }}
               <input v-model="editMinAmount" type="number" min="0" :step="amountStep(w.walletType.currency)" class="admin-input" />
@@ -699,11 +894,6 @@ function onPurchase() {
             </label>
 
             <template v-if="w.walletType.supportsAutoWithdraw">
-              <span class="hint">{{ t('dashboard.wallets.autoWithdrawLabel') }}</span>
-              <input v-model="editAutoWithdrawTimes[0]" type="time" class="admin-input" />
-              <input v-model="editAutoWithdrawTimes[1]" type="time" class="admin-input" />
-              <input v-model="editAutoWithdrawTimes[2]" type="time" class="admin-input" />
-
               <div class="settlement-rows">
                 <span class="hint">{{ t('dashboard.settlement.walletHint') }}</span>
                 <div v-for="(row, i) in editSettlementAccounts" :key="i" class="settlement-row">
@@ -716,6 +906,29 @@ function onPurchase() {
                   {{ t('dashboard.settlement.addAccount') }}
                 </button>
               </div>
+
+              <label>
+                {{ t('dashboard.settlement.railLabel') }}
+                <select v-model="editRailType" class="admin-input">
+                  <option value="">{{ t('dashboard.settlement.railPlaceholder') }}</option>
+                  <option value="POL_PAY">{{ t('dashboard.settlement.rail.POL_PAY') }}</option>
+                  <option value="PAYA">{{ t('dashboard.settlement.rail.PAYA') }}</option>
+                  <option value="SATNA">{{ t('dashboard.settlement.rail.SATNA') }}</option>
+                  <option value="BANK_TRANSFER">{{ t('dashboard.settlement.rail.BANK_TRANSFER') }}</option>
+                </select>
+              </label>
+              <label v-if="editRailType">
+                {{ t('dashboard.settlement.railScheduleLabel') }}
+                <input
+                  v-model="editRailScheduleTimes"
+                  type="text"
+                  :placeholder="t('dashboard.settlement.railSchedulePlaceholder')"
+                  class="admin-input"
+                />
+                <span class="hint">
+                  {{ editRailType === 'BANK_TRANSFER' ? t('dashboard.settlement.railScheduleRequiredHint') : t('dashboard.settlement.railScheduleHint') }}
+                </span>
+              </label>
             </template>
 
             <template v-if="w.walletType.allowPurchaseIn">
@@ -779,10 +992,6 @@ function onPurchase() {
         </label>
         <span class="hint">{{ t('dashboard.wallets.marketHint') }}</span>
 
-        <label class="checkbox-field">
-          <input v-model="newWalletDepositable" type="checkbox" />
-          {{ t('dashboard.wallets.depositableLabel') }}
-        </label>
         <label class="market-field">
           {{ t('dashboard.wallets.minAmountLabel') }}
           <input
@@ -805,11 +1014,6 @@ function onPurchase() {
         </label>
 
         <template v-if="showAutoWithdrawFields">
-          <span class="hint">{{ t('dashboard.wallets.autoWithdrawLabel') }}</span>
-          <input v-model="newWalletAutoWithdrawTimes[0]" type="time" class="admin-input" required />
-          <input v-model="newWalletAutoWithdrawTimes[1]" type="time" class="admin-input" required />
-          <input v-model="newWalletAutoWithdrawTimes[2]" type="time" class="admin-input" required />
-
           <div class="settlement-rows">
             <span class="hint">{{ t('dashboard.settlement.walletHint') }}</span>
             <div v-for="(row, i) in newWalletSettlementAccounts" :key="i" class="settlement-row">
@@ -822,6 +1026,29 @@ function onPurchase() {
               {{ t('dashboard.settlement.addAccount') }}
             </button>
           </div>
+
+          <label class="market-field">
+            {{ t('dashboard.settlement.railLabel') }}
+            <select v-model="newWalletRailType" class="admin-input">
+              <option value="">{{ t('dashboard.settlement.railPlaceholder') }}</option>
+              <option value="POL_PAY">{{ t('dashboard.settlement.rail.POL_PAY') }}</option>
+              <option value="PAYA">{{ t('dashboard.settlement.rail.PAYA') }}</option>
+              <option value="SATNA">{{ t('dashboard.settlement.rail.SATNA') }}</option>
+              <option value="BANK_TRANSFER">{{ t('dashboard.settlement.rail.BANK_TRANSFER') }}</option>
+            </select>
+          </label>
+          <label v-if="newWalletRailType" class="market-field">
+            {{ t('dashboard.settlement.railScheduleLabel') }}
+            <input
+              v-model="newWalletRailScheduleTimes"
+              type="text"
+              :placeholder="t('dashboard.settlement.railSchedulePlaceholder')"
+              class="admin-input"
+            />
+            <span class="hint">
+              {{ newWalletRailType === 'BANK_TRANSFER' ? t('dashboard.settlement.railScheduleRequiredHint') : t('dashboard.settlement.railScheduleHint') }}
+            </span>
+          </label>
         </template>
 
         <template v-if="showPurchaseTimeoutField">
@@ -1041,6 +1268,16 @@ function onPurchase() {
   margin-top: 4px;
 }
 
+.installment-status-paid {
+  color: var(--accent, #4ade80);
+}
+.installment-status-overdue {
+  color: #f87171;
+}
+.installment-status-pending {
+  color: var(--text-dim);
+}
+
 .wallets {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -1090,12 +1327,6 @@ function onPurchase() {
   font-size: 0.8rem;
   color: var(--text-dim);
 }
-.wallet-edit-form label.checkbox-field,
-label.checkbox-field {
-  flex-direction: row;
-  align-items: center;
-  gap: 6px;
-}
 .add-wallet {
   display: flex;
   flex-wrap: wrap;
@@ -1137,8 +1368,7 @@ label.checkbox-field {
 .tx-row-clickable {
   cursor: pointer;
 }
-.phone-form,
-.charge-form {
+.phone-form {
   display: flex;
   gap: 8px;
   margin: 10px 0;
@@ -1146,11 +1376,15 @@ label.checkbox-field {
 .phone-form input {
   flex: 1;
 }
-.charge-form select {
-  flex: 0 0 90px;
+.charge-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
 }
-.charge-form input {
-  flex: 1;
+.charge-form input,
+.charge-form select {
+  width: 100%;
 }
 .phone-success {
   color: var(--accent-lime);

@@ -1,5 +1,18 @@
-import { IsBoolean, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  Min,
+} from 'class-validator';
 
+// Same "empty clears" convention as UpdateWalletDto: send an explicit empty
+// array to clear autoWithdrawTimes back to unset. Non-empty must still be
+// exactly 3 times — checked in the service alongside the supportsAutoWithdraw
+// cross-check, since "empty is fine, non-empty must be exactly 3" isn't
+// expressible with a single array-size decorator.
 export class UpdateWalletTypeDto {
   @IsOptional()
   @IsString()
@@ -31,10 +44,54 @@ export class UpdateWalletTypeDto {
   supportsAutoWithdraw?: boolean;
 
   @IsOptional()
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { each: true })
+  autoWithdrawTimes?: string[];
+
+  @IsOptional()
   @IsBoolean()
   allowPurchaseOut?: boolean;
 
   @IsOptional()
   @IsBoolean()
   allowPurchaseIn?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  depositable?: boolean;
+
+  // Credit-line fields (repository/credit wallet feature). All optional and
+  // only meaningful on the CREDIT-style types this feature applies to —
+  // the shared billing rules; the actual virtualAmount granted and the
+  // holder's nationalCode are per-wallet (see UpdateWalletDto).
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(31)
+  installmentDate?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(31)
+  paymentDeadlineDate?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  fee?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  penalty?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  unblockFee?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  installmentCount?: number;
 }

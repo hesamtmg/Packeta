@@ -19,6 +19,7 @@ import { WalletsService } from './wallets.service';
 import { WalletTypesService } from '../wallet-types/wallet-types.service';
 import { CreateWalletDto } from './dto/create-wallet.dto';
 import { UpdateWalletDto } from './dto/update-wallet.dto';
+import { GrantCreditDto } from './dto/grant-credit.dto';
 import { serializeWallet } from './wallet.serializer';
 import { SettlementService } from '../settlement/settlement.service';
 
@@ -65,12 +66,21 @@ export class WalletsController {
     @Body() dto: CreateWalletDto,
   ) {
     const walletType = await this.walletTypesService.findById(dto.walletTypeId);
-    this.assertAutoWithdrawCapable(dto.autoWithdrawTimes, walletType);
     this.assertPurchaseInCapable(dto.purchaseTimeoutSeconds, walletType);
     this.assertAutoWithdrawCapable(
       dto.settlementAccounts,
       walletType,
       'settlement accounts',
+    );
+    this.assertAutoWithdrawCapable(
+      dto.railType,
+      walletType,
+      'a withdrawal rail',
+    );
+    this.assertAutoWithdrawCapable(
+      dto.railScheduleTimes,
+      walletType,
+      'a withdrawal rail schedule',
     );
     this.assertPurchaseInCapable(dto.terminalId, walletType, 'a terminal id');
     this.assertPurchaseInCapable(
@@ -90,7 +100,6 @@ export class WalletsController {
 
     const wallet = await this.dataSource.transaction((manager) =>
       this.walletsService.createForUser(manager, user.userId, walletType.id, {
-        autoWithdrawTimes: dto.autoWithdrawTimes,
         purchaseTimeoutSeconds: dto.purchaseTimeoutSeconds,
         settlementAccounts: dto.settlementAccounts,
         restrictedCounterparties: dto.restrictedCounterparties,
@@ -98,13 +107,16 @@ export class WalletsController {
         acceptorCode: dto.acceptorCode,
         minTransactionAmount: dto.minTransactionAmount,
         maxTransactionAmount: dto.maxTransactionAmount,
-        depositable: dto.depositable,
         storeName: dto.storeName,
         storeSite: dto.storeSite,
         allowedIps: dto.allowedIps,
         callbackUrl: dto.callbackUrl,
         category: dto.category,
         subCategory: dto.subCategory,
+        virtualAmount: dto.virtualAmount,
+        nationalCode: dto.nationalCode,
+        railType: dto.railType,
+        railScheduleTimes: dto.railScheduleTimes,
       }),
     );
     const settlementAccounts = await this.settlementService.findForWallet(
@@ -112,6 +124,19 @@ export class WalletsController {
       wallet.id,
     );
     return serializeWallet({ ...wallet, walletType }, settlementAccounts);
+  }
+
+  // A repository owner splits off some of their unallocated virtual pool
+  // into a brand-new CREDIT wallet for an existing user, looked up by phone.
+  @Post('credit-grant')
+  async grantCredit(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GrantCreditDto,
+  ) {
+    const wallet = await this.dataSource.transaction((manager) =>
+      this.walletsService.grantCredit(manager, user.userId, dto),
+    );
+    return serializeWallet(wallet);
   }
 
   @Patch(':id')
@@ -123,17 +148,21 @@ export class WalletsController {
     const existing = await this.walletsService.getById(user.userId, id);
     const walletType = existing.walletType;
 
-    this.assertAutoWithdrawCapable(dto.autoWithdrawTimes, walletType);
-    if (dto.autoWithdrawTimes?.length && dto.autoWithdrawTimes.length !== 3) {
-      throw new BadRequestException(
-        'autoWithdrawTimes must be exactly 3 times, or an empty array to clear it',
-      );
-    }
     this.assertPurchaseInCapable(dto.purchaseTimeoutSeconds, walletType);
     this.assertAutoWithdrawCapable(
       dto.settlementAccounts,
       walletType,
       'settlement accounts',
+    );
+    this.assertAutoWithdrawCapable(
+      dto.railType,
+      walletType,
+      'a withdrawal rail',
+    );
+    this.assertAutoWithdrawCapable(
+      dto.railScheduleTimes,
+      walletType,
+      'a withdrawal rail schedule',
     );
     this.assertPurchaseInCapable(dto.terminalId, walletType, 'a terminal id');
     this.assertPurchaseInCapable(
@@ -150,7 +179,6 @@ export class WalletsController {
 
     const wallet = await this.dataSource.transaction((manager) =>
       this.walletsService.updateForUser(manager, user.userId, id, {
-        autoWithdrawTimes: dto.autoWithdrawTimes,
         purchaseTimeoutSeconds: dto.purchaseTimeoutSeconds,
         settlementAccounts: dto.settlementAccounts,
         restrictedCounterparties: dto.restrictedCounterparties,
@@ -158,13 +186,16 @@ export class WalletsController {
         acceptorCode: dto.acceptorCode,
         minTransactionAmount: dto.minTransactionAmount,
         maxTransactionAmount: dto.maxTransactionAmount,
-        depositable: dto.depositable,
         storeName: dto.storeName,
         storeSite: dto.storeSite,
         allowedIps: dto.allowedIps,
         callbackUrl: dto.callbackUrl,
         category: dto.category,
         subCategory: dto.subCategory,
+        virtualAmount: dto.virtualAmount,
+        nationalCode: dto.nationalCode,
+        railType: dto.railType,
+        railScheduleTimes: dto.railScheduleTimes,
       }),
     );
     const settlementAccounts = await this.settlementService.findForWallet(

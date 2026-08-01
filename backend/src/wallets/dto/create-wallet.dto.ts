@@ -1,9 +1,8 @@
 import { Type } from 'class-transformer';
 import {
-  ArrayMaxSize,
   ArrayMinSize,
-  IsBoolean,
   IsEmail,
+  IsEnum,
   IsIP,
   IsInt,
   IsOptional,
@@ -17,18 +16,11 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { SettlementAccountDto } from '../../settlement/dto/settlement-account.dto';
+import { SettlementRailType } from '../../rail-settlements/entities/rail-settlement.entity';
 
 export class CreateWalletDto {
   @IsUUID()
   walletTypeId: string;
-
-  // Only meaningful when the wallet type's supportsAutoWithdraw is true:
-  // exactly 3 "HH:MM" (24h, server-local) times the full balance sweeps out.
-  @IsOptional()
-  @ArrayMinSize(3)
-  @ArrayMaxSize(3)
-  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { each: true })
-  autoWithdrawTimes?: string[];
 
   // Only meaningful when the wallet type's allowPurchaseIn is true: how long
   // (in seconds) a PURCHASE stays PENDING awaiting IPG verification before
@@ -84,12 +76,6 @@ export class CreateWalletDto {
   @Min(1)
   maxTransactionAmount?: number;
 
-  // All wallets: whether the self-service Deposit action is allowed here.
-  // Defaults to true (matches the DB column default) when omitted.
-  @IsOptional()
-  @IsBoolean()
-  depositable?: boolean;
-
   // Merchant wallets only: storefront identity + access controls — see the
   // Wallet entity for how each is used.
   @IsOptional()
@@ -121,4 +107,33 @@ export class CreateWalletDto {
   @IsString()
   @MaxLength(100)
   subCategory?: string;
+
+  // Credit-line fields (repository/credit wallet feature). Only meaningful
+  // on wallets of a credit-style type — per-person, unlike the shared
+  // billing rules on WalletType (fee, penalty, installment schedule, etc.).
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  virtualAmount?: number;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{10}$/, { message: 'nationalCode must be 10 digits' })
+  nationalCode?: string;
+
+  // Withdrawal-schedule rail (only meaningful when the wallet type's
+  // supportsAutoWithdraw is true) — which of Iran's interbank rails the
+  // auto-withdraw sweep pays this wallet out over. See the Wallet entity.
+  @IsOptional()
+  @IsEnum(SettlementRailType)
+  railType?: SettlementRailType;
+
+  // Optional "HH:MM" schedule override for the chosen rail — required when
+  // railType is BANK_TRANSFER (no sensible built-in default exists), falls
+  // back to the rail's built-in default for every other rail when omitted.
+  @IsOptional()
+  @ArrayMinSize(1)
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { each: true })
+  railScheduleTimes?: string[];
 }

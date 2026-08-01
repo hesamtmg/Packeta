@@ -8,9 +8,15 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { Wallet } from './entities/wallet.entity';
-import { WalletType } from '../wallet-types/entities/wallet-type.entity';
+import {
+  WalletType,
+  WalletTypeCode,
+} from '../wallet-types/entities/wallet-type.entity';
+import { WalletTypesService } from '../wallet-types/wallet-types.service';
 import { SettlementService } from '../settlement/settlement.service';
 import { SettlementAccountDto } from '../settlement/dto/settlement-account.dto';
+import { UsersService } from '../users/users.service';
+import { SettlementRailType } from '../rail-settlements/entities/rail-settlement.entity';
 
 const WALLET_RELATIONS = { walletType: { currency: true } } as const;
 const WALLET_RELATIONS_WITH_OWNER = {
@@ -24,6 +30,8 @@ export class WalletsService {
     @InjectRepository(Wallet)
     private readonly walletsRepository: Repository<Wallet>,
     private readonly settlementService: SettlementService,
+    private readonly walletTypesService: WalletTypesService,
+    private readonly usersService: UsersService,
   ) {}
 
   async createForUser(
@@ -31,7 +39,6 @@ export class WalletsService {
     userId: string,
     walletTypeId: string,
     options?: {
-      autoWithdrawTimes?: string[];
       purchaseTimeoutSeconds?: number;
       settlementAccounts?: SettlementAccountDto[];
       restrictedCounterparties?: string[];
@@ -39,38 +46,44 @@ export class WalletsService {
       acceptorCode?: string;
       minTransactionAmount?: number;
       maxTransactionAmount?: number;
-      depositable?: boolean;
       storeName?: string;
       storeSite?: string;
       allowedIps?: string[];
       callbackUrl?: string;
       category?: string;
       subCategory?: string;
+      virtualAmount?: number;
+      nationalCode?: string;
+      railType?: SettlementRailType;
+      railScheduleTimes?: string[];
     },
   ): Promise<Wallet> {
     this.assertValidLimits(
       options?.minTransactionAmount,
       options?.maxTransactionAmount,
     );
+    this.assertValidRailConfig(options?.railType, options?.railScheduleTimes);
 
     const wallet = manager.create(Wallet, {
       userId,
       walletTypeId,
       balance: '0',
-      autoWithdrawTimes: options?.autoWithdrawTimes ?? null,
       purchaseTimeoutSeconds: options?.purchaseTimeoutSeconds ?? null,
       restrictedCounterparties: options?.restrictedCounterparties ?? null,
       terminalId: options?.terminalId ?? null,
       acceptorCode: options?.acceptorCode ?? null,
       minTransactionAmount: options?.minTransactionAmount?.toString() ?? null,
       maxTransactionAmount: options?.maxTransactionAmount?.toString() ?? null,
-      depositable: options?.depositable ?? true,
       storeName: options?.storeName ?? null,
       storeSite: options?.storeSite ?? null,
       allowedIps: options?.allowedIps ?? null,
       callbackUrl: options?.callbackUrl ?? null,
       category: options?.category ?? null,
       subCategory: options?.subCategory ?? null,
+      virtualAmount: options?.virtualAmount?.toString() ?? null,
+      nationalCode: options?.nationalCode ?? null,
+      railType: options?.railType ?? null,
+      railScheduleTimes: options?.railScheduleTimes ?? null,
     });
     await manager.save(wallet);
 
@@ -93,7 +106,6 @@ export class WalletsService {
     userId: string,
     walletId: string,
     options: {
-      autoWithdrawTimes?: string[];
       purchaseTimeoutSeconds?: number;
       settlementAccounts?: SettlementAccountDto[];
       restrictedCounterparties?: string[];
@@ -101,13 +113,16 @@ export class WalletsService {
       acceptorCode?: string;
       minTransactionAmount?: number;
       maxTransactionAmount?: number;
-      depositable?: boolean;
       storeName?: string;
       storeSite?: string;
       allowedIps?: string[];
       callbackUrl?: string;
       category?: string;
       subCategory?: string;
+      virtualAmount?: number;
+      nationalCode?: string;
+      railType?: SettlementRailType;
+      railScheduleTimes?: string[];
     },
   ): Promise<Wallet> {
     const wallet = await this.getById(userId, walletId);
@@ -127,13 +142,14 @@ export class WalletsService {
           ? Number(wallet.maxTransactionAmount)
           : undefined,
     );
+    this.assertValidRailConfig(
+      options.railType !== undefined ? options.railType : wallet.railType,
+      options.railScheduleTimes !== undefined
+        ? options.railScheduleTimes
+        : wallet.railScheduleTimes,
+    );
 
     const patch: Partial<Wallet> = {};
-    if (options.autoWithdrawTimes !== undefined) {
-      patch.autoWithdrawTimes = options.autoWithdrawTimes.length
-        ? options.autoWithdrawTimes
-        : null;
-    }
     if (options.purchaseTimeoutSeconds !== undefined) {
       patch.purchaseTimeoutSeconds = options.purchaseTimeoutSeconds;
     }
@@ -155,9 +171,6 @@ export class WalletsService {
     }
     if (options.maxTransactionAmount !== undefined) {
       patch.maxTransactionAmount = options.maxTransactionAmount.toString();
-    }
-    if (options.depositable !== undefined) {
-      patch.depositable = options.depositable;
     }
     if (options.storeName !== undefined) {
       patch.storeName = options.storeName.length ? options.storeName : null;
@@ -181,6 +194,22 @@ export class WalletsService {
         ? options.subCategory
         : null;
     }
+    if (options.virtualAmount !== undefined) {
+      patch.virtualAmount = options.virtualAmount.toString();
+    }
+    if (options.nationalCode !== undefined) {
+      patch.nationalCode = options.nationalCode.length
+        ? options.nationalCode
+        : null;
+    }
+    if (options.railType !== undefined) {
+      patch.railType = options.railType;
+    }
+    if (options.railScheduleTimes !== undefined) {
+      patch.railScheduleTimes = options.railScheduleTimes.length
+        ? options.railScheduleTimes
+        : null;
+    }
     if (Object.keys(patch).length) {
       await manager.update(Wallet, walletId, patch);
     }
@@ -198,6 +227,94 @@ export class WalletsService {
     // since the writes haven't committed yet, could read pre-update data.
     const updated = await manager.findOne(Wallet, {
       where: { id: walletId },
+      relations: WALLET_RELATIONS,
+    });
+    return updated!;
+  }
+
+  // A repository owner splits off a slice of their unallocated virtual pool
+  // (repository.virtualAmount) into a brand-new CREDIT wallet for an
+  // existing user (looked up by phone — personnel must already have an
+  // account, same as every other wallet). The grant decrements the
+  // repository's pool by the same amount and links the new wallet back to
+  // it via repositoryWalletId. Doesn't touch anyone's real balance — that
+  // only happens once the credit wallet is actually spent from.
+  async grantCredit(
+    manager: EntityManager,
+    ownerUserId: string,
+    dto: {
+      repositoryWalletId: string;
+      personnelPhoneNumber: string;
+      walletTypeId: string;
+      virtualAmount: number;
+      nationalCode?: string;
+    },
+  ): Promise<Wallet> {
+    const repository = await this.getById(ownerUserId, dto.repositoryWalletId);
+    if (repository.walletType.code !== WalletTypeCode.REPOSITORY) {
+      throw new BadRequestException('That wallet is not a repository');
+    }
+    if (repository.closedAt) {
+      throw new BadRequestException('This repository wallet is closed');
+    }
+
+    const walletType = await this.walletTypesService.findById(dto.walletTypeId);
+    if (walletType.code !== WalletTypeCode.CREDIT) {
+      throw new BadRequestException(
+        'A repository can only grant credit to a CREDIT-type wallet',
+      );
+    }
+    if (walletType.currencyId !== repository.walletType.currencyId) {
+      throw new BadRequestException(
+        "The credit wallet's currency must match the repository's currency",
+      );
+    }
+
+    const personnel = await this.usersService.findByPhoneNumber(
+      dto.personnelPhoneNumber,
+    );
+    if (!personnel) {
+      throw new NotFoundException('No account found with that phone number');
+    }
+
+    // Locked right before the pool check/mutation (rather than off the
+    // earlier unlocked `repository` read) so two concurrent grants against
+    // the same repository can't both read the same pool and double-spend
+    // it — the second grant blocks here until the first commits.
+    const lockedRepository = await this.lockById(manager, repository.id);
+    const availablePool = lockedRepository.virtualAmount
+      ? BigInt(lockedRepository.virtualAmount)
+      : 0n;
+    const requested = BigInt(dto.virtualAmount);
+    if (requested > availablePool) {
+      throw new UnprocessableEntityException(
+        'This repository does not have enough unallocated virtual balance for that amount',
+      );
+    }
+
+    const creditWallet = await this.createForUser(
+      manager,
+      personnel.id,
+      walletType.id,
+      {
+        virtualAmount: dto.virtualAmount,
+        nationalCode: dto.nationalCode,
+      },
+    );
+    // The grant preloads the wallet's spendable balance up to its ceiling —
+    // virtualAmount stays the fixed ceiling this wallet was granted, while
+    // balance is what's actually left to spend right now (drawn down by
+    // ordinary spends, same as any other wallet's balance).
+    await manager.update(Wallet, creditWallet.id, {
+      repositoryWalletId: repository.id,
+      balance: requested.toString(),
+    });
+    await manager.update(Wallet, repository.id, {
+      virtualAmount: (availablePool - requested).toString(),
+    });
+
+    const updated = await manager.findOne(Wallet, {
+      where: { id: creditWallet.id },
       relations: WALLET_RELATIONS,
     });
     return updated!;
@@ -228,6 +345,25 @@ export class WalletsService {
     if (min !== undefined && max !== undefined && min > max) {
       throw new BadRequestException(
         'minTransactionAmount cannot be greater than maxTransactionAmount',
+      );
+    }
+  }
+
+  // BANK_TRANSFER has no built-in default schedule (see
+  // RAIL_DEFAULT_SCHEDULE_TIMES) — a direct bank transfer's timing is
+  // entirely bank-specific, so a wallet choosing that rail must supply its
+  // own railScheduleTimes explicitly. Every other rail is fine unconfigured
+  // (falls back to its built-in default at sweep time).
+  private assertValidRailConfig(
+    railType?: SettlementRailType | null,
+    scheduleTimes?: string[] | null,
+  ): void {
+    if (
+      railType === SettlementRailType.BANK_TRANSFER &&
+      !scheduleTimes?.length
+    ) {
+      throw new BadRequestException(
+        'BANK_TRANSFER has no default schedule — railScheduleTimes must be set explicitly for this wallet',
       );
     }
   }
@@ -278,13 +414,34 @@ export class WalletsService {
 
   // Merchant wallets whose type supports the auto-withdraw sweep and have a
   // schedule configured. Used by the scheduler to find sweep candidates.
+  // Excludes wallets with a rail configured (Wallet.railType) — those are
+  // swept on their rail's own schedule instead (see
+  // listWithRailSettlementDue), never both.
   async listWithAutoWithdrawDue(): Promise<Wallet[]> {
     return this.walletsRepository
       .createQueryBuilder('wallet')
       .innerJoinAndSelect('wallet.walletType', 'walletType')
       .innerJoinAndSelect('walletType.currency', 'currency')
       .where('walletType.supportsAutoWithdraw = true')
-      .andWhere('wallet.autoWithdrawTimes IS NOT NULL')
+      .andWhere('walletType.autoWithdrawTimes IS NOT NULL')
+      .andWhere('wallet."railType" IS NULL')
+      .andWhere('wallet.balance <> 0')
+      .andWhere('wallet.closedAt IS NULL')
+      .getMany();
+  }
+
+  // Merchant wallets configured with a withdrawal-schedule rail (Pol Pay /
+  // Paya / Satna / bank transfer). Used by SettlementRailSweepService to
+  // find sweep candidates — the actual "is it this rail's window right now"
+  // check happens in the scheduler, same division of labor as
+  // listWithAutoWithdrawDue.
+  async listWithRailSettlementDue(): Promise<Wallet[]> {
+    return this.walletsRepository
+      .createQueryBuilder('wallet')
+      .innerJoinAndSelect('wallet.walletType', 'walletType')
+      .innerJoinAndSelect('walletType.currency', 'currency')
+      .where('walletType.supportsAutoWithdraw = true')
+      .andWhere('wallet."railType" IS NOT NULL')
       .andWhere('wallet.balance <> 0')
       .andWhere('wallet.closedAt IS NULL')
       .getMany();

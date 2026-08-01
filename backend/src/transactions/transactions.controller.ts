@@ -86,6 +86,19 @@ export class TransactionsController {
     );
   }
 
+  @Post('installments/:id/pay')
+  payInstallment(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Headers('idempotency-key') idempotencyKey: string,
+  ) {
+    return this.transactionsService.payInstallment(
+      user.userId,
+      id,
+      idempotencyKey,
+    );
+  }
+
   @Post('purchase/charge')
   initiateCharge(
     @CurrentUser() user: AuthenticatedUser,

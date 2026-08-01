@@ -19,6 +19,10 @@ export enum WalletTypeCode {
   CREDIT = 'CREDIT',
   GIFT = 'GIFT',
   MERCHANT = 'MERCHANT',
+  // A "money repository": a big real+virtual balance a business/corporate
+  // user holds, then splits out to personnel as CREDIT wallets — see
+  // WalletsService.grantCredit.
+  REPOSITORY = 'REPOSITORY',
 }
 
 // Each row is the "law" governing a wallet type: whether it can go negative
@@ -68,17 +72,62 @@ export class WalletType {
   @Column({ type: 'boolean', default: false })
   allowP2pIn: boolean;
 
-  // Merchant-style types: eligible for the per-wallet auto-withdraw sweep
-  // schedule, and/or able to send/receive a PURCHASE (customer -> merchant
-  // only, never the reverse).
+  // Merchant-style types: eligible for the auto-withdraw sweep schedule,
+  // and/or able to send/receive a PURCHASE (customer -> merchant only,
+  // never the reverse).
   @Column({ type: 'boolean', default: false })
   supportsAutoWithdraw: boolean;
+
+  // Exactly 3 "HH:MM" (server-local) times at which every wallet of this
+  // type has its full balance auto-swept out via a plain WITHDRAW. Only
+  // meaningful when supportsAutoWithdraw is true — shared by every wallet of
+  // this type, not configurable per wallet.
+  @Column({ type: 'varchar', length: 5, array: true, nullable: true })
+  autoWithdrawTimes: string[] | null;
 
   @Column({ type: 'boolean', default: false })
   allowPurchaseOut: boolean;
 
   @Column({ type: 'boolean', default: false })
   allowPurchaseIn: boolean;
+
+  // Whether the self-service Deposit action is allowed on wallets of this
+  // type at all.
+  @Column({ type: 'boolean', default: true })
+  depositable: boolean;
+
+  // Credit-line fields (repository/credit wallet feature). All nullable and
+  // only meaningful on the CREDIT-style types this feature applies to —
+  // unused on every other type. The actual virtual balance granted and the
+  // holder's national code are per-wallet (see Wallet entity), since they
+  // differ per person — these are the shared billing rules every wallet of
+  // the type follows.
+  //
+  // Day of month (1-31) each billing cycle's installment is generated.
+  @Column({ type: 'smallint', nullable: true })
+  installmentDate: number | null;
+
+  // Day of month (1-31) by which a generated installment must be paid.
+  @Column({ type: 'smallint', nullable: true })
+  paymentDeadlineDate: number | null;
+
+  // Flat fee charged per installment, in minor units.
+  @Column({ type: 'bigint', nullable: true })
+  fee: string | null;
+
+  // Flat penalty charged when an installment misses its payment deadline, in
+  // minor units.
+  @Column({ type: 'bigint', nullable: true })
+  penalty: string | null;
+
+  // Flat fee charged to unblock a wallet frozen for missed payment, in minor
+  // units.
+  @Column({ type: 'bigint', nullable: true })
+  unblockFee: string | null;
+
+  // How many installments each credit line is split into.
+  @Column({ type: 'smallint', nullable: true })
+  installmentCount: number | null;
 
   // Whether every new signup gets a starter wallet of this type (in the
   // default currency). Only the four original built-ins are starter types;

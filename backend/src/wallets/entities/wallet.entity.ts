@@ -10,6 +10,7 @@ import {
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { WalletType } from '../../wallet-types/entities/wallet-type.entity';
+import { SettlementRailType } from '../../rail-settlements/entities/rail-settlement.entity';
 
 // balance is stored in minor units (e.g. cents) as a bigint to avoid float
 // rounding errors; typeorm maps postgres bigint to a JS string. A user can
@@ -41,12 +42,6 @@ export class Wallet {
   @Column({ type: 'bigint', default: 0 })
   balance: string;
 
-  // Merchant wallets only: exactly 3 "HH:MM" times (server-local) at which
-  // the full balance is auto-swept out. Set at creation, only meaningful
-  // when the wallet type's supportsAutoWithdraw is true.
-  @Column({ type: 'varchar', length: 5, array: true, nullable: true })
-  autoWithdrawTimes: string[] | null;
-
   // Merchant wallets only: how long a PURCHASE stays PENDING awaiting the
   // merchant's /verify call before the timeout sweep auto-reverses it. Set
   // at creation, only meaningful when the wallet type's allowPurchaseIn is
@@ -70,6 +65,14 @@ export class Wallet {
   @Column({ type: 'timestamptz', nullable: true })
   closedAt: Date | null;
 
+  // Set when a repository-backed credit wallet misses an installment's
+  // payment deadline (see InstallmentsService) — blocks every outgoing
+  // money movement (withdraw, transfer/purchase out) until the outstanding
+  // installment plus the type's unblockFee is paid off. Unlike closedAt,
+  // this is temporary and cleared automatically once repaid.
+  @Column({ type: 'timestamptz', nullable: true })
+  blockedAt: Date | null;
+
   // Merchant wallets only: the payment-switch (e.g. Shaparak) terminal and
   // acceptor identifiers this wallet settles under. Purely descriptive on
   // our side — nothing in the sandbox IPG validates or uses these — but
@@ -89,11 +92,6 @@ export class Wallet {
 
   @Column({ type: 'bigint', nullable: true })
   maxTransactionAmount: string | null;
-
-  // Every wallet: whether the self-service Deposit action is allowed on
-  // this wallet at all. Defaults to true so existing wallets are unaffected.
-  @Column({ type: 'boolean', default: true })
-  depositable: boolean;
 
   // Merchant wallets only: storefront identity shown on the IPG pay page in
   // place of the merchant's raw email/phone, and access controls enforced on
@@ -126,6 +124,51 @@ export class Wallet {
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   subCategory: string | null;
+
+  // Credit-line fields (repository/credit wallet feature). Only meaningful
+  // on wallets of a credit-style type — the shared billing rules (fee,
+  // penalty, installment schedule, etc.) live on WalletType instead, since
+  // those are the same for every wallet of the type; these differ per
+  // person/wallet. Meaning depends on which side of the relationship this
+  // wallet is on (see WalletsService.grantCredit):
+  //  - On a REPOSITORY wallet: the remaining unallocated virtual pool the
+  //    owner can still grant out to personnel. Set directly by the owner
+  //    (PATCH /wallets/:id) — not derived from real balance.
+  //  - On a CREDIT wallet: the virtual credit ceiling a repository granted
+  //    this specific wallet.
+  @Column({ type: 'bigint', nullable: true })
+  virtualAmount: string | null;
+
+  // Iranian national ID of this wallet's holder.
+  @Column({ type: 'varchar', length: 10, nullable: true })
+  nationalCode: string | null;
+
+  // Set on a CREDIT wallet created via WalletsService.grantCredit: the
+  // REPOSITORY wallet whose virtual pool backs this wallet's virtualAmount
+  // ceiling. Null for every wallet not created that way.
+  @Index()
+  @Column({ type: 'uuid', nullable: true })
+  repositoryWalletId: string | null;
+
+  @ManyToOne(() => Wallet, { nullable: true })
+  @JoinColumn({ name: 'repositoryWalletId' })
+  repositoryWallet: Wallet | null;
+
+  // Withdrawal-schedule rail (Pol Pay / Paya / Satna / bank transfer) this
+  // merchant wallet's auto-withdraw sweep pays out over — see
+  // TransactionsService.sweepAutoWithdraw and rail-schedule.ts. Only
+  // meaningful when walletType.supportsAutoWithdraw is true. One rail per
+  // wallet, chosen by the merchant — unlike settlementAccounts (the IBAN
+  // split), which this rail governs the *timing* of, not the destination.
+  @Column({ type: 'enum', enum: SettlementRailType, nullable: true })
+  railType: SettlementRailType | null;
+
+  // Optional "HH:MM" (server-local) schedule override for the chosen rail —
+  // falls back to that rail's built-in default when unset. Required (no
+  // sensible default exists) when railType is BANK_TRANSFER, since a direct
+  // bank transfer's timing is entirely bank-specific.
+  @Column({ type: 'varchar', length: 5, array: true, nullable: true })
+  railScheduleTimes: string[] | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
