@@ -19,6 +19,7 @@ import { WalletsService } from './wallets.service';
 import { WalletTypesService } from '../wallet-types/wallet-types.service';
 import { CreateWalletDto } from './dto/create-wallet.dto';
 import { UpdateWalletDto } from './dto/update-wallet.dto';
+import { GrantCreditDto } from './dto/grant-credit.dto';
 import { serializeWallet } from './wallet.serializer';
 import { SettlementService } from '../settlement/settlement.service';
 
@@ -111,6 +112,19 @@ export class WalletsController {
       wallet.id,
     );
     return serializeWallet({ ...wallet, walletType }, settlementAccounts);
+  }
+
+  // A repository owner splits off some of their unallocated virtual pool
+  // into a brand-new CREDIT wallet for an existing user, looked up by phone.
+  @Post('credit-grant')
+  async grantCredit(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GrantCreditDto,
+  ) {
+    const wallet = await this.dataSource.transaction((manager) =>
+      this.walletsService.grantCredit(manager, user.userId, dto),
+    );
+    return serializeWallet(wallet);
   }
 
   @Patch(':id')

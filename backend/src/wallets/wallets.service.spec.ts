@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { WalletsService } from './wallets.service';
@@ -17,15 +18,24 @@ function buildService(wallet: {
     }),
   };
   const settlementService = {};
+  const walletTypesService = {};
+  const usersService = {};
   const service = new WalletsService(
     walletsRepository as any,
     settlementService as any,
+    walletTypesService as any,
+    usersService as any,
   );
   return { service, walletsRepository };
 }
 
 describe('WalletsService.isCounterpartyAllowed', () => {
-  const service = new WalletsService({} as any, {} as any);
+  const service = new WalletsService(
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+  );
 
   it('allows the pairing when neither wallet has a restriction list', () => {
     expect(
@@ -130,7 +140,12 @@ describe('WalletsService.closeForUser', () => {
 });
 
 describe('WalletsService.assertWithinTransactionLimits', () => {
-  const service = new WalletsService({} as any, {} as any);
+  const service = new WalletsService(
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+  );
 
   function wallet(min: string | null, max: string | null) {
     return { minTransactionAmount: min, maxTransactionAmount: max } as any;
@@ -176,7 +191,12 @@ describe('WalletsService.assertWithinTransactionLimits', () => {
 describe('WalletsService.createForUser / updateForUser limit validation', () => {
   it('rejects creating a wallet whose minTransactionAmount exceeds its maxTransactionAmount', async () => {
     const manager = { create: jest.fn(), save: jest.fn() };
-    const service = new WalletsService({} as any, {} as any);
+    const service = new WalletsService(
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
 
     await expect(
       service.createForUser(manager as any, 'user-1', 'type-1', {
@@ -202,5 +222,199 @@ describe('WalletsService.createForUser / updateForUser limit validation', () => 
         maxTransactionAmount: 100,
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('WalletsService.grantCredit', () => {
+  function buildGrantService(options: {
+    repository: {
+      id: string;
+      userId: string;
+      closedAt: Date | null;
+      virtualAmount: string | null;
+      walletType: { code: string; currencyId: string };
+    };
+    creditWalletType?: { id: string; code: string; currencyId: string };
+    personnel?: { id: string } | null;
+  }) {
+    const walletsRepository = {
+      findOne: jest.fn(async () => options.repository),
+    };
+    const walletTypesService = {
+      findById: jest.fn(
+        async () =>
+          options.creditWalletType ?? {
+            id: 'credit-type-1',
+            code: 'CREDIT',
+            currencyId: options.repository.walletType.currencyId,
+          },
+      ),
+    };
+    const usersService = {
+      findByPhoneNumber: jest.fn(async () =>
+        options.personnel === undefined
+          ? { id: 'personnel-1' }
+          : options.personnel,
+      ),
+    };
+    const settlementService = {};
+    const service = new WalletsService(
+      walletsRepository as any,
+      settlementService as any,
+      walletTypesService as any,
+      usersService as any,
+    );
+    const created = { id: 'credit-wallet-1' };
+    const manager = {
+      create: jest.fn(() => created),
+      save: jest.fn(async () => undefined),
+      update: jest.fn(async () => undefined),
+      findOne: jest.fn(async () => created),
+    };
+    return { service, manager, walletTypesService, usersService };
+  }
+
+  const baseRepository = {
+    id: 'repo-1',
+    userId: 'owner-1',
+    closedAt: null,
+    virtualAmount: '1000',
+    walletType: { code: 'REPOSITORY', currencyId: 'currency-1' },
+  };
+
+  it('rejects granting from a wallet that is not a repository', async () => {
+    const { service, manager } = buildGrantService({
+      repository: {
+        ...baseRepository,
+        walletType: { code: 'BUY', currencyId: 'currency-1' },
+      },
+    });
+
+    await expect(
+      service.grantCredit(manager as any, 'owner-1', {
+        repositoryWalletId: 'repo-1',
+        personnelPhoneNumber: '+15551234567',
+        walletTypeId: 'credit-type-1',
+        virtualAmount: 100,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects granting from a closed repository', async () => {
+    const { service, manager } = buildGrantService({
+      repository: { ...baseRepository, closedAt: new Date() },
+    });
+
+    await expect(
+      service.grantCredit(manager as any, 'owner-1', {
+        repositoryWalletId: 'repo-1',
+        personnelPhoneNumber: '+15551234567',
+        walletTypeId: 'credit-type-1',
+        virtualAmount: 100,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects granting into a non-CREDIT wallet type', async () => {
+    const { service, manager } = buildGrantService({
+      repository: baseRepository,
+      creditWalletType: {
+        id: 'gift-type-1',
+        code: 'GIFT',
+        currencyId: 'currency-1',
+      },
+    });
+
+    await expect(
+      service.grantCredit(manager as any, 'owner-1', {
+        repositoryWalletId: 'repo-1',
+        personnelPhoneNumber: '+15551234567',
+        walletTypeId: 'gift-type-1',
+        virtualAmount: 100,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects a currency mismatch between the repository and the credit wallet type', async () => {
+    const { service, manager } = buildGrantService({
+      repository: baseRepository,
+      creditWalletType: {
+        id: 'credit-type-1',
+        code: 'CREDIT',
+        currencyId: 'currency-2',
+      },
+    });
+
+    await expect(
+      service.grantCredit(manager as any, 'owner-1', {
+        repositoryWalletId: 'repo-1',
+        personnelPhoneNumber: '+15551234567',
+        walletTypeId: 'credit-type-1',
+        virtualAmount: 100,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("rejects a grant that exceeds the repository's unallocated virtual pool", async () => {
+    const { service, manager } = buildGrantService({
+      repository: baseRepository,
+    });
+
+    await expect(
+      service.grantCredit(manager as any, 'owner-1', {
+        repositoryWalletId: 'repo-1',
+        personnelPhoneNumber: '+15551234567',
+        walletTypeId: 'credit-type-1',
+        virtualAmount: 5000,
+      }),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+  });
+
+  it('rejects when no account exists for the personnel phone number', async () => {
+    const { service, manager } = buildGrantService({
+      repository: baseRepository,
+      personnel: null,
+    });
+
+    await expect(
+      service.grantCredit(manager as any, 'owner-1', {
+        repositoryWalletId: 'repo-1',
+        personnelPhoneNumber: '+15551234567',
+        walletTypeId: 'credit-type-1',
+        virtualAmount: 100,
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('creates the credit wallet, links it to the repository, and decrements the pool', async () => {
+    const { service, manager } = buildGrantService({
+      repository: baseRepository,
+    });
+
+    await service.grantCredit(manager as any, 'owner-1', {
+      repositoryWalletId: 'repo-1',
+      personnelPhoneNumber: '+15551234567',
+      walletTypeId: 'credit-type-1',
+      virtualAmount: 400,
+      nationalCode: '1234567890',
+    });
+
+    expect(manager.create).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        userId: 'personnel-1',
+        walletTypeId: 'credit-type-1',
+        virtualAmount: '400',
+        nationalCode: '1234567890',
+      }),
+    );
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      'credit-wallet-1',
+      { repositoryWalletId: 'repo-1' },
+    );
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'repo-1', {
+      virtualAmount: '600',
+    });
   });
 });

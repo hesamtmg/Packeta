@@ -19,6 +19,10 @@ export enum WalletTypeCode {
   CREDIT = 'CREDIT',
   GIFT = 'GIFT',
   MERCHANT = 'MERCHANT',
+  // A "money repository": a big real+virtual balance a business/corporate
+  // user holds, then splits out to personnel as CREDIT wallets — see
+  // WalletsService.grantCredit.
+  REPOSITORY = 'REPOSITORY',
 }
 
 // Each row is the "law" governing a wallet type: whether it can go negative

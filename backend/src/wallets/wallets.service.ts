@@ -8,9 +8,14 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { Wallet } from './entities/wallet.entity';
-import { WalletType } from '../wallet-types/entities/wallet-type.entity';
+import {
+  WalletType,
+  WalletTypeCode,
+} from '../wallet-types/entities/wallet-type.entity';
+import { WalletTypesService } from '../wallet-types/wallet-types.service';
 import { SettlementService } from '../settlement/settlement.service';
 import { SettlementAccountDto } from '../settlement/dto/settlement-account.dto';
+import { UsersService } from '../users/users.service';
 
 const WALLET_RELATIONS = { walletType: { currency: true } } as const;
 const WALLET_RELATIONS_WITH_OWNER = {
@@ -24,6 +29,8 @@ export class WalletsService {
     @InjectRepository(Wallet)
     private readonly walletsRepository: Repository<Wallet>,
     private readonly settlementService: SettlementService,
+    private readonly walletTypesService: WalletTypesService,
+    private readonly usersService: UsersService,
   ) {}
 
   async createForUser(
@@ -198,6 +205,84 @@ export class WalletsService {
     // since the writes haven't committed yet, could read pre-update data.
     const updated = await manager.findOne(Wallet, {
       where: { id: walletId },
+      relations: WALLET_RELATIONS,
+    });
+    return updated!;
+  }
+
+  // A repository owner splits off a slice of their unallocated virtual pool
+  // (repository.virtualAmount) into a brand-new CREDIT wallet for an
+  // existing user (looked up by phone — personnel must already have an
+  // account, same as every other wallet). The grant decrements the
+  // repository's pool by the same amount and links the new wallet back to
+  // it via repositoryWalletId. Doesn't touch anyone's real balance — that
+  // only happens once the credit wallet is actually spent from.
+  async grantCredit(
+    manager: EntityManager,
+    ownerUserId: string,
+    dto: {
+      repositoryWalletId: string;
+      personnelPhoneNumber: string;
+      walletTypeId: string;
+      virtualAmount: number;
+      nationalCode?: string;
+    },
+  ): Promise<Wallet> {
+    const repository = await this.getById(ownerUserId, dto.repositoryWalletId);
+    if (repository.walletType.code !== WalletTypeCode.REPOSITORY) {
+      throw new BadRequestException('That wallet is not a repository');
+    }
+    if (repository.closedAt) {
+      throw new BadRequestException('This repository wallet is closed');
+    }
+
+    const walletType = await this.walletTypesService.findById(dto.walletTypeId);
+    if (walletType.code !== WalletTypeCode.CREDIT) {
+      throw new BadRequestException(
+        'A repository can only grant credit to a CREDIT-type wallet',
+      );
+    }
+    if (walletType.currencyId !== repository.walletType.currencyId) {
+      throw new BadRequestException(
+        "The credit wallet's currency must match the repository's currency",
+      );
+    }
+
+    const availablePool = repository.virtualAmount
+      ? BigInt(repository.virtualAmount)
+      : 0n;
+    const requested = BigInt(dto.virtualAmount);
+    if (requested > availablePool) {
+      throw new UnprocessableEntityException(
+        'This repository does not have enough unallocated virtual balance for that amount',
+      );
+    }
+
+    const personnel = await this.usersService.findByPhoneNumber(
+      dto.personnelPhoneNumber,
+    );
+    if (!personnel) {
+      throw new NotFoundException('No account found with that phone number');
+    }
+
+    const creditWallet = await this.createForUser(
+      manager,
+      personnel.id,
+      walletType.id,
+      {
+        virtualAmount: dto.virtualAmount,
+        nationalCode: dto.nationalCode,
+      },
+    );
+    await manager.update(Wallet, creditWallet.id, {
+      repositoryWalletId: repository.id,
+    });
+    await manager.update(Wallet, repository.id, {
+      virtualAmount: (availablePool - requested).toString(),
+    });
+
+    const updated = await manager.findOne(Wallet, {
+      where: { id: creditWallet.id },
       relations: WALLET_RELATIONS,
     });
     return updated!;

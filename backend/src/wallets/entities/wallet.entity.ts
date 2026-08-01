@@ -119,17 +119,31 @@ export class Wallet {
   // Credit-line fields (repository/credit wallet feature). Only meaningful
   // on wallets of a credit-style type — the shared billing rules (fee,
   // penalty, installment schedule, etc.) live on WalletType instead, since
-  // those are the same for every wallet of the type; these two differ per
-  // person.
-  //
-  // The virtual (allocatable, not directly spendable) balance a repository
-  // owner has granted this specific wallet, in minor units.
+  // those are the same for every wallet of the type; these differ per
+  // person/wallet. Meaning depends on which side of the relationship this
+  // wallet is on (see WalletsService.grantCredit):
+  //  - On a REPOSITORY wallet: the remaining unallocated virtual pool the
+  //    owner can still grant out to personnel. Set directly by the owner
+  //    (PATCH /wallets/:id) — not derived from real balance.
+  //  - On a CREDIT wallet: the virtual credit ceiling a repository granted
+  //    this specific wallet.
   @Column({ type: 'bigint', nullable: true })
   virtualAmount: string | null;
 
   // Iranian national ID of this wallet's holder.
   @Column({ type: 'varchar', length: 10, nullable: true })
   nationalCode: string | null;
+
+  // Set on a CREDIT wallet created via WalletsService.grantCredit: the
+  // REPOSITORY wallet whose virtual pool backs this wallet's virtualAmount
+  // ceiling. Null for every wallet not created that way.
+  @Index()
+  @Column({ type: 'uuid', nullable: true })
+  repositoryWalletId: string | null;
+
+  @ManyToOne(() => Wallet, { nullable: true })
+  @JoinColumn({ name: 'repositoryWalletId' })
+  repositoryWallet: Wallet | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
