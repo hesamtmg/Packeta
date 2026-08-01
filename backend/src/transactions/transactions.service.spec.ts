@@ -10,6 +10,7 @@ import { TransactionType } from './entities/transaction.entity';
 import { SettlementRailType } from '../rail-settlements/entities/rail-settlement.entity';
 
 interface WalletTypeFixture {
+  code?: string;
   name: string;
   currency: { code: string };
   currencyId: string;
@@ -32,6 +33,8 @@ interface WalletFixture {
   purchaseTimeoutSeconds?: number | null;
   repositoryWalletId?: string | null;
   blockedAt?: Date | null;
+  closedAt?: Date | null;
+  virtualAmount?: string | null;
 }
 
 function buildService(options: {
@@ -928,6 +931,124 @@ function buildSweepService(options: {
     railSettlementLinks,
   };
 }
+
+describe('TransactionsService.verifyPurchase', () => {
+  it("draws down a CREDIT wallet's virtual balance and logs a TRANSFER when paying a merchant", async () => {
+    const creditWallet: WalletFixture = {
+      id: 'credit-wallet-1',
+      balance: '1000',
+      virtualAmount: '400',
+      walletType: walletType({ code: 'CREDIT', allowPurchaseOut: true }),
+    };
+    const merchantWallet: WalletFixture = {
+      id: 'merchant-wallet-1',
+      balance: '0',
+      walletType: walletType({ allowPurchaseIn: true }),
+    };
+    const { service, manager } = buildService({
+      senderWallet: creditWallet,
+      recipientWallet: merchantWallet,
+    });
+
+    const pendingPurchase = {
+      id: 'purchase-tx-1',
+      type: TransactionType.PURCHASE,
+      status: 'PENDING',
+      fromWalletId: creditWallet.id,
+      toWalletId: merchantWallet.id,
+      amount: '150',
+      installmentId: null,
+      expiresAt: null,
+    };
+    manager.createQueryBuilder = jest.fn(() => {
+      const builder: any = {
+        setLock: () => builder,
+        where: () => builder,
+        andWhere: () => builder,
+        getOne: async () => pendingPurchase,
+      };
+      return builder;
+    });
+
+    const result = await service.verifyPurchase('purchase-tx-1');
+
+    expect(result.status).toBe('COMPLETED');
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      creditWallet.id,
+      { virtualAmount: '250' },
+    );
+    expect(manager.create).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: TransactionType.TRANSFER,
+        fromWalletId: creditWallet.id,
+        toWalletId: creditWallet.id,
+        amount: '150',
+        idempotencyKey: 'credit-draw:purchase-tx-1',
+      }),
+    );
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      creditWallet.id,
+      { balance: '850' },
+    );
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      merchantWallet.id,
+      { balance: '150' },
+    );
+  });
+
+  it('does not draw virtual balance for a non-CREDIT purchase', async () => {
+    const buyWallet: WalletFixture = {
+      id: 'buy-wallet-1',
+      balance: '1000',
+      walletType: walletType({ code: 'BUY', allowPurchaseOut: true }),
+    };
+    const merchantWallet: WalletFixture = {
+      id: 'merchant-wallet-2',
+      balance: '0',
+      walletType: walletType({ allowPurchaseIn: true }),
+    };
+    const { service, manager } = buildService({
+      senderWallet: buyWallet,
+      recipientWallet: merchantWallet,
+    });
+
+    const pendingPurchase = {
+      id: 'purchase-tx-2',
+      type: TransactionType.PURCHASE,
+      status: 'PENDING',
+      fromWalletId: buyWallet.id,
+      toWalletId: merchantWallet.id,
+      amount: '150',
+      installmentId: null,
+      expiresAt: null,
+    };
+    manager.createQueryBuilder = jest.fn(() => {
+      const builder: any = {
+        setLock: () => builder,
+        where: () => builder,
+        andWhere: () => builder,
+        getOne: async () => pendingPurchase,
+      };
+      return builder;
+    });
+
+    await service.verifyPurchase('purchase-tx-2');
+
+    expect(manager.update).not.toHaveBeenCalledWith(
+      expect.anything(),
+      buyWallet.id,
+      expect.objectContaining({ virtualAmount: expect.anything() }),
+    );
+    expect(manager.create).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ type: TransactionType.TRANSFER }),
+    );
+  });
+});
 
 describe('TransactionsService.sweepAutoWithdraw', () => {
   it('falls back to a single full-balance WITHDRAW when no settlement split is configured (legacy behavior)', async () => {
