@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useWalletStore, type Wallet, type WalletOptionsInput } from '../stores/wallet';
+import {
+  useWalletStore,
+  type Wallet,
+  type WalletOptionsInput,
+  type Installment,
+} from '../stores/wallet';
 import { apiRequest, ApiError } from '../api/client';
 import { amountStep, formatAmount, toMinorUnits, type CurrencyInfo } from '../utils/currency';
 import AppLayout from '../components/AppLayout.vue';
@@ -69,6 +74,19 @@ const purchaseAmount = ref('');
 const actionError = ref('');
 const busy = ref(false);
 
+const grantRepositoryWalletId = ref('');
+const grantPersonnelPhone = ref('');
+const grantWalletTypeId = ref('');
+const grantVirtualAmount = ref('');
+const grantNationalCode = ref('');
+const grantBusy = ref(false);
+const grantError = ref('');
+const grantSuccess = ref('');
+
+const payFromWalletId = ref('');
+const payBusy = ref<string | null>(null);
+const payError = ref('');
+
 const withdrawableWallets = computed(() =>
   wallet.wallets.filter((w) => w.walletType.allowWithdraw),
 );
@@ -77,6 +95,26 @@ const p2pWallets = computed(() =>
 );
 const purchaseWallets = computed(() =>
   wallet.wallets.filter((w) => w.walletType.allowPurchaseOut),
+);
+
+// Repository/credit-line feature: wallets the caller owns that can grant
+// credit (type code REPOSITORY), and the CREDIT-type wallet types available
+// to grant into.
+const repositoryWallets = computed(() =>
+  wallet.wallets.filter((w) => w.walletType.code === 'REPOSITORY' && !w.closedAt),
+);
+const creditWalletTypes = computed(() =>
+  wallet.walletTypes.filter((wt) => wt.code === 'CREDIT'),
+);
+const grantRepositoryWallet = computed(() =>
+  repositoryWallets.value.find((w) => w.id === grantRepositoryWalletId.value),
+);
+const grantAmountStep = computed(() =>
+  grantRepositoryWallet.value ? amountStep(grantRepositoryWallet.value.walletType.currency) : '0.01',
+);
+
+const sortedInstallments = computed(() =>
+  [...wallet.installments].sort((a, b) => a.deadlineDate.localeCompare(b.deadlineDate)),
 );
 
 // Currencies the user could charge a customer in (i.e. they hold at least
@@ -153,6 +191,22 @@ function badges(w: Wallet): string[] {
   if (!w.walletType.depositable) list.push(t('dashboard.wallets.noDeposits'));
   if (w.restrictedCounterparties?.length) list.push(t('dashboard.wallets.marketBadge'));
   if (w.closedAt) list.push(t('dashboard.wallets.closedBadge'));
+  if (w.walletType.code === 'REPOSITORY' && w.virtualAmount !== null) {
+    list.push(
+      t('dashboard.wallets.virtualPoolBadge', {
+        amount: formatAmount(w.virtualAmount, w.walletType.currency),
+      }),
+    );
+  }
+  if (w.walletType.code === 'CREDIT' && w.virtualAmount !== null) {
+    list.push(
+      t('dashboard.wallets.creditCeilingBadge', {
+        amount: formatAmount(w.virtualAmount, w.walletType.currency),
+      }),
+    );
+  }
+  if (w.repositoryWalletId) list.push(t('dashboard.wallets.repositoryBackedBadge'));
+  if (w.blockedAt) list.push(t('dashboard.wallets.blockedBadge'));
   return list;
 }
 
@@ -206,6 +260,7 @@ onMounted(async () => {
     wallet.fetchWallets(),
     wallet.fetchWalletTypes(),
     wallet.fetchTransactions(),
+    wallet.fetchInstallments(),
   ]);
   try {
     const me = await apiRequest<{ phoneNumber: string | null }>('/users/me');
@@ -505,6 +560,50 @@ function onPurchase() {
     window.location.href = result.redirectUrl;
   });
 }
+
+async function onGrantCredit() {
+  grantError.value = '';
+  grantSuccess.value = '';
+  const repo = grantRepositoryWallet.value;
+  if (!repo) return;
+  grantBusy.value = true;
+  try {
+    await wallet.grantCredit({
+      repositoryWalletId: repo.id,
+      personnelPhoneNumber: grantPersonnelPhone.value,
+      walletTypeId: grantWalletTypeId.value,
+      virtualAmount: toMinorUnits(grantVirtualAmount.value, repo.walletType.currency),
+      nationalCode: grantNationalCode.value || undefined,
+    });
+    grantSuccess.value = t('dashboard.grantCredit.success');
+    grantPersonnelPhone.value = '';
+    grantVirtualAmount.value = '';
+    grantNationalCode.value = '';
+  } catch (err) {
+    grantError.value = err instanceof ApiError ? err.message : t('dashboard.actions.error');
+  } finally {
+    grantBusy.value = false;
+  }
+}
+
+function installmentStatusLabel(status: Installment['status']): string {
+  if (status === 'PAID') return t('dashboard.installments.statusPaid');
+  if (status === 'OVERDUE') return t('dashboard.installments.statusOverdue');
+  return t('dashboard.installments.statusPending');
+}
+
+async function onPayInstallment(installment: Installment) {
+  payError.value = '';
+  if (!payFromWalletId.value) return;
+  payBusy.value = installment.id;
+  try {
+    const result = await wallet.payInstallment(installment.id, payFromWalletId.value);
+    window.location.href = result.redirectUrl;
+  } catch (err) {
+    payError.value = err instanceof ApiError ? err.message : t('dashboard.actions.error');
+    payBusy.value = null;
+  }
+}
 </script>
 
 <template>
@@ -631,6 +730,95 @@ function onPurchase() {
           </button>
         </div>
       </div>
+
+      <div v-if="repositoryWallets.length" class="admin-card">
+        <h2>{{ t('dashboard.grantCredit.title') }}</h2>
+        <p class="hint">{{ t('dashboard.grantCredit.hint') }}</p>
+        <form class="charge-form" @submit.prevent="onGrantCredit">
+          <select v-model="grantRepositoryWalletId" class="admin-input" required>
+            <option value="" disabled>{{ t('dashboard.grantCredit.repositoryPlaceholder') }}</option>
+            <option v-for="w in repositoryWallets" :key="w.id" :value="w.id">{{ walletLabel(w) }}</option>
+          </select>
+          <input
+            v-model="grantPersonnelPhone"
+            type="tel"
+            :placeholder="t('dashboard.grantCredit.phonePlaceholder')"
+            class="admin-input"
+            required
+          />
+          <select v-model="grantWalletTypeId" class="admin-input" required>
+            <option value="" disabled>{{ t('dashboard.grantCredit.walletTypePlaceholder') }}</option>
+            <option v-for="wt in creditWalletTypes" :key="wt.id" :value="wt.id">{{ wt.name }} ({{ wt.currency.code }})</option>
+          </select>
+          <input
+            v-model="grantVirtualAmount"
+            type="number"
+            min="0"
+            :step="grantAmountStep"
+            :placeholder="t('dashboard.grantCredit.amountPlaceholder')"
+            class="admin-input"
+            required
+          />
+          <input
+            v-model="grantNationalCode"
+            type="text"
+            :placeholder="t('dashboard.grantCredit.nationalCodePlaceholder')"
+            class="admin-input"
+          />
+          <button type="submit" class="admin-btn admin-btn-primary" :disabled="grantBusy">
+            {{ t('dashboard.grantCredit.submit') }}
+          </button>
+        </form>
+        <p v-if="grantError" class="admin-error">{{ grantError }}</p>
+        <p v-if="grantSuccess" class="phone-success">{{ grantSuccess }}</p>
+      </div>
+    </div>
+
+    <div v-if="sortedInstallments.length" class="admin-card">
+      <h2>{{ t('dashboard.installments.title') }}</h2>
+      <p class="hint">{{ t('dashboard.installments.hint') }}</p>
+      <label class="pay-from-label">
+        {{ t('dashboard.installments.payFromLabel') }}
+        <select v-model="payFromWalletId" class="admin-input">
+          <option value="" disabled>{{ t('dashboard.installments.payFromPlaceholder') }}</option>
+          <option v-for="w in purchaseWallets" :key="w.id" :value="w.id">{{ walletLabel(w) }}</option>
+        </select>
+      </label>
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>{{ t('dashboard.installments.dueDate') }}</th>
+            <th>{{ t('dashboard.installments.deadlineDate') }}</th>
+            <th>{{ t('dashboard.installments.amount') }}</th>
+            <th>{{ t('dashboard.installments.status') }}</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="i in sortedInstallments" :key="i.id">
+            <td>{{ i.sequenceNumber }}</td>
+            <td>{{ i.dueDate }}</td>
+            <td>{{ i.deadlineDate }}</td>
+            <td>{{ formatAmount(i.amount, findWallet(i.walletId)?.walletType.currency ?? { code: '', symbol: '', symbolPosition: 'PREFIX', decimalPlaces: 0 }) }}</td>
+            <td>
+              <span class="admin-badge" :class="`installment-status-${i.status.toLowerCase()}`">{{ installmentStatusLabel(i.status) }}</span>
+            </td>
+            <td>
+              <button
+                v-if="i.status !== 'PAID'"
+                type="button"
+                class="admin-btn admin-btn-primary"
+                :disabled="!payFromWalletId || payBusy === i.id"
+                @click="onPayInstallment(i)"
+              >
+                {{ t('dashboard.installments.pay') }}
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-if="payError" class="admin-error">{{ payError }}</p>
     </div>
 
     <div class="admin-card">
@@ -1012,6 +1200,25 @@ function onPurchase() {
   margin-top: 4px;
 }
 
+.pay-from-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  max-width: 320px;
+  margin-bottom: 14px;
+}
+.installment-status-paid {
+  color: var(--accent, #4ade80);
+}
+.installment-status-overdue {
+  color: #f87171;
+}
+.installment-status-pending {
+  color: var(--text-dim);
+}
+
 .wallets {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -1102,8 +1309,7 @@ function onPurchase() {
 .tx-row-clickable {
   cursor: pointer;
 }
-.phone-form,
-.charge-form {
+.phone-form {
   display: flex;
   gap: 8px;
   margin: 10px 0;
@@ -1111,11 +1317,15 @@ function onPurchase() {
 .phone-form input {
   flex: 1;
 }
-.charge-form select {
-  flex: 0 0 90px;
+.charge-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
 }
-.charge-form input {
-  flex: 1;
+.charge-form input,
+.charge-form select {
+  width: 100%;
 }
 .phone-success {
   color: var(--accent-lime);

@@ -20,6 +20,7 @@ export function serializeWallet(
     purchaseTimeoutSeconds: wallet.purchaseTimeoutSeconds,
     restrictedCounterparties: wallet.restrictedCounterparties,
     closedAt: wallet.closedAt,
+    blockedAt: wallet.blockedAt,
     terminalId: wallet.terminalId,
     acceptorCode: wallet.acceptorCode,
     minTransactionAmount: wallet.minTransactionAmount,

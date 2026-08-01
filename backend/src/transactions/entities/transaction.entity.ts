@@ -104,6 +104,13 @@ export class Transaction {
   @Column({ type: 'varchar', length: 34, nullable: true })
   destinationIban: string | null;
 
+  // Only set on a PURCHASE row created by TransactionsService.payInstallment:
+  // which Installment this repayment pays off. verifyPurchase marks that
+  // installment PAID and clears the wallet's block once this completes.
+  @Index()
+  @Column({ type: 'uuid', nullable: true })
+  installmentId: string | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

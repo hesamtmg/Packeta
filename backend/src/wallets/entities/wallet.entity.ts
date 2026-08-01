@@ -64,6 +64,14 @@ export class Wallet {
   @Column({ type: 'timestamptz', nullable: true })
   closedAt: Date | null;
 
+  // Set when a repository-backed credit wallet misses an installment's
+  // payment deadline (see InstallmentsService) — blocks every outgoing
+  // money movement (withdraw, transfer/purchase out) until the outstanding
+  // installment plus the type's unblockFee is paid off. Unlike closedAt,
+  // this is temporary and cleared automatically once repaid.
+  @Column({ type: 'timestamptz', nullable: true })
+  blockedAt: Date | null;
+
   // Merchant wallets only: the payment-switch (e.g. Shaparak) terminal and
   // acceptor identifiers this wallet settles under. Purely descriptive on
   // our side — nothing in the sandbox IPG validates or uses these — but

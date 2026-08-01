@@ -10,6 +10,7 @@ import { Currency } from './currencies/entities/currency.entity';
 import { Transaction } from './transactions/entities/transaction.entity';
 import { IdempotencyKey } from './idempotency/entities/idempotency-key.entity';
 import { SettlementSplit } from './settlement/entities/settlement-split.entity';
+import { Installment } from './installments/entities/installment.entity';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { WalletsModule } from './wallets/wallets.module';
@@ -43,6 +44,7 @@ import { SettlementModule } from './settlement/settlement.module';
           Transaction,
           IdempotencyKey,
           SettlementSplit,
+          Installment,
         ],
         synchronize: false,
       }),

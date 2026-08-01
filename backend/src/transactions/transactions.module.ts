@@ -9,6 +9,7 @@ import { LoggingModule } from '../logging/logging.module';
 import { IpgModule } from '../ipg/ipg.module';
 import { CurrenciesModule } from '../currencies/currencies.module';
 import { SettlementModule } from '../settlement/settlement.module';
+import { InstallmentsModule } from '../installments/installments.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { SettlementModule } from '../settlement/settlement.module';
     IpgModule,
     CurrenciesModule,
     SettlementModule,
+    InstallmentsModule,
   ],
   controllers: [TransactionsController],
   providers: [TransactionsService],

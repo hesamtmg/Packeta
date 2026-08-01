@@ -1,4 +1,6 @@
 import {
+  BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
   UnprocessableEntityException,
@@ -18,6 +20,7 @@ interface WalletTypeFixture {
   allowPurchaseOut?: boolean;
   allowPurchaseIn?: boolean;
   depositable?: boolean;
+  unblockFee?: string | null;
 }
 
 interface WalletFixture {
@@ -27,6 +30,7 @@ interface WalletFixture {
   walletType: WalletTypeFixture;
   purchaseTimeoutSeconds?: number | null;
   repositoryWalletId?: string | null;
+  blockedAt?: Date | null;
 }
 
 function buildService(options: {
@@ -34,9 +38,15 @@ function buildService(options: {
   recipientWallet?: WalletFixture | null;
   repositoryWallet?: WalletFixture | null;
   ipgOverrides?: Record<string, jest.Mock>;
+  installmentsService?: Record<string, jest.Mock>;
 }) {
-  const { senderWallet, recipientWallet, repositoryWallet, ipgOverrides } =
-    options;
+  const {
+    senderWallet,
+    recipientWallet,
+    repositoryWallet,
+    ipgOverrides,
+    installmentsService,
+  } = options;
   const lockCalls: string[] = [];
 
   const walletsById = new Map<string, WalletFixture>([
@@ -148,6 +158,7 @@ function buildService(options: {
     configService as any,
     {} as any,
     settlementService as any,
+    (installmentsService ?? {}) as any,
     {} as any,
   );
 
@@ -597,6 +608,20 @@ describe('TransactionsService.withdraw', () => {
       service.withdraw('sender', senderWallet.id, 300, 'idem-repo-2'),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
+
+  it('rejects a withdrawal from a wallet blocked by an overdue installment', async () => {
+    const senderWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '500',
+      walletType: walletType({ name: 'Credit' }),
+      blockedAt: new Date(),
+    };
+    const { service } = buildService({ senderWallet });
+
+    await expect(
+      service.withdraw('sender', senderWallet.id, 100, 'idem-blocked-1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
 });
 
 describe('TransactionsService.adjust', () => {
@@ -833,6 +858,7 @@ function buildSweepService(options: {
     {} as any,
     settlementService as any,
     {} as any,
+    {} as any,
   );
 
   return { service, savedTransactions, savedPurchases, updatedBalances };
@@ -922,5 +948,184 @@ describe('TransactionsService.sweepAutoWithdraw', () => {
       relatedTransactionId: 'purchase-3',
       destinationIban: null,
     });
+  });
+});
+
+describe('TransactionsService.payInstallment', () => {
+  const repositoryWallet: WalletFixture = {
+    id: 'repo-1',
+    balance: '1000',
+    walletType: walletType({ name: 'Repository', allowPurchaseIn: true }),
+  };
+
+  const fromWallet: WalletFixture = {
+    id: 'payer-1',
+    userId: 'personnel-1',
+    balance: '5000',
+    walletType: walletType({ name: 'Buy', allowPurchaseOut: true }),
+  };
+
+  function baseInstallment(overrides: Record<string, any> = {}) {
+    return {
+      id: 'installment-1',
+      amount: '400',
+      status: 'PENDING',
+      wallet: {
+        id: 'credit-1',
+        userId: 'personnel-1',
+        repositoryWalletId: 'repo-1',
+        blockedAt: null,
+        walletType: { unblockFee: '50' },
+      },
+      ...overrides,
+    };
+  }
+
+  function buildPayService(installment: any) {
+    const installmentsService = {
+      getByIdForUser: jest.fn(async () => installment),
+      markPaid: jest.fn(async () => undefined),
+    };
+    return buildService({
+      senderWallet: fromWallet,
+      repositoryWallet,
+      installmentsService: installmentsService as any,
+    });
+  }
+
+  it('rejects paying an already-PAID installment', async () => {
+    const { service } = buildPayService(baseInstallment({ status: 'PAID' }));
+
+    await expect(
+      service.payInstallment(
+        'personnel-1',
+        'installment-1',
+        'payer-1',
+        'idem-inst-1',
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('rejects when the credit wallet has no linked repository', async () => {
+    const { service } = buildPayService(
+      baseInstallment({
+        wallet: {
+          id: 'credit-1',
+          userId: 'personnel-1',
+          repositoryWalletId: null,
+          blockedAt: null,
+          walletType: { unblockFee: '50' },
+        },
+      }),
+    );
+
+    await expect(
+      service.payInstallment(
+        'personnel-1',
+        'installment-1',
+        'payer-1',
+        'idem-inst-2',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects when the repository does not accept purchases', async () => {
+    const closedRepository: WalletFixture = {
+      ...repositoryWallet,
+      walletType: walletType({ name: 'Repository', allowPurchaseIn: false }),
+    };
+    const installmentsService = {
+      getByIdForUser: jest.fn(async () => baseInstallment()),
+      markPaid: jest.fn(async () => undefined),
+    };
+    const { service } = buildService({
+      senderWallet: fromWallet,
+      repositoryWallet: closedRepository,
+      installmentsService: installmentsService as any,
+    });
+
+    await expect(
+      service.payInstallment(
+        'personnel-1',
+        'installment-1',
+        'payer-1',
+        'idem-inst-3',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("rejects when the paying wallet's currency does not match the repository's", async () => {
+    const otherCurrencyWallet: WalletFixture = {
+      ...fromWallet,
+      walletType: walletType({
+        name: 'Buy',
+        allowPurchaseOut: true,
+        currencyId: 'irr-currency-id',
+      }),
+    };
+    const installmentsService = {
+      getByIdForUser: jest.fn(async () => baseInstallment()),
+      markPaid: jest.fn(async () => undefined),
+    };
+    const { service } = buildService({
+      senderWallet: otherCurrencyWallet,
+      repositoryWallet,
+      installmentsService: installmentsService as any,
+    });
+
+    await expect(
+      service.payInstallment(
+        'personnel-1',
+        'installment-1',
+        'payer-1',
+        'idem-inst-4',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('initiates a repayment purchase for exactly the installment amount when not blocked', async () => {
+    const { service, manager } = buildPayService(baseInstallment());
+
+    const result = await service.payInstallment(
+      'personnel-1',
+      'installment-1',
+      'payer-1',
+      'idem-inst-5',
+    );
+
+    expect(result.redirectUrl).toBe('http://ipg/pay/auth-1');
+    expect(manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toWalletId: 'repo-1',
+        fromWalletId: 'payer-1',
+        amount: '400',
+        installmentId: 'installment-1',
+      }),
+    );
+  });
+
+  it('folds the unblockFee into the charge when the credit wallet is blocked', async () => {
+    const { service, manager } = buildPayService(
+      baseInstallment({
+        wallet: {
+          id: 'credit-1',
+          userId: 'personnel-1',
+          repositoryWalletId: 'repo-1',
+          blockedAt: new Date(),
+          walletType: { unblockFee: '50' },
+        },
+      }),
+    );
+
+    await service.payInstallment(
+      'personnel-1',
+      'installment-1',
+      'payer-1',
+      'idem-inst-6',
+    );
+
+    expect(manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: '450' }),
+    );
   });
 });

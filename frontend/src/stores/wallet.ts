@@ -40,6 +40,7 @@ export interface Wallet {
   purchaseTimeoutSeconds: number | null;
   restrictedCounterparties: string[] | null;
   closedAt: string | null;
+  blockedAt: string | null;
   terminalId: string | null;
   acceptorCode: string | null;
   minTransactionAmount: string | null;
@@ -108,11 +109,26 @@ interface Transaction {
   createdAt: string;
 }
 
+export interface Installment {
+  id: string;
+  walletId: string;
+  sequenceNumber: number;
+  amount: string;
+  penaltyApplied: boolean;
+  dueDate: string;
+  deadlineDate: string;
+  status: 'PENDING' | 'OVERDUE' | 'PAID';
+  paidAt: string | null;
+  paymentTransactionId: string | null;
+  createdAt: string;
+}
+
 export const useWalletStore = defineStore('wallet', {
   state: () => ({
     wallets: [] as Wallet[],
     walletTypes: [] as WalletType[],
     transactions: [] as Transaction[],
+    installments: [] as Installment[],
   }),
   actions: {
     async fetchWallets() {
@@ -123,6 +139,19 @@ export const useWalletStore = defineStore('wallet', {
     },
     async fetchTransactions() {
       this.transactions = await apiRequest<Transaction[]>('/transactions');
+    },
+    async fetchInstallments() {
+      this.installments = await apiRequest<Installment[]>('/installments');
+    },
+    async payInstallment(installmentId: string, fromWalletId: string) {
+      return apiRequest<{ transactionId: string; redirectUrl: string; expiresAt: string }>(
+        `/transactions/installments/${installmentId}/pay`,
+        {
+          method: 'POST',
+          body: { fromWalletId },
+          idempotent: true,
+        },
+      );
     },
     async createWallet(walletTypeId: string, options?: WalletOptionsInput) {
       await apiRequest('/wallets', {

@@ -27,6 +27,8 @@ import { formatAmount } from '../common/format-amount';
 import { displayIdentity } from '../common/synthetic-email';
 import { SettlementService } from '../settlement/settlement.service';
 import { SettlementSplitDto } from '../settlement/dto/settlement-split.dto';
+import { InstallmentsService } from '../installments/installments.service';
+import { InstallmentStatus } from '../installments/entities/installment.entity';
 
 export interface MoneyResult {
   transactionId: string;
@@ -60,6 +62,7 @@ export class TransactionsService {
     private readonly configService: ConfigService,
     private readonly currenciesService: CurrenciesService,
     private readonly settlementService: SettlementService,
+    private readonly installmentsService: InstallmentsService,
     @InjectRepository(Transaction)
     private readonly transactionsRepository: Repository<Transaction>,
   ) {}
@@ -126,6 +129,7 @@ export class TransactionsService {
         if (walletRef.closedAt) {
           throw new BadRequestException('This wallet is closed');
         }
+        this.assertNotBlocked(walletRef);
         if (!walletRef.walletType.allowWithdraw) {
           throw new ForbiddenException(
             `${walletRef.walletType.name} wallets do not support withdrawals`,
@@ -185,6 +189,7 @@ export class TransactionsService {
         if (fromWalletRef.closedAt) {
           throw new BadRequestException('This wallet is closed');
         }
+        this.assertNotBlocked(fromWalletRef);
         if (!fromWalletRef.walletType.allowP2pOut) {
           throw new ForbiddenException(
             `${fromWalletRef.walletType.name} wallets cannot send transfers`,
@@ -367,6 +372,7 @@ export class TransactionsService {
         if (fromWalletRef.closedAt) {
           throw new BadRequestException('This wallet is closed');
         }
+        this.assertNotBlocked(fromWalletRef);
         if (!fromWalletRef.walletType.allowPurchaseOut) {
           throw new ForbiddenException(
             `${fromWalletRef.walletType.name} wallets cannot make purchases`,
@@ -439,6 +445,125 @@ export class TransactionsService {
             displayAmount: formatAmount(
               amount,
               fromWalletRef.walletType.currency,
+            ),
+            callbackUrl: `${frontendUrl}/purchase/${transaction.id}/callback`,
+            timeoutSeconds,
+          });
+
+        transaction.ipgAuthority = authority;
+        transaction.ipgPaymentUrl = paymentUrl;
+        await manager.save(transaction);
+
+        return {
+          transactionId: transaction.id,
+          redirectUrl: paymentUrl,
+          expiresAt,
+        };
+      },
+    );
+  }
+
+  // Repays one of a credit wallet's scheduled installments (see
+  // InstallmentsService), through the same IPG purchase flow as any other
+  // purchase — the payer picks one of their own wallets, gets an IPG
+  // payment page, and once verifyPurchase confirms it, the amount lands in
+  // the repository's real balance and the installment is marked PAID (see
+  // the installmentId branch at the end of verifyPurchase). If the credit
+  // wallet is currently blocked (a previous installment went OVERDUE), the
+  // type's unblockFee is folded into this charge and the block is lifted on
+  // success.
+  async payInstallment(
+    userId: string,
+    installmentId: string,
+    fromWalletId: string,
+    idempotencyKey: string,
+  ): Promise<PurchaseInitiateResult> {
+    return this.run(
+      'installment_pay',
+      userId,
+      { installmentId, fromWalletId },
+      idempotencyKey,
+      async (manager) => {
+        const installment = await this.installmentsService.getByIdForUser(
+          userId,
+          installmentId,
+        );
+        if (installment.status === InstallmentStatus.PAID) {
+          throw new ConflictException('This installment has already been paid');
+        }
+        const creditWallet = installment.wallet;
+        if (!creditWallet.repositoryWalletId) {
+          throw new BadRequestException(
+            'This wallet has no linked repository to repay',
+          );
+        }
+
+        const repository = await this.walletsService.getByIdUnscoped(
+          creditWallet.repositoryWalletId,
+        );
+        if (repository.closedAt) {
+          throw new BadRequestException('This repository wallet is closed');
+        }
+        if (!repository.walletType.allowPurchaseIn) {
+          throw new BadRequestException(
+            'This repository does not accept installment repayments',
+          );
+        }
+
+        const fromWalletRef = await this.walletsService.getById(
+          userId,
+          fromWalletId,
+        );
+        if (fromWalletRef.closedAt) {
+          throw new BadRequestException('This wallet is closed');
+        }
+        this.assertNotBlocked(fromWalletRef);
+        if (!fromWalletRef.walletType.allowPurchaseOut) {
+          throw new ForbiddenException(
+            `${fromWalletRef.walletType.name} wallets cannot make purchases`,
+          );
+        }
+        if (
+          fromWalletRef.walletType.currencyId !==
+          repository.walletType.currencyId
+        ) {
+          throw new BadRequestException(
+            "The paying wallet's currency must match the repository's currency",
+          );
+        }
+
+        const unblockFee = creditWallet.blockedAt
+          ? BigInt(creditWallet.walletType.unblockFee ?? '0')
+          : 0n;
+        const chargeAmount = BigInt(installment.amount) + unblockFee;
+        this.walletsService.assertWithinTransactionLimits(
+          fromWalletRef,
+          chargeAmount,
+        );
+
+        const timeoutSeconds = DEFAULT_PURCHASE_TIMEOUT_SECONDS;
+        const expiresAt = new Date(Date.now() + timeoutSeconds * 1000);
+
+        const transaction = manager.create(Transaction, {
+          type: TransactionType.PURCHASE,
+          status: TransactionStatus.PENDING,
+          fromWalletId: fromWalletRef.id,
+          toWalletId: repository.id,
+          amount: chargeAmount.toString(),
+          idempotencyKey,
+          expiresAt,
+          installmentId: installment.id,
+        });
+        await manager.save(transaction);
+
+        const frontendUrl = this.configService.get<string>('frontendUrl');
+        const { authority, paymentUrl } =
+          await this.ipgClientService.createPayment({
+            merchantName: 'Installment repayment',
+            amount: transaction.amount,
+            displayAmount: formatAmount(
+              chargeAmount.toString(),
+              repository.walletType.currency,
             ),
             callbackUrl: `${frontendUrl}/purchase/${transaction.id}/callback`,
             timeoutSeconds,
@@ -737,6 +862,14 @@ export class TransactionsService {
 
       transaction.status = TransactionStatus.COMPLETED;
       await manager.save(transaction);
+
+      if (transaction.installmentId) {
+        await this.installmentsService.markPaid(
+          manager,
+          transaction.installmentId,
+          transaction.id,
+        );
+      }
 
       await this.loggingService.log({
         category: 'TRANSACTION',
@@ -1076,6 +1209,18 @@ export class TransactionsService {
     }
   }
 
+  // A wallet frozen by InstallmentsService.applyOverduePenalties can't send
+  // any money out (withdraw, transfer, purchase) until the overdue
+  // installment is repaid — see payInstallment. Incoming money (deposit,
+  // being paid) is unaffected.
+  private assertNotBlocked(wallet: { blockedAt: Date | null }): void {
+    if (wallet.blockedAt) {
+      throw new ForbiddenException(
+        'This wallet is blocked pending an overdue installment payment',
+      );
+    }
+  }
+
   // Fire-and-forget notification to the merchant's own registered webhook
   // once a purchase into this wallet completes — best-effort, never blocks
   // or fails the customer-facing verify response.
@@ -1243,7 +1388,8 @@ export class TransactionsService {
       | 'adjustment'
       | 'purchase_initiate'
       | 'purchase_charge'
-      | 'purchase_reverse',
+      | 'purchase_reverse'
+      | 'installment_pay',
     userId: string,
     payload: Record<string, unknown>,
     idempotencyKey: string,
