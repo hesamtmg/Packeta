@@ -11,6 +11,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { DataSource, EntityManager, In, LessThan, Repository } from 'typeorm';
 import { Wallet } from '../wallets/entities/wallet.entity';
+import { WalletTypeCode } from '../wallet-types/entities/wallet-type.entity';
 import { User } from '../users/entities/user.entity';
 import {
   Transaction,
@@ -902,6 +903,36 @@ export class TransactionsService {
       }
       const newToBalance =
         BigInt(toWallet.balance) + BigInt(transaction.amount);
+
+      // A credit wallet's balance is real money from the moment it's
+      // granted (see WalletsService.grantCredit), so this doesn't change
+      // what the payment below actually moves — it draws the same amount
+      // down from the wallet's own remaining virtual ceiling and logs that
+      // draw as its own ledger entry, so the credit line's outstanding
+      // balance keeps shrinking as it's spent instead of staying frozen at
+      // the original grant.
+      if (fromWalletRef.walletType.code === WalletTypeCode.CREDIT) {
+        const availableVirtual = fromWallet.virtualAmount
+          ? BigInt(fromWallet.virtualAmount)
+          : 0n;
+        const purchaseAmount = BigInt(transaction.amount);
+        const drawn =
+          purchaseAmount < availableVirtual ? purchaseAmount : availableVirtual;
+        if (drawn > 0n) {
+          await manager.update(Wallet, fromWallet.id, {
+            virtualAmount: (availableVirtual - drawn).toString(),
+          });
+          const creditDraw = manager.create(Transaction, {
+            type: TransactionType.TRANSFER,
+            fromWalletId: fromWallet.id,
+            toWalletId: fromWallet.id,
+            amount: drawn.toString(),
+            idempotencyKey: `credit-draw:${transaction.id}`,
+            note: 'Credit line drawn: virtual balance -> real balance',
+          });
+          await manager.save(creditDraw);
+        }
+      }
 
       await manager.update(Wallet, fromWallet.id, {
         balance: newFromBalance.toString(),
