@@ -36,24 +36,19 @@ function buildService(options: {
   return { service, installmentsRepository, walletsRepository };
 }
 
-describe('InstallmentsService.computeInstallmentAmount', () => {
+describe('InstallmentsService.computeInstallmentPrincipal', () => {
   const { service } = buildService({});
 
   it('splits evenly when the amount divides cleanly', () => {
-    expect(service.computeInstallmentAmount(1000n, 4, 1, 0n)).toBe(250n);
-    expect(service.computeInstallmentAmount(1000n, 4, 4, 0n)).toBe(250n);
+    expect(service.computeInstallmentPrincipal(1000n, 4, 1)).toBe(250n);
+    expect(service.computeInstallmentPrincipal(1000n, 4, 4)).toBe(250n);
   });
 
   it('folds the remainder into the last installment only', () => {
     // 1000 / 3 = 333 remainder 1
-    expect(service.computeInstallmentAmount(1000n, 3, 1, 0n)).toBe(333n);
-    expect(service.computeInstallmentAmount(1000n, 3, 2, 0n)).toBe(333n);
-    expect(service.computeInstallmentAmount(1000n, 3, 3, 0n)).toBe(334n);
-  });
-
-  it('adds the flat fee on every installment, including the last', () => {
-    expect(service.computeInstallmentAmount(1000n, 3, 1, 50n)).toBe(383n);
-    expect(service.computeInstallmentAmount(1000n, 3, 3, 50n)).toBe(384n);
+    expect(service.computeInstallmentPrincipal(1000n, 3, 1)).toBe(333n);
+    expect(service.computeInstallmentPrincipal(1000n, 3, 2)).toBe(333n);
+    expect(service.computeInstallmentPrincipal(1000n, 3, 3)).toBe(334n);
   });
 });
 
@@ -92,7 +87,7 @@ describe('InstallmentsService.generateDue', () => {
     virtualAmount: '900',
     walletType: {
       installmentCount: 3,
-      fee: '10',
+      feePercent: '10',
       paymentDeadlineDate: 15,
     },
   };
@@ -111,7 +106,8 @@ describe('InstallmentsService.generateDue', () => {
       expect.objectContaining({
         walletId: 'wallet-1',
         sequenceNumber: 1,
-        amount: '310', // 900/3 + fee 10
+        principalAmount: '300', // 900/3
+        amount: '330', // principal 300 + 10% fee (30)
         status: InstallmentStatus.PENDING,
       }),
     );
@@ -151,26 +147,31 @@ describe('InstallmentsService.generateDue', () => {
 });
 
 describe('InstallmentsService.applyOverduePenalties', () => {
-  it('adds the penalty, marks OVERDUE, and blocks a not-yet-blocked wallet', async () => {
+  it('adds 5 days worth of penalty, marks OVERDUE, and blocks a not-yet-blocked wallet', async () => {
     const row = {
       id: 'installment-1',
-      amount: '300',
+      amount: '1000',
+      principalAmount: '1000',
       penaltyApplied: false,
+      penaltyDaysApplied: 0,
       status: InstallmentStatus.PENDING,
+      deadlineDate: '2026-01-15',
       wallet: {
         id: 'wallet-1',
         blockedAt: null,
-        walletType: { penalty: '25' },
+        walletType: { penaltyPercentPerDay: '2' },
       },
     };
     const { service, installmentsRepository, walletsRepository } = buildService(
       { overdueRows: [row] },
     );
 
+    // 5 days past deadline, 2%/day of the 1000 principal = 100
     const count = await service.applyOverduePenalties(new Date(2026, 0, 20));
 
     expect(count).toBe(1);
-    expect(row.amount).toBe('325');
+    expect(row.amount).toBe('1100');
+    expect(row.penaltyDaysApplied).toBe(5);
     expect(row.status).toBe(InstallmentStatus.OVERDUE);
     expect(row.penaltyApplied).toBe(true);
     expect(installmentsRepository.save).toHaveBeenCalledWith(row);
@@ -180,16 +181,69 @@ describe('InstallmentsService.applyOverduePenalties', () => {
     );
   });
 
+  it('only charges the additional days owed on a run that follows an earlier one', async () => {
+    const row = {
+      id: 'installment-3',
+      amount: '1040', // already charged 2 days (2 * 20) on an earlier run
+      principalAmount: '1000',
+      penaltyApplied: true,
+      penaltyDaysApplied: 2,
+      status: InstallmentStatus.OVERDUE,
+      deadlineDate: '2026-01-15',
+      wallet: {
+        id: 'wallet-3',
+        blockedAt: new Date(2026, 0, 17),
+        walletType: { penaltyPercentPerDay: '2' },
+      },
+    };
+    const { service } = buildService({ overdueRows: [row] });
+
+    // Now 5 days past deadline — only 3 more days owed, not 5 again.
+    await service.applyOverduePenalties(new Date(2026, 0, 20));
+
+    expect(row.amount).toBe('1100');
+    expect(row.penaltyDaysApplied).toBe(5);
+  });
+
+  it('is a no-op when penalty for every elapsed day was already applied', async () => {
+    const row = {
+      id: 'installment-4',
+      amount: '1100',
+      principalAmount: '1000',
+      penaltyApplied: true,
+      penaltyDaysApplied: 5,
+      status: InstallmentStatus.OVERDUE,
+      deadlineDate: '2026-01-15',
+      wallet: {
+        id: 'wallet-4',
+        blockedAt: new Date(2026, 0, 17),
+        walletType: { penaltyPercentPerDay: '2' },
+      },
+    };
+    const { service, installmentsRepository } = buildService({
+      overdueRows: [row],
+    });
+
+    const count = await service.applyOverduePenalties(new Date(2026, 0, 20));
+
+    expect(count).toBe(0);
+    expect(row.amount).toBe('1100');
+    expect(installmentsRepository.save).not.toHaveBeenCalled();
+  });
+
   it('does not re-block a wallet that is already blocked', async () => {
     const row = {
       id: 'installment-2',
-      amount: '300',
+      amount: '1000',
+      principalAmount: '1000',
       penaltyApplied: false,
+      penaltyDaysApplied: 0,
       status: InstallmentStatus.PENDING,
+      deadlineDate: '2026-01-15',
       wallet: {
         id: 'wallet-2',
         blockedAt: new Date(2026, 0, 10),
-        walletType: { penalty: '25' },
+        walletType: { penaltyPercentPerDay: '2' },
       },
     };
     const { service, walletsRepository } = buildService({

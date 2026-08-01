@@ -94,8 +94,11 @@ export class WalletTypesService {
       hasVirtualBalance: dto.hasVirtualBalance ?? false,
       installmentDate: dto.installmentDate ?? null,
       paymentDeadlineDate: dto.paymentDeadlineDate ?? null,
-      fee: dto.fee !== undefined ? String(dto.fee) : null,
-      penalty: dto.penalty !== undefined ? String(dto.penalty) : null,
+      feePercent: dto.feePercent !== undefined ? String(dto.feePercent) : null,
+      penaltyPercentPerDay:
+        dto.penaltyPercentPerDay !== undefined
+          ? String(dto.penaltyPercentPerDay)
+          : null,
       unblockFee: dto.unblockFee !== undefined ? String(dto.unblockFee) : null,
       installmentCount: dto.installmentCount ?? null,
     });
@@ -182,11 +185,11 @@ export class WalletTypesService {
     if (dto.paymentDeadlineDate !== undefined) {
       type.paymentDeadlineDate = dto.paymentDeadlineDate;
     }
-    if (dto.fee !== undefined) {
-      type.fee = String(dto.fee);
+    if (dto.feePercent !== undefined) {
+      type.feePercent = String(dto.feePercent);
     }
-    if (dto.penalty !== undefined) {
-      type.penalty = String(dto.penalty);
+    if (dto.penaltyPercentPerDay !== undefined) {
+      type.penaltyPercentPerDay = String(dto.penaltyPercentPerDay);
     }
     if (dto.unblockFee !== undefined) {
       type.unblockFee = String(dto.unblockFee);

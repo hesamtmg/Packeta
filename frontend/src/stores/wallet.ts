@@ -24,8 +24,8 @@ export interface WalletType {
   // rules for every wallet of this type.
   installmentDate: number | null;
   paymentDeadlineDate: number | null;
-  fee: string | null;
-  penalty: string | null;
+  feePercent: string | null;
+  penaltyPercentPerDay: string | null;
   unblockFee: string | null;
   installmentCount: number | null;
 }
@@ -139,7 +139,9 @@ export interface Installment {
   walletId: string;
   sequenceNumber: number;
   amount: string;
+  principalAmount: string;
   penaltyApplied: boolean;
+  penaltyDaysApplied: number;
   dueDate: string;
   deadlineDate: string;
   status: 'PENDING' | 'OVERDUE' | 'PAID';

@@ -54,8 +54,8 @@ export function serializeWallet(
       hasVirtualBalance: wallet.walletType.hasVirtualBalance,
       installmentDate: wallet.walletType.installmentDate,
       paymentDeadlineDate: wallet.walletType.paymentDeadlineDate,
-      fee: wallet.walletType.fee,
-      penalty: wallet.walletType.penalty,
+      feePercent: wallet.walletType.feePercent,
+      penaltyPercentPerDay: wallet.walletType.penaltyPercentPerDay,
       unblockFee: wallet.walletType.unblockFee,
       installmentCount: wallet.walletType.installmentCount,
       currency: {

@@ -21,7 +21,7 @@ export class InstallmentSweepService {
 
     const overdue = await this.installmentsService.applyOverduePenalties();
     if (overdue) {
-      this.logger.log(`Marked ${overdue} installment(s) OVERDUE`);
+      this.logger.log(`Applied overdue penalty to ${overdue} installment(s)`);
     }
   }
 }
