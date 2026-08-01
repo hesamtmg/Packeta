@@ -32,6 +32,29 @@ interface WalletType {
   penalty: string | null;
   unblockFee: string | null;
   installmentCount: number | null;
+  // UI-only: whether the credit-line fields section is expanded for this
+  // card — not sent to the backend, mirrors the supportsAutoWithdraw ->
+  // autoWithdrawTimes visibility pattern. Defaults to expanded when the type
+  // already has any credit-line field set.
+  enableCreditLine?: boolean;
+}
+
+function hasCreditLineFields(type: {
+  installmentDate: number | null;
+  paymentDeadlineDate: number | null;
+  fee: string | null;
+  penalty: string | null;
+  unblockFee: string | null;
+  installmentCount: number | null;
+}): boolean {
+  return (
+    type.installmentDate != null ||
+    type.paymentDeadlineDate != null ||
+    type.fee != null ||
+    type.penalty != null ||
+    type.unblockFee != null ||
+    type.installmentCount != null
+  );
 }
 
 const types = ref<WalletType[]>([]);
@@ -59,6 +82,7 @@ const newType = reactive({
   allowPurchaseOut: false,
   allowPurchaseIn: false,
   depositable: true,
+  enableCreditLine: false,
   installmentDate: '',
   paymentDeadlineDate: '',
   fee: '',
@@ -117,6 +141,7 @@ async function loadTypes() {
     types.value = loaded.map((type) => ({
       ...type,
       autoWithdrawTimes: type.autoWithdrawTimes ?? ['', '', ''],
+      enableCreditLine: hasCreditLineFields(type),
     }));
     currencies.value = loadedCurrencies;
   } catch (err) {
@@ -144,12 +169,17 @@ async function save(type: WalletType) {
         allowPurchaseOut: type.allowPurchaseOut,
         allowPurchaseIn: type.allowPurchaseIn,
         depositable: type.depositable,
-        installmentDate: type.installmentDate ?? undefined,
-        paymentDeadlineDate: type.paymentDeadlineDate ?? undefined,
-        fee: type.fee ? Number(type.fee) : undefined,
-        penalty: type.penalty ? Number(type.penalty) : undefined,
-        unblockFee: type.unblockFee ? Number(type.unblockFee) : undefined,
-        installmentCount: type.installmentCount ?? undefined,
+        installmentDate: type.enableCreditLine ? type.installmentDate ?? undefined : undefined,
+        paymentDeadlineDate: type.enableCreditLine
+          ? type.paymentDeadlineDate ?? undefined
+          : undefined,
+        fee: type.enableCreditLine && type.fee ? Number(type.fee) : undefined,
+        penalty: type.enableCreditLine && type.penalty ? Number(type.penalty) : undefined,
+        unblockFee:
+          type.enableCreditLine && type.unblockFee ? Number(type.unblockFee) : undefined,
+        installmentCount: type.enableCreditLine
+          ? type.installmentCount ?? undefined
+          : undefined,
       },
     });
     await loadTypes();
@@ -197,22 +227,30 @@ async function createType() {
         allowPurchaseOut: newType.allowPurchaseOut,
         allowPurchaseIn: newType.allowPurchaseIn,
         depositable: newType.depositable,
-        installmentDate: newType.installmentDate
-          ? Number(newType.installmentDate)
-          : undefined,
-        paymentDeadlineDate: newType.paymentDeadlineDate
-          ? Number(newType.paymentDeadlineDate)
-          : undefined,
-        fee: newType.fee && currency ? toMinorUnits(newType.fee, currency) : undefined,
+        installmentDate:
+          newType.enableCreditLine && newType.installmentDate
+            ? Number(newType.installmentDate)
+            : undefined,
+        paymentDeadlineDate:
+          newType.enableCreditLine && newType.paymentDeadlineDate
+            ? Number(newType.paymentDeadlineDate)
+            : undefined,
+        fee:
+          newType.enableCreditLine && newType.fee && currency
+            ? toMinorUnits(newType.fee, currency)
+            : undefined,
         penalty:
-          newType.penalty && currency ? toMinorUnits(newType.penalty, currency) : undefined,
+          newType.enableCreditLine && newType.penalty && currency
+            ? toMinorUnits(newType.penalty, currency)
+            : undefined,
         unblockFee:
-          newType.unblockFee && currency
+          newType.enableCreditLine && newType.unblockFee && currency
             ? toMinorUnits(newType.unblockFee, currency)
             : undefined,
-        installmentCount: newType.installmentCount
-          ? Number(newType.installmentCount)
-          : undefined,
+        installmentCount:
+          newType.enableCreditLine && newType.installmentCount
+            ? Number(newType.installmentCount)
+            : undefined,
       },
     });
     newType.code = '';
@@ -228,6 +266,7 @@ async function createType() {
     newType.allowPurchaseOut = false;
     newType.allowPurchaseIn = false;
     newType.depositable = true;
+    newType.enableCreditLine = false;
     newType.installmentDate = '';
     newType.paymentDeadlineDate = '';
     newType.fee = '';
@@ -288,30 +327,36 @@ loadTypes();
           <label class="checkbox-label"><input v-model="wt.depositable" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.depositableLabel') }}</label>
 
           <span class="section-label">{{ t('admin.walletTypes.creditLineHeading') }}</span>
-          <label>
-            {{ t('admin.walletTypes.installmentDateLabel') }}
-            <input v-model.number="wt.installmentDate" type="number" min="1" max="31" class="admin-input" :disabled="!auth.isSuperAdmin" />
+          <label class="checkbox-label">
+            <input v-model="wt.enableCreditLine" type="checkbox" :disabled="!auth.isSuperAdmin" />
+            {{ t('admin.walletTypes.enableCreditLineLabel') }}
           </label>
-          <label>
-            {{ t('admin.walletTypes.paymentDeadlineDateLabel') }}
-            <input v-model.number="wt.paymentDeadlineDate" type="number" min="1" max="31" class="admin-input" :disabled="!auth.isSuperAdmin" />
-          </label>
-          <label>
-            {{ t('admin.walletTypes.installmentCountLabel') }}
-            <input v-model.number="wt.installmentCount" type="number" min="1" class="admin-input" :disabled="!auth.isSuperAdmin" />
-          </label>
-          <label>
-            {{ t('admin.walletTypes.feeLabel', { code: wt.currency.code }) }}
-            <input :value="moneyFieldDisplay(wt, 'fee')" type="number" min="0" :step="amountStep(wt.currency)" class="admin-input" :disabled="!auth.isSuperAdmin" @input="onMoneyFieldInput(wt, 'fee', $event)" />
-          </label>
-          <label>
-            {{ t('admin.walletTypes.penaltyLabel', { code: wt.currency.code }) }}
-            <input :value="moneyFieldDisplay(wt, 'penalty')" type="number" min="0" :step="amountStep(wt.currency)" class="admin-input" :disabled="!auth.isSuperAdmin" @input="onMoneyFieldInput(wt, 'penalty', $event)" />
-          </label>
-          <label>
-            {{ t('admin.walletTypes.unblockFeeLabel', { code: wt.currency.code }) }}
-            <input :value="moneyFieldDisplay(wt, 'unblockFee')" type="number" min="0" :step="amountStep(wt.currency)" class="admin-input" :disabled="!auth.isSuperAdmin" @input="onMoneyFieldInput(wt, 'unblockFee', $event)" />
-          </label>
+          <template v-if="wt.enableCreditLine">
+            <label>
+              {{ t('admin.walletTypes.installmentDateLabel') }}
+              <input v-model.number="wt.installmentDate" type="number" min="1" max="31" class="admin-input" :disabled="!auth.isSuperAdmin" />
+            </label>
+            <label>
+              {{ t('admin.walletTypes.paymentDeadlineDateLabel') }}
+              <input v-model.number="wt.paymentDeadlineDate" type="number" min="1" max="31" class="admin-input" :disabled="!auth.isSuperAdmin" />
+            </label>
+            <label>
+              {{ t('admin.walletTypes.installmentCountLabel') }}
+              <input v-model.number="wt.installmentCount" type="number" min="1" class="admin-input" :disabled="!auth.isSuperAdmin" />
+            </label>
+            <label>
+              {{ t('admin.walletTypes.feeLabel', { code: wt.currency.code }) }}
+              <input :value="moneyFieldDisplay(wt, 'fee')" type="number" min="0" :step="amountStep(wt.currency)" class="admin-input" :disabled="!auth.isSuperAdmin" @input="onMoneyFieldInput(wt, 'fee', $event)" />
+            </label>
+            <label>
+              {{ t('admin.walletTypes.penaltyLabel', { code: wt.currency.code }) }}
+              <input :value="moneyFieldDisplay(wt, 'penalty')" type="number" min="0" :step="amountStep(wt.currency)" class="admin-input" :disabled="!auth.isSuperAdmin" @input="onMoneyFieldInput(wt, 'penalty', $event)" />
+            </label>
+            <label>
+              {{ t('admin.walletTypes.unblockFeeLabel', { code: wt.currency.code }) }}
+              <input :value="moneyFieldDisplay(wt, 'unblockFee')" type="number" min="0" :step="amountStep(wt.currency)" class="admin-input" :disabled="!auth.isSuperAdmin" @input="onMoneyFieldInput(wt, 'unblockFee', $event)" />
+            </label>
+          </template>
 
           <div v-if="auth.isSuperAdmin" class="type-card-actions">
             <button class="admin-btn admin-btn-primary" :disabled="busy" @click="save(wt)">{{ t('admin.walletTypes.save') }}</button>
@@ -378,30 +423,36 @@ loadTypes();
       <label class="checkbox-label"><input v-model="newType.depositable" type="checkbox" /> {{ t('admin.walletTypes.depositableLabel') }}</label>
 
       <span class="section-label">{{ t('admin.walletTypes.creditLineHeading') }}</span>
-      <label>
-        {{ t('admin.walletTypes.installmentDateLabel') }}
-        <input v-model="newType.installmentDate" type="number" min="1" max="31" class="admin-input" />
+      <label class="checkbox-label">
+        <input v-model="newType.enableCreditLine" type="checkbox" />
+        {{ t('admin.walletTypes.enableCreditLineLabel') }}
       </label>
-      <label>
-        {{ t('admin.walletTypes.paymentDeadlineDateLabel') }}
-        <input v-model="newType.paymentDeadlineDate" type="number" min="1" max="31" class="admin-input" />
-      </label>
-      <label>
-        {{ t('admin.walletTypes.installmentCountLabel') }}
-        <input v-model="newType.installmentCount" type="number" min="1" class="admin-input" />
-      </label>
-      <label>
-        {{ t('admin.walletTypes.feeLabel', { code: newType.currencyCode || '…' }) }}
-        <input v-model="newType.fee" type="number" min="0" :step="newTypeCurrency ? amountStep(newTypeCurrency) : '0.01'" class="admin-input" />
-      </label>
-      <label>
-        {{ t('admin.walletTypes.penaltyLabel', { code: newType.currencyCode || '…' }) }}
-        <input v-model="newType.penalty" type="number" min="0" :step="newTypeCurrency ? amountStep(newTypeCurrency) : '0.01'" class="admin-input" />
-      </label>
-      <label>
-        {{ t('admin.walletTypes.unblockFeeLabel', { code: newType.currencyCode || '…' }) }}
-        <input v-model="newType.unblockFee" type="number" min="0" :step="newTypeCurrency ? amountStep(newTypeCurrency) : '0.01'" class="admin-input" />
-      </label>
+      <template v-if="newType.enableCreditLine">
+        <label>
+          {{ t('admin.walletTypes.installmentDateLabel') }}
+          <input v-model="newType.installmentDate" type="number" min="1" max="31" class="admin-input" />
+        </label>
+        <label>
+          {{ t('admin.walletTypes.paymentDeadlineDateLabel') }}
+          <input v-model="newType.paymentDeadlineDate" type="number" min="1" max="31" class="admin-input" />
+        </label>
+        <label>
+          {{ t('admin.walletTypes.installmentCountLabel') }}
+          <input v-model="newType.installmentCount" type="number" min="1" class="admin-input" />
+        </label>
+        <label>
+          {{ t('admin.walletTypes.feeLabel', { code: newType.currencyCode || '…' }) }}
+          <input v-model="newType.fee" type="number" min="0" :step="newTypeCurrency ? amountStep(newTypeCurrency) : '0.01'" class="admin-input" />
+        </label>
+        <label>
+          {{ t('admin.walletTypes.penaltyLabel', { code: newType.currencyCode || '…' }) }}
+          <input v-model="newType.penalty" type="number" min="0" :step="newTypeCurrency ? amountStep(newTypeCurrency) : '0.01'" class="admin-input" />
+        </label>
+        <label>
+          {{ t('admin.walletTypes.unblockFeeLabel', { code: newType.currencyCode || '…' }) }}
+          <input v-model="newType.unblockFee" type="number" min="0" :step="newTypeCurrency ? amountStep(newTypeCurrency) : '0.01'" class="admin-input" />
+        </label>
+      </template>
 
       <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('admin.walletTypes.create') }}</button>
     </form>

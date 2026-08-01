@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { WalletType } from './entities/wallet-type.entity';
+import { WalletType, WalletTypeCode } from './entities/wallet-type.entity';
 import { Wallet } from '../wallets/entities/wallet.entity';
 import { CurrenciesService } from '../currencies/currencies.service';
 import { CreateWalletTypeDto } from './dto/create-wallet-type.dto';
@@ -64,6 +64,14 @@ export class WalletTypesService {
     if (dto.autoWithdrawTimes?.length && !dto.supportsAutoWithdraw) {
       throw new BadRequestException(
         'supportsAutoWithdraw must be true to set autoWithdrawTimes',
+      );
+    }
+    if (
+      dto.code === WalletTypeCode.REPOSITORY &&
+      (dto.allowWithdraw || dto.supportsAutoWithdraw)
+    ) {
+      throw new BadRequestException(
+        'REPOSITORY wallets cannot allow withdrawals or auto-withdraw settlement — they only hold real (IPG) and virtual (manual) balances',
       );
     }
 
@@ -131,6 +139,16 @@ export class WalletTypesService {
       // clear them too, since a stale schedule on a type that can no longer
       // sweep would otherwise linger invisibly.
       type.autoWithdrawTimes = null;
+    }
+
+    const allowWithdraw = dto.allowWithdraw ?? type.allowWithdraw;
+    if (
+      type.code === WalletTypeCode.REPOSITORY &&
+      (allowWithdraw || supportsAutoWithdraw)
+    ) {
+      throw new BadRequestException(
+        'REPOSITORY wallets cannot allow withdrawals or auto-withdraw settlement — they only hold real (IPG) and virtual (manual) balances',
+      );
     }
 
     if (dto.name !== undefined) type.name = dto.name;

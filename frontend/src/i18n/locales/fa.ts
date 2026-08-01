@@ -349,6 +349,7 @@ export default {
       canReceivePurchaseLabel: 'امکان دریافت خرید (فروشنده)',
       depositableLabel: 'امکان واریز',
       creditLineHeading: 'تنظیمات خط اعتباری / اقساط (اختیاری)',
+      enableCreditLineLabel: 'فعال‌سازی خط اعتباری / اقساط',
       installmentDateLabel: 'روز تولید قسط (۱ تا ۳۱)',
       paymentDeadlineDateLabel: 'روز مهلت پرداخت (۱ تا ۳۱)',
       installmentCountLabel: 'تعداد اقساط',

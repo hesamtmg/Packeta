@@ -349,6 +349,7 @@ export default {
       canReceivePurchaseLabel: 'Can receive purchases (merchant)',
       depositableLabel: 'Accepts deposits',
       creditLineHeading: 'Credit-line / installment settings (optional)',
+      enableCreditLineLabel: 'Enable credit-line / installments',
       installmentDateLabel: 'Installment generation day (1-31)',
       paymentDeadlineDateLabel: 'Payment deadline day (1-31)',
       installmentCountLabel: 'Number of installments',
