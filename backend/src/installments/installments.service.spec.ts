@@ -3,14 +3,19 @@ import { InstallmentStatus } from './entities/installment.entity';
 
 function buildService(options: {
   wallets?: any[];
-  existingBySourceTransaction?: Record<string, any[]>;
+  // walletId -> periodEnd ("YYYY-MM-DD") -> already-generated rows for that
+  // batch, mirroring the { walletId, periodEnd } lookup generateDue uses to
+  // skip a period it's already generated.
+  existingByWalletAndPeriodEnd?: Record<string, Record<string, any[]>>;
   overdueRows?: any[];
-  grantsByWallet?: Record<string, any>;
+  // walletId -> the SUM(t.amount) generateDue's raw query would return for
+  // that wallet's VIRTUAL transactions within the collection window.
+  virtualSumByWallet?: Record<string, string>;
 }) {
   const installmentsRepository = {
     find: jest.fn(
-      async ({ where: { sourceTransactionId } }: any) =>
-        options.existingBySourceTransaction?.[sourceTransactionId] ?? [],
+      async ({ where: { walletId, periodEnd } }: any) =>
+        options.existingByWalletAndPeriodEnd?.[walletId]?.[periodEnd] ?? [],
     ),
     create: jest.fn((data: any) => ({ ...data })),
     save: jest.fn(async (data: any) => ({ id: 'installment-1', ...data })),
@@ -30,11 +35,22 @@ function buildService(options: {
       getMany: jest.fn(async () => options.wallets ?? []),
     })),
   };
+  let lastWalletIdQueried: string | undefined;
   const transactionsRepository = {
-    findOne: jest.fn(
-      async ({ where: { toWalletId } }: any) =>
-        options.grantsByWallet?.[toWalletId] ?? null,
-    ),
+    createQueryBuilder: jest.fn(() => {
+      const builder: any = {
+        select: jest.fn(() => builder),
+        where: jest.fn(() => builder),
+        andWhere: jest.fn((_cond: string, params: any) => {
+          if (params?.walletId) lastWalletIdQueried = params.walletId;
+          return builder;
+        }),
+        getRawOne: jest.fn(async () => ({
+          total: options.virtualSumByWallet?.[lastWalletIdQueried!] ?? '0',
+        })),
+      };
+      return builder;
+    }),
   };
   const service = new InstallmentsService(
     installmentsRepository as any,
@@ -104,44 +120,55 @@ describe('InstallmentsService.generateDue', () => {
       paymentDeadlineDate: 15,
     },
   };
-  // The VIRTUAL transaction WalletsService.grantCredit recorded when this
-  // wallet was granted its credit line — the fixed amount generateDue now
-  // splits, instead of the wallet's live (and here deliberately absent)
-  // virtualAmount.
-  const grant = {
-    id: 'grant-tx-1',
-    fromWalletId: 'repo-1',
-    toWalletId: 'wallet-1',
-    amount: '900',
-  };
 
-  it('generates the next installment for an eligible wallet with none yet', async () => {
+  it("sums the wallet's own VIRTUAL transactions over the one-month window and splits that total across a full installmentCount batch, spread one month apart", async () => {
     const { service, installmentsRepository } = buildService({
       wallets: [wallet],
-      grantsByWallet: { 'wallet-1': grant },
-      existingBySourceTransaction: {},
+      virtualSumByWallet: { 'wallet-1': '900' },
     });
 
-    const today = new Date(2026, 0, 1);
+    const today = new Date(2026, 0, 1); // Jan 1, 2026
     const created = await service.generateDue(today);
 
-    expect(created).toHaveLength(1);
-    expect(installmentsRepository.create).toHaveBeenCalledWith(
+    expect(created).toHaveLength(3);
+    expect(installmentsRepository.create).toHaveBeenNthCalledWith(
+      1,
       expect.objectContaining({
         walletId: 'wallet-1',
-        sourceTransactionId: 'grant-tx-1',
         sequenceNumber: 1,
         principalAmount: '300', // 900/3
         amount: '330', // principal 300 + 10% fee (30)
+        periodStart: '2025-12-01',
+        periodEnd: '2026-01-01',
+        dueDate: '2026-01-01',
+        deadlineDate: '2026-01-15',
         status: InstallmentStatus.PENDING,
+      }),
+    );
+    expect(installmentsRepository.create).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        sequenceNumber: 2,
+        principalAmount: '300',
+        dueDate: '2026-02-01',
+        deadlineDate: '2026-02-15',
+      }),
+    );
+    expect(installmentsRepository.create).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        sequenceNumber: 3,
+        principalAmount: '300',
+        dueDate: '2026-03-01',
+        deadlineDate: '2026-03-15',
       }),
     );
   });
 
-  it('skips a wallet with no VIRTUAL grant transaction on record', async () => {
+  it('skips a wallet with no VIRTUAL activity in the collection window', async () => {
     const { service, installmentsRepository } = buildService({
       wallets: [wallet],
-      grantsByWallet: {},
+      virtualSumByWallet: {},
     });
 
     const created = await service.generateDue(new Date(2026, 0, 1));
@@ -150,31 +177,12 @@ describe('InstallmentsService.generateDue', () => {
     expect(installmentsRepository.create).not.toHaveBeenCalled();
   });
 
-  it('skips a wallet that already has every installment generated', async () => {
+  it('skips a wallet that already has a batch generated for a period ending today', async () => {
     const { service, installmentsRepository } = buildService({
       wallets: [wallet],
-      grantsByWallet: { 'wallet-1': grant },
-      existingBySourceTransaction: {
-        'grant-tx-1': [
-          { dueDate: '2025-11-01' },
-          { dueDate: '2025-12-01' },
-          { dueDate: '2025-10-01' },
-        ],
-      },
-    });
-
-    const created = await service.generateDue(new Date(2026, 0, 1));
-
-    expect(created).toHaveLength(0);
-    expect(installmentsRepository.create).not.toHaveBeenCalled();
-  });
-
-  it("is idempotent within the same day (doesn't double-generate)", async () => {
-    const { service, installmentsRepository } = buildService({
-      wallets: [wallet],
-      grantsByWallet: { 'wallet-1': grant },
-      existingBySourceTransaction: {
-        'grant-tx-1': [{ dueDate: '2026-01-01' }],
+      virtualSumByWallet: { 'wallet-1': '900' },
+      existingByWalletAndPeriodEnd: {
+        'wallet-1': { '2026-01-01': [{ sequenceNumber: 1 }] },
       },
     });
 
