@@ -1249,7 +1249,7 @@ describe('TransactionsService.verifyPurchase', () => {
 
     const pendingPurchase = {
       id: 'installment-tx-1',
-      type: TransactionType.PURCHASE,
+      type: TransactionType.DEPOSIT,
       status: 'PENDING',
       fromWalletId: null,
       toWalletId: repositoryWallet.id,
@@ -1682,6 +1682,7 @@ describe('TransactionsService.payInstallment', () => {
     );
     expect(manager.save).toHaveBeenCalledWith(
       expect.objectContaining({
+        type: TransactionType.DEPOSIT,
         toWalletId: 'repo-1',
         fromWalletId: null,
         amount: '400',

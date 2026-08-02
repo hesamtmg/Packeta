@@ -585,7 +585,7 @@ export class TransactionsService {
         const expiresAt = new Date(Date.now() + timeoutSeconds * 1000);
 
         const transaction = manager.create(Transaction, {
-          type: TransactionType.PURCHASE,
+          type: TransactionType.DEPOSIT,
           status: TransactionStatus.PENDING,
           fromWalletId: null,
           toWalletId: repository.id,
