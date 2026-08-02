@@ -12,10 +12,11 @@ interface ZarinpalVerifyResponse {
   errors: { code?: number; message?: string } | [];
 }
 
-// Real-money client for ZarinPal (https://www.zarinpal.com), used only for
-// deposits — see TransactionsService.deposit/verifyPurchase. Unlike the
-// in-house sandbox IPG (ipg-client.service.ts), a deposit only completes once
-// an actual outside payment gateway confirms it. Defaults to ZarinPal's
+// Real-money client for ZarinPal (https://www.zarinpal.com), used for
+// deposits and installment repayments — see
+// TransactionsService.deposit/payInstallment/verifyPurchase. Unlike the
+// in-house sandbox IPG (ipg-client.service.ts), these only complete once an
+// actual outside payment gateway confirms them. Defaults to ZarinPal's
 // public sandbox (sandbox.zarinpal.com), which accepts any well-formed
 // merchant id and settles no real money — point ZARINPAL_BASE_URL /
 // ZARINPAL_MERCHANT_ID at production values to go live.

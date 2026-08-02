@@ -1110,6 +1110,60 @@ describe('TransactionsService.verifyPurchase', () => {
       expect.objectContaining({ type: TransactionType.TRANSFER }),
     );
   });
+
+  it('verifies an installment repayment through ZarinPal (not the sandbox IPG) and marks the installment paid', async () => {
+    const repositoryWallet: WalletFixture = {
+      id: 'repo-1',
+      balance: '1000',
+      walletType: walletType({ name: 'Repository', allowPurchaseIn: true }),
+    };
+    const installmentsService = { markPaid: jest.fn(async () => undefined) };
+    const { service, manager, ipgClientService, zarinpalClientService } =
+      buildService({
+        senderWallet: repositoryWallet,
+        installmentsService: installmentsService as any,
+      });
+
+    const pendingPurchase = {
+      id: 'installment-tx-1',
+      type: TransactionType.PURCHASE,
+      status: 'PENDING',
+      fromWalletId: null,
+      toWalletId: repositoryWallet.id,
+      amount: '400',
+      installmentId: 'installment-1',
+      expiresAt: null,
+      ipgAuthority: 'zarinpal-auth-1',
+    };
+    manager.createQueryBuilder = jest.fn(() => {
+      const builder: any = {
+        setLock: () => builder,
+        where: () => builder,
+        andWhere: () => builder,
+        getOne: async () => pendingPurchase,
+      };
+      return builder;
+    });
+
+    const result = await service.verifyPurchase('installment-tx-1');
+
+    expect(result.status).toBe('COMPLETED');
+    expect(zarinpalClientService.verifyPayment).toHaveBeenCalledWith(
+      'zarinpal-auth-1',
+      '400',
+    );
+    expect(ipgClientService.verifyPayment).not.toHaveBeenCalled();
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      repositoryWallet.id,
+      { balance: '1400' },
+    );
+    expect(installmentsService.markPaid).toHaveBeenCalledWith(
+      manager,
+      'installment-1',
+      'installment-tx-1',
+    );
+  });
 });
 
 describe('TransactionsService.sweepAutoWithdraw', () => {
@@ -1364,7 +1418,9 @@ describe('TransactionsService.payInstallment', () => {
       'idem-inst-5',
     );
 
-    expect(result.redirectUrl).toBe('http://ipg/pay/auth-1');
+    expect(result.redirectUrl).toBe(
+      'https://sandbox.zarinpal.com/pg/StartPay/zarinpal-auth-1',
+    );
     expect(manager.save).toHaveBeenCalledWith(
       expect.objectContaining({
         toWalletId: 'repo-1',

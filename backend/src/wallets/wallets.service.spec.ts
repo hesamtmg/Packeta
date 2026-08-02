@@ -142,6 +142,37 @@ describe('WalletsService.closeForUser', () => {
   });
 });
 
+describe('WalletsService.reopenAsAdmin', () => {
+  it('rejects reopening a wallet that is not closed', async () => {
+    const { service } = buildService({
+      id: 'wallet-1',
+      userId: 'user-1',
+      balance: '0',
+      closedAt: null,
+    });
+
+    await expect(service.reopenAsAdmin('wallet-1')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
+  it('clears closedAt on a closed wallet', async () => {
+    const { service, walletsRepository } = buildService({
+      id: 'wallet-1',
+      userId: 'user-1',
+      balance: '0',
+      closedAt: new Date(),
+    });
+
+    const result = await service.reopenAsAdmin('wallet-1');
+
+    expect(walletsRepository.update).toHaveBeenCalledWith('wallet-1', {
+      closedAt: null,
+    });
+    expect(result.closedAt).toBeNull();
+  });
+});
+
 describe('WalletsService.assertWithinTransactionLimits', () => {
   const service = new WalletsService(
     {} as any,

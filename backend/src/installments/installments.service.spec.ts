@@ -255,3 +255,53 @@ describe('InstallmentsService.applyOverduePenalties', () => {
     expect(walletsRepository.update).not.toHaveBeenCalled();
   });
 });
+
+describe('InstallmentsService.markPaid', () => {
+  function buildManager(installment: any, wallet: any) {
+    return {
+      update: jest.fn(async () => undefined),
+      findOne: jest.fn(async (_entity: any, { where: { id } }: any) => {
+        if (id === installment.id) return installment;
+        if (id === wallet.id) return wallet;
+        return null;
+      }),
+    };
+  }
+
+  it('marks the installment paid, clears the block, and restores virtualAmount by the installment amount', async () => {
+    const { service } = buildService({});
+    const installment = {
+      id: 'installment-1',
+      walletId: 'wallet-1',
+      amount: '330',
+    };
+    const wallet = { id: 'wallet-1', virtualAmount: '600' };
+    const manager = buildManager(installment, wallet);
+
+    await service.markPaid(manager as any, installment.id, 'tx-1');
+
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'wallet-1', {
+      blockedAt: null,
+    });
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'wallet-1', {
+      virtualAmount: '930',
+    });
+  });
+
+  it('restores from a null virtualAmount as if it were zero', async () => {
+    const { service } = buildService({});
+    const installment = {
+      id: 'installment-2',
+      walletId: 'wallet-2',
+      amount: '250',
+    };
+    const wallet = { id: 'wallet-2', virtualAmount: null };
+    const manager = buildManager(installment, wallet);
+
+    await service.markPaid(manager as any, installment.id, 'tx-2');
+
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'wallet-2', {
+      virtualAmount: '250',
+    });
+  });
+});

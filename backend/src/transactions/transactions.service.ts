@@ -522,11 +522,13 @@ export class TransactionsService {
 
   // Repays one of a credit wallet's scheduled installments (see
   // InstallmentsService). Unlike a regular purchase, this is always real
-  // money paid directly through the IPG — there is no "pay from another
-  // wallet" option — so the resulting row has no fromWalletId at all (see
-  // the walletless branch at the top of verifyPurchase, which credits
-  // straight to toWallet). Once verified, the amount lands in the
-  // repository's real balance and the installment is marked PAID (see the
+  // money paid directly through ZarinPal (same gateway as deposit()) —
+  // there is no "pay from another wallet" option — so the resulting row has
+  // no fromWalletId at all (see the walletless branch at the top of
+  // verifyPurchase, which credits straight to toWallet). Once verified, the
+  // amount lands in the repository's real balance, the installment is
+  // marked PAID, and the credit wallet's virtualAmount is restored by the
+  // installment's amount (see InstallmentsService.markPaid, called from the
   // installmentId branch at the end of verifyPurchase). If the credit
   // wallet is currently blocked (a previous installment went OVERDUE), the
   // type's unblockFee is folded into this charge and the block is lifted on
@@ -590,7 +592,7 @@ export class TransactionsService {
 
         const frontendUrl = this.configService.get<string>('frontendUrl');
         const { authority, paymentUrl } =
-          await this.ipgClientService.createPayment({
+          await this.zarinpalClientService.createPayment({
             merchantName: 'Installment repayment',
             amount: transaction.amount,
             displayAmount: formatAmount(
@@ -837,13 +839,13 @@ export class TransactionsService {
         );
       }
 
-      // Deposits were paid through ZarinPal (a real gateway), not the
-      // in-house sandbox IPG every other flow here uses — see deposit()
-      // above.
-      const verifyClient =
-        transaction.type === TransactionType.DEPOSIT
-          ? this.zarinpalClientService
-          : this.ipgClientService;
+      // Deposits and installment repayments are paid through ZarinPal (a
+      // real gateway) — see deposit() and payInstallment() above. Every
+      // other flow here (regular purchases) still uses the in-house
+      // sandbox IPG.
+      const verifyClient = isRealMoneyIn
+        ? this.zarinpalClientService
+        : this.ipgClientService;
       const verifyResult = await verifyClient.verifyPayment(
         transaction.ipgAuthority!,
         transaction.amount,

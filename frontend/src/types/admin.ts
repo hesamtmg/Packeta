@@ -25,6 +25,7 @@ export interface AdminWallet {
   balance: string;
   walletType: AdminWalletType;
   createdAt: string;
+  closedAt: string | null;
   ownerId: string;
   ownerEmail: string;
   ownerPhoneNumber: string | null;
