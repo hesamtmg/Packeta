@@ -6,7 +6,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, IsNull, Repository } from 'typeorm';
 import { Wallet } from './entities/wallet.entity';
 import {
   WalletType,
@@ -239,6 +239,26 @@ export class WalletsService {
     return updated!;
   }
 
+  // How much a CREDIT wallet could actually fund right now: the lesser of
+  // its own remaining ceiling (virtualAmount) and its linked repository's
+  // real balance — the same two limits verifyPurchase enforces atomically at
+  // spend time. This is an unlocked, point-in-time read (no manager/lock),
+  // meant for a pre-payment "is this enough?" check (see
+  // PurchaseGatewayService.attachWallet) — the actual spend re-derives and
+  // locks this fresh, so a stale read here can never cause an over-spend,
+  // only a possibly-outdated warning.
+  async getAvailableCredit(wallet: Wallet): Promise<bigint> {
+    if (!wallet.repositoryWalletId) return 0n;
+    const repository = await this.getByIdUnscoped(wallet.repositoryWalletId);
+    const availableVirtual = wallet.virtualAmount
+      ? BigInt(wallet.virtualAmount)
+      : 0n;
+    const repositoryBalance = BigInt(repository.balance);
+    return availableVirtual < repositoryBalance
+      ? availableVirtual
+      : repositoryBalance;
+  }
+
   // A repository owner splits off a slice of their unallocated virtual pool
   // (repository.virtualAmount) into a brand-new CREDIT wallet for an
   // existing user (looked up by phone — personnel must already have an
@@ -364,6 +384,48 @@ export class WalletsService {
       responseBody,
     );
     return responseBody;
+  }
+
+  // Called mid-purchase (see TransactionsService.verifyPurchase's support
+  // top-up completion) once a customer has agreed to pay a real-money
+  // shortfall on a CREDIT purchase — finds this customer's existing SUPPORT
+  // wallet in the given currency, or provisions one on the spot against
+  // whatever SUPPORT wallet type an admin has configured for that currency.
+  // Never created any other way (see the CREDIT-style guards in
+  // WalletsController/AdminController) — this is the only path that mints
+  // one.
+  async findOrCreateSupportWallet(
+    manager: EntityManager,
+    userId: string,
+    currencyId: string,
+  ): Promise<Wallet> {
+    const existing = await manager.findOne(Wallet, {
+      where: {
+        userId,
+        closedAt: IsNull(),
+        walletType: { code: WalletTypeCode.SUPPORT, currencyId },
+      },
+      relations: WALLET_RELATIONS,
+    });
+    if (existing) {
+      return existing;
+    }
+
+    const walletType = await this.walletTypesService.findByCodeAndCurrency(
+      WalletTypeCode.SUPPORT,
+      currencyId,
+    );
+    if (!walletType) {
+      throw new UnprocessableEntityException(
+        'No support wallet type is configured for this currency — an admin must create one before a credit shortfall can be topped up',
+      );
+    }
+
+    const wallet = await this.createForUser(manager, userId, walletType.id);
+    return (await manager.findOne(Wallet, {
+      where: { id: wallet.id },
+      relations: WALLET_RELATIONS,
+    }))!;
   }
 
   // Soft-close: a wallet with any transaction history can't be hard-deleted

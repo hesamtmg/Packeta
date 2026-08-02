@@ -23,6 +23,11 @@ export enum WalletTypeCode {
   // user holds, then splits out to personnel as CREDIT wallets — see
   // WalletsService.grantCredit.
   REPOSITORY = 'REPOSITORY',
+  // Auto-provisioned only (never created directly by a user or admin) — see
+  // WalletsService.findOrCreateSupportWallet. Holds the real money a
+  // customer pays via ZarinPal to cover the gap when a CREDIT purchase
+  // exceeds what its credit line + backing repository can fund.
+  SUPPORT = 'SUPPORT',
 }
 
 // Each row is the "law" governing a wallet type: whether it can go negative

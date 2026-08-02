@@ -73,6 +73,11 @@ export class WalletsController {
         'CREDIT wallets can only be created by a repository owner via POST /wallets/credit-grant',
       );
     }
+    if (walletType.code === WalletTypeCode.SUPPORT) {
+      throw new BadRequestException(
+        'SUPPORT wallets are provisioned automatically when a credit purchase needs a top-up',
+      );
+    }
     this.assertPurchaseInCapable(dto.purchaseTimeoutSeconds, walletType);
     this.assertAutoWithdrawCapable(
       dto.settlementAccounts,

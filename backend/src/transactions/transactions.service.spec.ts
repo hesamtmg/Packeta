@@ -1048,12 +1048,12 @@ describe('TransactionsService.verifyPurchase', () => {
       repositoryWallet.id,
       { balance: '4850' },
     );
-    // 2. the credit wallet is funded with that real money and its
-    // remaining credit ceiling (virtualAmount) is drawn down.
+    // 2. the credit wallet's remaining credit ceiling (virtualAmount) is
+    // drawn down by the repository-funded amount.
     expect(manager.update).toHaveBeenCalledWith(
       expect.anything(),
       creditWallet.id,
-      { balance: '150', virtualAmount: '250' },
+      { virtualAmount: '250' },
     );
     expect(manager.create).toHaveBeenCalledWith(
       expect.anything(),
