@@ -40,6 +40,19 @@ export class WalletTypesService {
     return type;
   }
 
+  // Used by WalletsService.findOrCreateSupportWallet to look up the
+  // admin-configured SUPPORT wallet type for a given currency — unlike
+  // findById, returns null instead of throwing when none exists yet.
+  async findByCodeAndCurrency(
+    code: string,
+    currencyId: string,
+  ): Promise<WalletType | null> {
+    return this.walletTypesRepository.findOne({
+      where: { code, currencyId },
+      relations: { currency: true },
+    });
+  }
+
   async create(dto: CreateWalletTypeDto): Promise<WalletType> {
     const currency = await this.currenciesService.findByCode(dto.currencyCode);
 

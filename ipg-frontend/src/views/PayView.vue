@@ -47,14 +47,28 @@ function toggleLocale() {
 // assigned yet, so the customer identifies themselves here first. A
 // customer-initiated purchase (they already picked their own wallet on
 // Packeta before being redirected) skips straight to the pay step.
-type Step = 'loading' | 'phone' | 'otp' | 'wallet' | 'pay' | 'redirecting';
+// 'insufficient-credit' and 'topup-result' back the credit-shortfall
+// top-up detour: a chosen CREDIT wallet that can't cover the purchase on
+// its own shows the gap and, if the customer agrees to pay it, redirects
+// to ZarinPal — which lands back on this same page with a query param
+// ('topup-result', handled entirely on mount) instead of the normal
+// sandbox-IPG confirm/redirect step.
+type Step =
+  | 'loading'
+  | 'phone'
+  | 'otp'
+  | 'wallet'
+  | 'insufficient-credit'
+  | 'pay'
+  | 'redirecting'
+  | 'topup-result';
 const step = ref<Step>('loading');
 
 const chargeInfo = ref<ChargeStatus | null>(null);
 
 const phoneNumber = ref('');
 const captchaId = ref('');
-const captchaQuestion = ref('');
+const captchaImage = ref('');
 const captchaAnswer = ref('');
 const otpDigits = ref<string[]>(['', '', '', '', '', '']);
 const otpInputRefs = ref<(HTMLInputElement | null)[]>([]);
@@ -66,6 +80,17 @@ const selectedWalletId = ref('');
 const carousel = ref<HTMLElement | null>(null);
 const gatewayError = ref('');
 const gatewayBusy = ref(false);
+const insufficientCredit = ref<{ shortfall: string; availableCredit: string } | null>(null);
+const topUpResult = ref<'success' | 'failed'>('success');
+const topUpResultMessage = ref('');
+const selectedWallet = computed(() =>
+  eligibleWallets.value.find((w) => w.id === selectedWalletId.value),
+);
+const shortfallDisplay = computed(() =>
+  insufficientCredit.value && selectedWallet.value
+    ? formatAmount(insufficientCredit.value.shortfall, selectedWallet.value.walletType.currency)
+    : '',
+);
 
 const info = ref<PaymentInfo | null>(null);
 const loadError = ref('');
@@ -113,14 +138,14 @@ const statusMessage = computed(() => {
 
 async function loadCaptcha() {
   try {
-    const result = await packetaRequest<{ captchaId: string; question: string }>(
+    const result = await packetaRequest<{ captchaId: string; image: string }>(
       '/purchase-gateway/captcha',
     );
     captchaId.value = result.captchaId;
-    captchaQuestion.value = result.question;
+    captchaImage.value = result.image;
     captchaAnswer.value = '';
   } catch {
-    captchaQuestion.value = '';
+    captchaImage.value = '';
   }
 }
 
@@ -280,10 +305,18 @@ async function onContinueWithWallet() {
   gatewayError.value = '';
   gatewayBusy.value = true;
   try {
-    await packetaRequest('/purchase-gateway/attach-wallet', {
+    const result = await packetaRequest<{
+      transactionId: string;
+      insufficientCredit?: { shortfall: string; availableCredit: string };
+    }>('/purchase-gateway/attach-wallet', {
       method: 'POST',
       body: { authority, sessionToken: sessionToken.value, walletId: selectedWalletId.value },
     });
+    if (result.insufficientCredit) {
+      insufficientCredit.value = result.insufficientCredit;
+      step.value = 'insufficient-credit';
+      return;
+    }
     await enterPayStep();
   } catch (err) {
     gatewayError.value = err instanceof ApiError ? err.message : t('errors.walletSelectFailed');
@@ -292,12 +325,81 @@ async function onContinueWithWallet() {
   }
 }
 
+// Customer agreed to pay the gap — kicks off a real ZarinPal payment for
+// exactly the shortfall and leaves the app entirely (real gateway, not the
+// in-house sandbox IPG). ZarinPal's own callback lands back on this same
+// /pay/:authority URL with a topupTxnId query param, picked up on mount.
+async function onConfirmTopUp() {
+  gatewayError.value = '';
+  gatewayBusy.value = true;
+  try {
+    const result = await packetaRequest<{ redirectUrl: string }>(
+      '/purchase-gateway/support-topup',
+      {
+        method: 'POST',
+        body: { authority, sessionToken: sessionToken.value, walletId: selectedWalletId.value },
+      },
+    );
+    window.location.href = result.redirectUrl;
+  } catch (err) {
+    gatewayError.value = err instanceof ApiError ? err.message : t('errors.topUpFailed');
+    gatewayBusy.value = false;
+  }
+}
+
+function backToWalletSelection() {
+  insufficientCredit.value = null;
+  gatewayError.value = '';
+  step.value = 'wallet';
+}
+
 async function goToPhoneStep() {
   step.value = 'phone';
   await loadCaptcha();
 }
 
+// Resolves the ZarinPal leg of a credit-shortfall top-up: verifies the
+// payment (crediting the customer's support wallet and completing the
+// purchase server-side — see TransactionsService.completeSupportTopUp),
+// then shows the outcome right here instead of bouncing to Packeta's own
+// app, since this customer never had a Packeta session to begin with.
+async function resolveTopUpCallback(topUpTransactionId: string) {
+  try {
+    const result = await packetaRequest<{ status: string; reason?: string }>(
+      `/transactions/purchase/${topUpTransactionId}/verify`,
+      { method: 'POST' },
+    );
+    if (result.status === 'COMPLETED') {
+      topUpResult.value = 'success';
+    } else {
+      topUpResult.value = 'failed';
+      topUpResultMessage.value = result.reason ?? '';
+    }
+  } catch (err) {
+    topUpResult.value = 'failed';
+    topUpResultMessage.value = err instanceof ApiError ? err.message : '';
+  }
+  step.value = 'topup-result';
+
+  try {
+    const status = await packetaRequest<ChargeStatus>(
+      `/purchase-gateway/charge/${authority}/status`,
+    );
+    chargeInfo.value = status;
+    setLocale(status.language === 'fa' ? 'fa' : 'en');
+  } catch {
+    // Non-critical — only used for the merchant/amount header up top.
+  }
+}
+
 onMounted(async () => {
+  const topUpTransactionId = route.query.topupTxnId as string | undefined;
+  if (topUpTransactionId) {
+    await resolveTopUpCallback(topUpTransactionId);
+    clock = setInterval(() => (now.value = Date.now()), 1000);
+    return;
+  }
+
   try {
     const status = await packetaRequest<ChargeStatus>(
       `/purchase-gateway/charge/${authority}/status`,
@@ -371,7 +473,9 @@ onUnmounted(() => {
           <p class="status">{{ t('loading') }}</p>
         </template>
 
-        <template v-else-if="isExpired && step !== 'redirecting'">
+        <template
+          v-else-if="isExpired && step !== 'redirecting' && step !== 'insufficient-credit' && step !== 'topup-result'"
+        >
           <p class="error">{{ t('expiredMessage') }}</p>
         </template>
 
@@ -379,8 +483,9 @@ onUnmounted(() => {
           <p class="status">{{ t('phone.prompt') }}</p>
           <form class="gateway-form" @submit.prevent="onRequestOtp">
             <input v-model="phoneNumber" type="tel" :placeholder="t('phone.placeholder')" required />
-            <label v-if="captchaQuestion" class="captcha-label">
-              {{ t('phone.captchaPrefix', { question: captchaQuestion }) }}
+            <label v-if="captchaImage" class="captcha-label">
+              {{ t('phone.captchaPrefix') }}
+              <img :src="captchaImage" :alt="t('phone.captchaPrefix')" class="captcha-image" />
               <input v-model="captchaAnswer" type="text" inputmode="numeric" :placeholder="t('phone.answerPlaceholder')" required />
             </label>
             <button class="confirm" type="submit" :disabled="gatewayBusy">{{ t('phone.sendCode') }}</button>
@@ -441,6 +546,23 @@ onUnmounted(() => {
             {{ t('wallet.continue') }}
           </button>
           <p v-if="gatewayError" class="error">{{ gatewayError }}</p>
+        </template>
+
+        <template v-else-if="step === 'insufficient-credit'">
+          <p class="status">{{ t('insufficientCredit.message', { amount: shortfallDisplay }) }}</p>
+          <button class="confirm" :disabled="gatewayBusy" @click="onConfirmTopUp">
+            {{ t('insufficientCredit.payDifference', { amount: shortfallDisplay }) }}
+          </button>
+          <button class="link-btn" :disabled="gatewayBusy" @click="backToWalletSelection">
+            {{ t('insufficientCredit.chooseDifferent') }}
+          </button>
+          <p v-if="gatewayError" class="error">{{ gatewayError }}</p>
+        </template>
+
+        <template v-else-if="step === 'topup-result'">
+          <p class="status" :class="{ error: topUpResult === 'failed' }">
+            {{ topUpResult === 'success' ? t('topUpResult.success') : topUpResultMessage || t('topUpResult.failed') }}
+          </p>
         </template>
 
         <template v-else-if="step === 'redirecting'">
@@ -751,6 +873,13 @@ onUnmounted(() => {
   gap: 0.4rem;
   color: #6b7280;
   font-size: 0.85rem;
+}
+.captcha-image {
+  width: 180px;
+  height: 56px;
+  align-self: center;
+  border-radius: 12px;
+  border: 1px solid #e3e5f2;
 }
 .link-btn {
   background: none;

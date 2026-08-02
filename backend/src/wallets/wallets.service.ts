@@ -6,7 +6,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, IsNull, Repository } from 'typeorm';
 import { Wallet } from './entities/wallet.entity';
 import {
   WalletType,
@@ -239,6 +239,26 @@ export class WalletsService {
     return updated!;
   }
 
+  // How much a CREDIT wallet could actually fund right now: the lesser of
+  // its own remaining ceiling (virtualAmount) and its linked repository's
+  // real balance — the same two limits verifyPurchase enforces atomically at
+  // spend time. This is an unlocked, point-in-time read (no manager/lock),
+  // meant for a pre-payment "is this enough?" check (see
+  // PurchaseGatewayService.attachWallet) — the actual spend re-derives and
+  // locks this fresh, so a stale read here can never cause an over-spend,
+  // only a possibly-outdated warning.
+  async getAvailableCredit(wallet: Wallet): Promise<bigint> {
+    if (!wallet.repositoryWalletId) return 0n;
+    const repository = await this.getByIdUnscoped(wallet.repositoryWalletId);
+    const availableVirtual = wallet.virtualAmount
+      ? BigInt(wallet.virtualAmount)
+      : 0n;
+    const repositoryBalance = BigInt(repository.balance);
+    return availableVirtual < repositoryBalance
+      ? availableVirtual
+      : repositoryBalance;
+  }
+
   // A repository owner splits off a slice of their unallocated virtual pool
   // (repository.virtualAmount) into a brand-new CREDIT wallet for an
   // existing user (looked up by phone — personnel must already have an
@@ -324,30 +344,32 @@ export class WalletsService {
         nationalCode: dto.nationalCode,
       },
     );
-    // The grant preloads the wallet's spendable balance up to its ceiling —
-    // virtualAmount stays the fixed ceiling this wallet was granted, while
-    // balance is what's actually left to spend right now (drawn down by
-    // ordinary spends, same as any other wallet's balance).
+    // No real money moves yet — the grant only links the wallet to its
+    // repository and sets its spending ceiling (virtualAmount). The credit
+    // wallet's real `balance` stays at 0 until it's actually spent: each
+    // purchase funds it with a real transfer from the repository for
+    // exactly that purchase's amount before debiting it like any other
+    // wallet (see TransactionsService.verifyPurchase), draining this same
+    // ceiling as it goes.
     await manager.update(Wallet, creditWallet.id, {
       repositoryWalletId: repository.id,
-      balance: requested.toString(),
     });
     await manager.update(Wallet, repository.id, {
       virtualAmount: (availablePool - requested).toString(),
     });
 
     // Not a real-money transfer (nothing moves between fromWalletId's and
-    // toWalletId's spendable `balance` — the credit wallet's balance was
-    // already preloaded above), but it's still a virtual-pool movement worth
-    // a ledger entry so it's visible in the repository owner's and
-    // personnel's transaction history like any other movement.
+    // toWalletId's spendable `balance` here — that only happens once the
+    // credit wallet is actually spent from), but it's still a virtual-pool
+    // movement worth a ledger entry so it's visible in the repository
+    // owner's and personnel's transaction history like any other movement.
     const transaction = manager.create(Transaction, {
       type: TransactionType.TRANSFER,
       fromWalletId: repository.id,
       toWalletId: creditWallet.id,
       amount: requested.toString(),
       idempotencyKey,
-      note: 'Credit grant: repository virtual balance -> credit wallet',
+      note: 'Credit grant: repository virtual pool -> credit wallet ceiling',
     });
     await manager.save(transaction);
 
@@ -362,6 +384,48 @@ export class WalletsService {
       responseBody,
     );
     return responseBody;
+  }
+
+  // Called mid-purchase (see TransactionsService.verifyPurchase's support
+  // top-up completion) once a customer has agreed to pay a real-money
+  // shortfall on a CREDIT purchase — finds this customer's existing SUPPORT
+  // wallet in the given currency, or provisions one on the spot against
+  // whatever SUPPORT wallet type an admin has configured for that currency.
+  // Never created any other way (see the CREDIT-style guards in
+  // WalletsController/AdminController) — this is the only path that mints
+  // one.
+  async findOrCreateSupportWallet(
+    manager: EntityManager,
+    userId: string,
+    currencyId: string,
+  ): Promise<Wallet> {
+    const existing = await manager.findOne(Wallet, {
+      where: {
+        userId,
+        closedAt: IsNull(),
+        walletType: { code: WalletTypeCode.SUPPORT, currencyId },
+      },
+      relations: WALLET_RELATIONS,
+    });
+    if (existing) {
+      return existing;
+    }
+
+    const walletType = await this.walletTypesService.findByCodeAndCurrency(
+      WalletTypeCode.SUPPORT,
+      currencyId,
+    );
+    if (!walletType) {
+      throw new UnprocessableEntityException(
+        'No support wallet type is configured for this currency — an admin must create one before a credit shortfall can be topped up',
+      );
+    }
+
+    const wallet = await this.createForUser(manager, userId, walletType.id);
+    return (await manager.findOne(Wallet, {
+      where: { id: wallet.id },
+      relations: WALLET_RELATIONS,
+    }))!;
   }
 
   // Soft-close: a wallet with any transaction history can't be hard-deleted

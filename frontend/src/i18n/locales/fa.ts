@@ -46,7 +46,7 @@ export default {
     },
     phone: {
       phoneLabel: 'شماره تلفن',
-      captchaLabel: 'بررسی سریع: {question}',
+      captchaLabel: 'کد نمایش داده‌شده در تصویر را وارد کنید',
       sendCode: 'ارسال کد',
       codeSentTo: 'کد ارسال‌شده به {phone} را وارد کنید',
       devHint: 'حالت آزمایشی — کد شما {code} است (پیامکی ارسال نمی‌شود)',

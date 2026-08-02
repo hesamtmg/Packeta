@@ -757,6 +757,91 @@ export class TransactionsService {
       .execute();
   }
 
+  // Step 1 of the credit-shortfall top-up: called once the customer has seen
+  // the shortfall and explicitly agreed to pay it (see
+  // PurchaseGatewayService.confirmSupportTopUp) — creates a real ZarinPal
+  // payment for exactly the shortfall and links it back to the PENDING
+  // purchase via completesPurchaseId. Idempotent: a second call while one is
+  // already PENDING just hands back the same redirect instead of charging
+  // twice. Also extends the purchase's own expiresAt to a full window, since
+  // the sandbox-IPG timeout it was created with may be far shorter than what
+  // a second, real payment gateway detour actually needs.
+  async initiateSupportTopUp(
+    purchaseTransactionId: string,
+    shortfall: bigint,
+  ): Promise<{ redirectUrl: string; topUpTransactionId: string }> {
+    return this.dataSource.transaction(async (manager) => {
+      const existing = await manager.findOne(Transaction, {
+        where: {
+          completesPurchaseId: purchaseTransactionId,
+          status: TransactionStatus.PENDING,
+        },
+      });
+      if (existing) {
+        return {
+          redirectUrl: existing.ipgPaymentUrl!,
+          topUpTransactionId: existing.id,
+        };
+      }
+
+      const purchase = await manager.findOne(Transaction, {
+        where: { id: purchaseTransactionId },
+      });
+      if (
+        !purchase ||
+        purchase.status !== TransactionStatus.PENDING ||
+        !purchase.fromWalletId
+      ) {
+        throw new NotFoundException(
+          'Purchase not found, already resolved, or has no wallet attached yet',
+        );
+      }
+
+      const expiresAt = new Date(
+        Date.now() + DEFAULT_PURCHASE_TIMEOUT_SECONDS * 1000,
+      );
+      await manager.update(Transaction, purchase.id, { expiresAt });
+
+      const creditWallet = await this.walletsService.getByIdUnscoped(
+        purchase.fromWalletId,
+      );
+      const ipgFrontendUrl = this.configService.get<string>('ipgFrontendUrl');
+
+      const topUp = manager.create(Transaction, {
+        type: TransactionType.DEPOSIT,
+        status: TransactionStatus.PENDING,
+        fromWalletId: null,
+        toWalletId: null,
+        amount: shortfall.toString(),
+        idempotencyKey: `support-topup:${purchase.id}`,
+        completesPurchaseId: purchase.id,
+        expiresAt,
+      });
+      await manager.save(topUp);
+
+      // Callback lands back on the IPG's own pay page (not Packeta's app —
+      // this customer never had a Packeta session) for the same authority,
+      // carrying the top-up's own id so it knows to verify it on mount.
+      const { authority, paymentUrl } =
+        await this.zarinpalClientService.createPayment({
+          merchantName: 'Credit top-up',
+          amount: topUp.amount,
+          displayAmount: formatAmount(
+            topUp.amount,
+            creditWallet.walletType.currency,
+          ),
+          callbackUrl: `${ipgFrontendUrl}/pay/${purchase.ipgAuthority}?topupTxnId=${topUp.id}`,
+          timeoutSeconds: DEFAULT_PURCHASE_TIMEOUT_SECONDS,
+        });
+
+      topUp.ipgAuthority = authority;
+      topUp.ipgPaymentUrl = paymentUrl;
+      await manager.save(topUp);
+
+      return { redirectUrl: paymentUrl, topUpTransactionId: topUp.id };
+    });
+  }
+
   // Used by the purchase gateway to look up a charge's currency/merchant
   // before showing the customer their eligible wallets.
   async findPendingChargeByAuthority(
@@ -804,15 +889,19 @@ export class TransactionsService {
       }
 
       // A row with no fromWalletId is either genuinely walletless — a
-      // DEPOSIT (credits the depositor's own wallet) or an installment
-      // repayment (credits the repository) — both funded purely by the IPG,
-      // with nothing to debit on Packeta's side; or it's a merchant-initiated
+      // DEPOSIT (credits the depositor's own wallet), an installment
+      // repayment (credits the repository), or a credit-shortfall top-up
+      // (credits an auto-provisioned support wallet, then completes the
+      // purchase it's linked to) — all funded purely by the IPG, with
+      // nothing to debit on Packeta's side; or it's a merchant-initiated
       // charge still waiting for the customer to identify themselves and
       // pick a wallet at the IPG (see attachPurchaseWallet), which genuinely
       // can't be verified yet.
+      const isSupportTopUp = !!transaction.completesPurchaseId;
       const isRealMoneyIn =
         transaction.type === TransactionType.DEPOSIT ||
-        !!transaction.installmentId;
+        !!transaction.installmentId ||
+        isSupportTopUp;
       if (!transaction.fromWalletId && !isRealMoneyIn) {
         throw new UnprocessableEntityException(
           'This purchase has no customer wallet assigned yet — the customer must identify themselves and pick a wallet at the payment page first',
@@ -856,6 +945,10 @@ export class TransactionsService {
           status: transaction.status,
           reason: verifyResult.reason,
         };
+      }
+
+      if (isSupportTopUp) {
+        return this.completeSupportTopUp(manager, transaction);
       }
 
       if (isRealMoneyIn) {
@@ -922,78 +1015,13 @@ export class TransactionsService {
         );
       }
 
-      const floor = fromWalletRef.walletType.allowNegativeBalance
-        ? -BigInt(fromWalletRef.walletType.creditLimit ?? '0')
-        : 0n;
-      const newFromBalance =
-        BigInt(fromWallet.balance) - BigInt(transaction.amount);
-      if (newFromBalance < floor) {
-        transaction.status = TransactionStatus.REVERSED;
-        await manager.save(transaction);
-        throw new UnprocessableEntityException(
-          'Insufficient balance to complete this purchase',
-        );
-      }
-      const newToBalance =
-        BigInt(toWallet.balance) + BigInt(transaction.amount);
-
-      // A credit wallet's balance is real money from the moment it's
-      // granted (see WalletsService.grantCredit), so this doesn't change
-      // what the payment below actually moves — it draws the same amount
-      // down from the wallet's own remaining virtual ceiling and logs that
-      // draw as its own ledger entry, so the credit line's outstanding
-      // balance keeps shrinking as it's spent instead of staying frozen at
-      // the original grant.
-      if (fromWalletRef.walletType.code === WalletTypeCode.CREDIT) {
-        const availableVirtual = fromWallet.virtualAmount
-          ? BigInt(fromWallet.virtualAmount)
-          : 0n;
-        const purchaseAmount = BigInt(transaction.amount);
-        const drawn =
-          purchaseAmount < availableVirtual ? purchaseAmount : availableVirtual;
-        if (drawn > 0n) {
-          await manager.update(Wallet, fromWallet.id, {
-            virtualAmount: (availableVirtual - drawn).toString(),
-          });
-          const creditDraw = manager.create(Transaction, {
-            type: TransactionType.TRANSFER,
-            fromWalletId: fromWallet.id,
-            toWalletId: fromWallet.id,
-            amount: drawn.toString(),
-            idempotencyKey: `credit-draw:${transaction.id}`,
-            note: 'Credit line drawn: virtual balance -> real balance',
-          });
-          await manager.save(creditDraw);
-        }
-      }
-
-      await manager.update(Wallet, fromWallet.id, {
-        balance: newFromBalance.toString(),
-      });
-      await manager.update(Wallet, toWallet.id, {
-        balance: newToBalance.toString(),
-      });
-      // Unlike the floor check above, an insufficient-repository-funds
-      // rejection here rolls back this whole DB transaction (including the
-      // two balance updates just above) rather than persisting REVERSED —
-      // the purchase stays PENDING and the timeout sweep will eventually
-      // reverse it. Safe either way (nothing moves on a throw), just less
-      // immediate than the floor-check case.
-      await this.debitLinkedRepository(
+      await this.settleCreditFundedPurchase(
         manager,
+        transaction,
         fromWalletRef,
-        BigInt(transaction.amount),
+        fromWallet,
+        toWallet,
       );
-
-      transaction.status = TransactionStatus.COMPLETED;
-      await manager.save(transaction);
-
-      await this.loggingService.log({
-        category: 'TRANSACTION',
-        action: 'PURCHASE_VERIFY',
-        success: true,
-        metadata: { transactionId: transaction.id },
-      });
 
       const merchantWalletRef = await this.walletsService.getByIdUnscoped(
         transaction.toWalletId!,
@@ -1002,6 +1030,224 @@ export class TransactionsService {
 
       return { transactionId: transaction.id, status: transaction.status };
     });
+  }
+
+  // Completes a PURCHASE from a CREDIT wallet, funding it with real money
+  // from up to two sources before debiting it and crediting the merchant —
+  // exactly like any other wallet's purchase, except the money to spend has
+  // to be moved in first:
+  //   1. supportFunding, if given (see completeSupportTopUp): a customer
+  //      already paid this exact amount via ZarinPal into their own SUPPORT
+  //      wallet — pull it into the credit wallet first.
+  //   2. Whatever's still needed beyond that (or the whole amount, if there
+  //      was no support funding) is drawn from the wallet's linked
+  //      REPOSITORY, capped by the remaining credit ceiling
+  //      (fromWallet.virtualAmount) — same as before support wallets
+  //      existed.
+  // Each leg is its own visible TRANSFER into the credit wallet, so the
+  // ledger shows exactly where a purchase's money came from.
+  private async settleCreditFundedPurchase(
+    manager: EntityManager,
+    transaction: Transaction,
+    fromWalletRef: Wallet,
+    fromWallet: Wallet,
+    toWallet: Wallet,
+    supportFunding?: { supportWallet: Wallet; amount: bigint },
+  ): Promise<void> {
+    const purchaseAmount = BigInt(transaction.amount);
+    let fundedBalance = BigInt(fromWallet.balance);
+
+    if (supportFunding && supportFunding.amount > 0n) {
+      const { supportWallet, amount } = supportFunding;
+      const newSupportBalance = BigInt(supportWallet.balance) - amount;
+      if (newSupportBalance < 0n) {
+        // Can't happen in practice — the support wallet was credited this
+        // exact amount moments ago in the same DB transaction — but guard
+        // it anyway rather than letting a balance go negative silently.
+        throw new UnprocessableEntityException(
+          'The support wallet does not have enough balance to fund this purchase',
+        );
+      }
+      await manager.update(Wallet, supportWallet.id, {
+        balance: newSupportBalance.toString(),
+      });
+      fundedBalance += amount;
+      const supportTransfer = manager.create(Transaction, {
+        type: TransactionType.TRANSFER,
+        fromWalletId: supportWallet.id,
+        toWalletId: fromWallet.id,
+        amount: amount.toString(),
+        idempotencyKey: `support-fund:${transaction.id}`,
+        note: 'Support wallet funded the credit wallet for this purchase',
+      });
+      await manager.save(supportTransfer);
+    }
+
+    const remainder = purchaseAmount - (supportFunding?.amount ?? 0n);
+    const isRepositoryBackedCredit =
+      fromWalletRef.walletType.code === WalletTypeCode.CREDIT &&
+      !!fromWallet.repositoryWalletId;
+    if (remainder > 0n && isRepositoryBackedCredit) {
+      const availableVirtual = fromWallet.virtualAmount
+        ? BigInt(fromWallet.virtualAmount)
+        : 0n;
+      if (remainder > availableVirtual) {
+        transaction.status = TransactionStatus.REVERSED;
+        await manager.save(transaction);
+        throw new UnprocessableEntityException(
+          'This purchase exceeds the remaining credit line on this wallet',
+        );
+      }
+
+      // Unlike the floor check below, an insufficient-repository-funds
+      // rejection here rolls back this whole DB transaction rather than
+      // persisting REVERSED — the purchase stays PENDING and the timeout
+      // sweep will eventually reverse it. Safe either way (nothing moves on
+      // a throw), just less immediate than the floor-check case.
+      const repository = await this.walletsService.lockById(
+        manager,
+        fromWallet.repositoryWalletId!,
+      );
+      const newRepositoryBalance = BigInt(repository.balance) - remainder;
+      if (newRepositoryBalance < 0n) {
+        throw new UnprocessableEntityException(
+          'The backing repository does not have enough real balance to fund this purchase',
+        );
+      }
+
+      await manager.update(Wallet, repository.id, {
+        balance: newRepositoryBalance.toString(),
+      });
+      await manager.update(Wallet, fromWallet.id, {
+        virtualAmount: (availableVirtual - remainder).toString(),
+      });
+      fundedBalance += remainder;
+      const fundingTransfer = manager.create(Transaction, {
+        type: TransactionType.TRANSFER,
+        fromWalletId: repository.id,
+        toWalletId: fromWallet.id,
+        amount: remainder.toString(),
+        idempotencyKey: `credit-fund:${transaction.id}`,
+        note: 'Repository funded the credit wallet for this purchase',
+      });
+      await manager.save(fundingTransfer);
+    }
+
+    const floor = fromWalletRef.walletType.allowNegativeBalance
+      ? -BigInt(fromWalletRef.walletType.creditLimit ?? '0')
+      : 0n;
+    const newFromBalance = fundedBalance - purchaseAmount;
+    if (newFromBalance < floor) {
+      transaction.status = TransactionStatus.REVERSED;
+      await manager.save(transaction);
+      throw new UnprocessableEntityException(
+        'Insufficient balance to complete this purchase',
+      );
+    }
+    const newToBalance = BigInt(toWallet.balance) + purchaseAmount;
+
+    await manager.update(Wallet, fromWallet.id, {
+      balance: newFromBalance.toString(),
+    });
+    await manager.update(Wallet, toWallet.id, {
+      balance: newToBalance.toString(),
+    });
+
+    transaction.status = TransactionStatus.COMPLETED;
+    await manager.save(transaction);
+
+    await this.loggingService.log({
+      category: 'TRANSACTION',
+      action: 'PURCHASE_VERIFY',
+      success: true,
+      metadata: { transactionId: transaction.id },
+    });
+  }
+
+  // Resolves the ZarinPal-verified half of a credit-shortfall top-up (see
+  // initiateSupportTopUp): credits the customer's auto-provisioned SUPPORT
+  // wallet with the real money that just landed, then immediately spends it
+  // — together with whatever the linked credit wallet's repository still
+  // covers — to complete the PURCHASE this top-up exists for.
+  private async completeSupportTopUp(
+    manager: EntityManager,
+    topUp: Transaction,
+  ): Promise<PurchaseVerifyResult> {
+    const purchase = await manager
+      .createQueryBuilder(Transaction, 't')
+      .setLock('pessimistic_write')
+      .where('t.id = :id', { id: topUp.completesPurchaseId })
+      .getOne();
+    if (!purchase || !purchase.fromWalletId || !purchase.toWalletId) {
+      throw new UnprocessableEntityException(
+        'The purchase this top-up belongs to is no longer available',
+      );
+    }
+
+    const fromWalletRef = await this.walletsService.getByIdUnscoped(
+      purchase.fromWalletId,
+    );
+    const orderedIds = [
+      purchase.fromWalletId,
+      purchase.toWalletId,
+      ...(fromWalletRef.repositoryWalletId
+        ? [fromWalletRef.repositoryWalletId]
+        : []),
+    ].sort();
+    const locked = new Map<string, Wallet>();
+    for (const id of orderedIds) {
+      locked.set(id, await this.walletsService.lockById(manager, id));
+    }
+    const fromWallet = locked.get(purchase.fromWalletId)!;
+    const toWallet = locked.get(purchase.toWalletId)!;
+
+    const supportWalletRaw =
+      await this.walletsService.findOrCreateSupportWallet(
+        manager,
+        fromWallet.userId,
+        fromWalletRef.walletType.currencyId,
+      );
+    const supportWallet = await this.walletsService.lockById(
+      manager,
+      supportWalletRaw.id,
+    );
+
+    const topUpAmount = BigInt(topUp.amount);
+    await manager.update(Wallet, supportWallet.id, {
+      balance: (BigInt(supportWallet.balance) + topUpAmount).toString(),
+    });
+    supportWallet.balance = (
+      BigInt(supportWallet.balance) + topUpAmount
+    ).toString();
+    topUp.toWalletId = supportWallet.id;
+    topUp.status = TransactionStatus.COMPLETED;
+    await manager.save(topUp);
+
+    if (purchase.status !== TransactionStatus.COMPLETED) {
+      if (fromWallet.closedAt || toWallet.closedAt) {
+        purchase.status = TransactionStatus.REVERSED;
+        await manager.save(purchase);
+        throw new UnprocessableEntityException(
+          'One of the wallets for this purchase was closed before it could be verified',
+        );
+      }
+
+      await this.settleCreditFundedPurchase(
+        manager,
+        purchase,
+        fromWalletRef,
+        fromWallet,
+        toWallet,
+        { supportWallet, amount: topUpAmount },
+      );
+
+      const merchantWalletRef = await this.walletsService.getByIdUnscoped(
+        purchase.toWalletId,
+      );
+      this.notifyMerchantCallback(merchantWalletRef, purchase);
+    }
+
+    return { transactionId: purchase.id, status: purchase.status };
   }
 
   // Cancels a still-PENDING purchase (customer backed out on the IPG page,
@@ -1311,9 +1557,10 @@ export class TransactionsService {
   // REPOSITORY's real balance by the same amount, since that's the real
   // money actually funding the personnel's spend (see
   // WalletsService.grantCredit). No-op for every wallet without a
-  // repositoryWalletId. Applies to withdraw/transfer-out/purchase-out only
-  // (the organic "spend" paths) — admin adjustments and purchase refunds
-  // intentionally don't cascade here.
+  // repositoryWalletId. Applies to withdraw/transfer-out only — merchant
+  // purchases fund the credit wallet from its repository explicitly, up
+  // front, inline in verifyPurchase, rather than through this helper — and
+  // admin adjustments/purchase refunds intentionally don't cascade here.
   private async debitLinkedRepository(
     manager: EntityManager,
     fromWalletRef: Wallet,

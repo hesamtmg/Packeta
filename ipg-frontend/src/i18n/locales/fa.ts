@@ -14,7 +14,7 @@ export default {
   phone: {
     prompt: 'شماره تلفن خود را وارد کنید تا شناسایی شوید و کیف پول پرداخت را انتخاب کنید.',
     placeholder: '+15551234567',
-    captchaPrefix: 'بررسی سریع: {question}',
+    captchaPrefix: 'کد نمایش داده‌شده در تصویر را وارد کنید',
     answerPlaceholder: 'پاسخ',
     sendCode: 'ارسال کد',
   },
@@ -28,6 +28,15 @@ export default {
     prompt: 'کیف پولی را که می‌خواهید از آن پرداخت کنید انتخاب کنید.',
     none: 'شما هیچ کیف پول واجد شرایطی برای این خرید ندارید.',
     continue: 'ادامه',
+  },
+  insufficientCredit: {
+    message: 'اعتبار این کیف پول {amount} کمتر از مبلغ این خرید است.',
+    payDifference: 'برای ادامه، مبلغ {amount} را با کارت پرداخت کنید',
+    chooseDifferent: 'انتخاب کیف پول دیگر',
+  },
+  topUpResult: {
+    success: 'پرداخت با موفقیت انجام شد — سپاسگزاریم!',
+    failed: 'تأیید پرداخت تکمیلی ممکن نشد.',
   },
   redirecting: {
     message: 'در حال بازگشت به فروشنده در {seconds} ثانیه…',
@@ -47,5 +56,6 @@ export default {
     sendCodeFailed: 'ارسال کد ناموفق بود',
     invalidCode: 'کد نامعتبر یا منقضی شده است',
     walletSelectFailed: 'انتخاب کیف پول ناموفق بود',
+    topUpFailed: 'شروع پرداخت تکمیلی ناموفق بود',
   },
 };

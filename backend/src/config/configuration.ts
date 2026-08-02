@@ -30,4 +30,10 @@ export default () => ({
   // Where the customer's browser lands after the IPG redirects back — used
   // to build each purchase's callbackUrl.
   frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:5173',
+  // The IPG's own pay page (ipg-frontend) — used to send a ZarinPal credit
+  // shortfall top-up's callback back to the branded merchant-purchase flow
+  // instead of Packeta's own (login-gated) app, since the customer never
+  // had a Packeta session to begin with. See
+  // TransactionsService.initiateSupportTopUp.
+  ipgFrontendUrl: process.env.IPG_FRONTEND_URL ?? 'http://localhost:5174',
 });
