@@ -63,6 +63,19 @@ async function adjust(wallet: AdminWallet) {
   }
 }
 
+async function reopen(wallet: AdminWallet) {
+  error.value = '';
+  busy.value = true;
+  try {
+    await apiRequest(`/admin/wallets/${wallet.id}/reopen`, { method: 'POST' });
+    await load();
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : t('admin.wallets.reopenFailed');
+  } finally {
+    busy.value = false;
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -83,6 +96,7 @@ onMounted(load);
             <th>{{ t('admin.wallets.tableCurrency') }}</th>
             <th>{{ t('admin.wallets.tableBalance') }}</th>
             <th>{{ t('admin.wallets.tableCreated') }}</th>
+            <th>{{ t('admin.wallets.tableStatus') }}</th>
             <th></th>
           </tr>
         </thead>
@@ -94,10 +108,20 @@ onMounted(load);
               <td>{{ w.walletType.currency.code }}</td>
               <td>{{ formatAmount(w.balance, w.walletType.currency) }}</td>
               <td>{{ new Date(w.createdAt).toLocaleDateString() }}</td>
-              <td><button class="admin-btn admin-btn-ghost" @click="toggleAdjust(w.id)">{{ t('admin.wallets.adjust') }}</button></td>
+              <td>
+                <span class="admin-badge" :class="{ 'status-closed': w.closedAt }">
+                  {{ w.closedAt ? t('admin.wallets.statusClosed') : t('admin.wallets.statusActive') }}
+                </span>
+              </td>
+              <td class="actions-cell">
+                <button class="admin-btn admin-btn-ghost" @click="toggleAdjust(w.id)">{{ t('admin.wallets.adjust') }}</button>
+                <button v-if="w.closedAt" class="admin-btn admin-btn-ghost" :disabled="busy" @click="reopen(w)">
+                  {{ t('admin.wallets.reopen') }}
+                </button>
+              </td>
             </tr>
             <tr v-if="openAdjustId === w.id">
-              <td colspan="6">
+              <td colspan="7">
                 <div class="adjust-row">
                   <input
                     v-model="adjustAmount[w.id]"
@@ -112,7 +136,7 @@ onMounted(load);
               </td>
             </tr>
           </template>
-          <tr v-if="!filtered.length"><td colspan="6">{{ t('admin.wallets.noWallets') }}</td></tr>
+          <tr v-if="!filtered.length"><td colspan="7">{{ t('admin.wallets.noWallets') }}</td></tr>
         </tbody>
       </table>
     </div>
@@ -147,5 +171,12 @@ onMounted(load);
   display: flex;
   gap: 10px;
   padding: 8px 0;
+}
+.actions-cell {
+  display: flex;
+  gap: 8px;
+}
+.status-closed {
+  color: var(--accent-red);
 }
 </style>
