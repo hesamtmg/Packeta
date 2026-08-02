@@ -628,7 +628,7 @@ describe('WalletsService.grantCredit', () => {
     expect(manager.create).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        type: 'TRANSFER',
+        type: 'VIRTUAL',
         fromWalletId: 'repo-1',
         toWalletId: 'credit-wallet-1',
         amount: '400',

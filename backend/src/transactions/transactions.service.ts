@@ -1143,6 +1143,21 @@ export class TransactionsService {
         note: 'Repository funded the credit wallet for this purchase',
       });
       await manager.save(fundingTransfer);
+
+      // The real-money leg above is recorded as its own TRANSFER — this is
+      // the separate virtualAmount leg: the credit wallet's remaining ceiling
+      // shrinking by the same amount it was just drawn on for. Its own
+      // VIRTUAL row (not folded into fundingTransfer) so the ledger keeps
+      // "real money moved" and "credit ceiling consumed" distinct.
+      const ceilingDrawDown = manager.create(Transaction, {
+        type: TransactionType.VIRTUAL,
+        fromWalletId: fromWallet.id,
+        toWalletId: null,
+        amount: remainder.toString(),
+        idempotencyKey: `credit-draw:${transaction.id}`,
+        note: 'Credit wallet ceiling drawn down for this purchase',
+      });
+      await manager.save(ceilingDrawDown);
     }
 
     const floor = fromWalletRef.walletType.allowNegativeBalance

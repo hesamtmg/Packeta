@@ -33,6 +33,16 @@ export class Installment {
   @JoinColumn({ name: 'walletId' })
   wallet: Wallet;
 
+  // The VIRTUAL transaction that granted this wallet the credit ceiling this
+  // installment plan repays (see WalletsService.grantCredit) — the fixed,
+  // never-mutated source InstallmentsService.generateDue splits across the
+  // schedule, unlike the wallet's live virtualAmount ceiling, which
+  // fluctuates as it's spent and repaid. Also how generateDue tells which
+  // grants already have their installmentCount rows generated.
+  @Index()
+  @Column({ type: 'uuid', nullable: true })
+  sourceTransactionId: string | null;
+
   // 1-based position within the credit line's WalletType.installmentCount
   // schedule.
   @Column({ type: 'smallint' })

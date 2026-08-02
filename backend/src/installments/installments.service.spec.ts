@@ -3,13 +3,14 @@ import { InstallmentStatus } from './entities/installment.entity';
 
 function buildService(options: {
   wallets?: any[];
-  existingByWallet?: Record<string, any[]>;
+  existingBySourceTransaction?: Record<string, any[]>;
   overdueRows?: any[];
+  grantsByWallet?: Record<string, any>;
 }) {
   const installmentsRepository = {
     find: jest.fn(
-      async ({ where: { walletId } }: any) =>
-        options.existingByWallet?.[walletId] ?? [],
+      async ({ where: { sourceTransactionId } }: any) =>
+        options.existingBySourceTransaction?.[sourceTransactionId] ?? [],
     ),
     create: jest.fn((data: any) => ({ ...data })),
     save: jest.fn(async (data: any) => ({ id: 'installment-1', ...data })),
@@ -29,11 +30,23 @@ function buildService(options: {
       getMany: jest.fn(async () => options.wallets ?? []),
     })),
   };
+  const transactionsRepository = {
+    findOne: jest.fn(
+      async ({ where: { toWalletId } }: any) =>
+        options.grantsByWallet?.[toWalletId] ?? null,
+    ),
+  };
   const service = new InstallmentsService(
     installmentsRepository as any,
     walletsRepository as any,
+    transactionsRepository as any,
   );
-  return { service, installmentsRepository, walletsRepository };
+  return {
+    service,
+    installmentsRepository,
+    walletsRepository,
+    transactionsRepository,
+  };
 }
 
 describe('InstallmentsService.computeInstallmentPrincipal', () => {
@@ -84,18 +97,29 @@ describe('InstallmentsService.computeDeadlineDate', () => {
 describe('InstallmentsService.generateDue', () => {
   const wallet = {
     id: 'wallet-1',
-    virtualAmount: '900',
+    repositoryWalletId: 'repo-1',
     walletType: {
       installmentCount: 3,
       feePercent: '10',
       paymentDeadlineDate: 15,
     },
   };
+  // The VIRTUAL transaction WalletsService.grantCredit recorded when this
+  // wallet was granted its credit line — the fixed amount generateDue now
+  // splits, instead of the wallet's live (and here deliberately absent)
+  // virtualAmount.
+  const grant = {
+    id: 'grant-tx-1',
+    fromWalletId: 'repo-1',
+    toWalletId: 'wallet-1',
+    amount: '900',
+  };
 
   it('generates the next installment for an eligible wallet with none yet', async () => {
     const { service, installmentsRepository } = buildService({
       wallets: [wallet],
-      existingByWallet: {},
+      grantsByWallet: { 'wallet-1': grant },
+      existingBySourceTransaction: {},
     });
 
     const today = new Date(2026, 0, 1);
@@ -105,6 +129,7 @@ describe('InstallmentsService.generateDue', () => {
     expect(installmentsRepository.create).toHaveBeenCalledWith(
       expect.objectContaining({
         walletId: 'wallet-1',
+        sourceTransactionId: 'grant-tx-1',
         sequenceNumber: 1,
         principalAmount: '300', // 900/3
         amount: '330', // principal 300 + 10% fee (30)
@@ -113,11 +138,24 @@ describe('InstallmentsService.generateDue', () => {
     );
   });
 
+  it('skips a wallet with no VIRTUAL grant transaction on record', async () => {
+    const { service, installmentsRepository } = buildService({
+      wallets: [wallet],
+      grantsByWallet: {},
+    });
+
+    const created = await service.generateDue(new Date(2026, 0, 1));
+
+    expect(created).toHaveLength(0);
+    expect(installmentsRepository.create).not.toHaveBeenCalled();
+  });
+
   it('skips a wallet that already has every installment generated', async () => {
     const { service, installmentsRepository } = buildService({
       wallets: [wallet],
-      existingByWallet: {
-        'wallet-1': [
+      grantsByWallet: { 'wallet-1': grant },
+      existingBySourceTransaction: {
+        'grant-tx-1': [
           { dueDate: '2025-11-01' },
           { dueDate: '2025-12-01' },
           { dueDate: '2025-10-01' },
@@ -134,8 +172,9 @@ describe('InstallmentsService.generateDue', () => {
   it("is idempotent within the same day (doesn't double-generate)", async () => {
     const { service, installmentsRepository } = buildService({
       wallets: [wallet],
-      existingByWallet: {
-        'wallet-1': [{ dueDate: '2026-01-01' }],
+      grantsByWallet: { 'wallet-1': grant },
+      existingBySourceTransaction: {
+        'grant-tx-1': [{ dueDate: '2026-01-01' }],
       },
     });
 
@@ -265,10 +304,12 @@ describe('InstallmentsService.markPaid', () => {
         if (id === wallet.id) return wallet;
         return null;
       }),
+      create: jest.fn((_entity: any, data: any) => ({ ...data })),
+      save: jest.fn(async (data: any) => data),
     };
   }
 
-  it('marks the installment paid, clears the block, and restores virtualAmount by the installment amount', async () => {
+  it('marks the installment paid, clears the block, restores virtualAmount, and records a VIRTUAL restore transaction', async () => {
     const { service } = buildService({});
     const installment = {
       id: 'installment-1',
@@ -286,6 +327,16 @@ describe('InstallmentsService.markPaid', () => {
     expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'wallet-1', {
       virtualAmount: '930',
     });
+    expect(manager.create).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: 'VIRTUAL',
+        fromWalletId: null,
+        toWalletId: 'wallet-1',
+        amount: '330',
+        idempotencyKey: 'installment-restore:installment-1',
+      }),
+    );
   });
 
   it('restores from a null virtualAmount as if it were zero', async () => {

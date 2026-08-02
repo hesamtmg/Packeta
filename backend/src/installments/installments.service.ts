@@ -7,6 +7,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { Installment, InstallmentStatus } from './entities/installment.entity';
 import { Wallet } from '../wallets/entities/wallet.entity';
+import {
+  Transaction,
+  TransactionType,
+} from '../transactions/entities/transaction.entity';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -36,19 +40,22 @@ export class InstallmentsService {
     private readonly installmentsRepository: Repository<Installment>,
     @InjectRepository(Wallet)
     private readonly walletsRepository: Repository<Wallet>,
+    @InjectRepository(Transaction)
+    private readonly transactionsRepository: Repository<Transaction>,
   ) {}
 
-  // Splits a granted virtualAmount into installmentCount equal shares — the
+  // Splits a grant amount (a VIRTUAL transaction's amount — see
+  // WalletsService.grantCredit) into installmentCount equal shares — the
   // remainder, if any, folds into the last installment so the total always
   // reconciles exactly. This is the fee/penalty percentage base
   // (Installment.principalAmount), fixed at generation time.
   computeInstallmentPrincipal(
-    virtualAmount: bigint,
+    grantAmount: bigint,
     installmentCount: number,
     sequenceNumber: number,
   ): bigint {
-    const share = virtualAmount / BigInt(installmentCount);
-    const remainder = virtualAmount % BigInt(installmentCount);
+    const share = grantAmount / BigInt(installmentCount);
+    const remainder = grantAmount % BigInt(installmentCount);
     const isLast = sequenceNumber === installmentCount;
     return share + (isLast ? remainder : 0n);
   }
@@ -83,10 +90,19 @@ export class InstallmentsService {
   }
 
   // Generates the next scheduled installment for every repository-backed
-  // credit wallet whose type's installmentDate matches today, and that
-  // hasn't yet had all installmentCount installments generated. Idempotent
-  // within a single day — skips a wallet that already has an installment
-  // dated today.
+  // credit wallet whose type's installmentDate matches today, and whose
+  // originating grant (the VIRTUAL transaction WalletsService.grantCredit
+  // recorded — see Installment.sourceTransactionId) hasn't yet had all
+  // installmentCount installments generated from it. Idempotent within a
+  // single day — skips a wallet that already has an installment dated
+  // today.
+  //
+  // Splits that grant's fixed amount, not the wallet's live virtualAmount:
+  // the ceiling moves constantly as the wallet spends and repays (see
+  // TransactionsService.settleCreditFundedPurchase and markPaid below), so
+  // reading it at generation time would mean the schedule's total no longer
+  // matches what was actually lent, depending on how much the customer had
+  // already drawn down or repaid by the time this tick ran.
   async generateDue(today: Date = new Date()): Promise<Installment[]> {
     const dayOfMonth = today.getDate();
     const todayDate = toDateOnly(today);
@@ -98,21 +114,31 @@ export class InstallmentsService {
       .andWhere('wallet.closedAt IS NULL')
       .andWhere('walletType.installmentDate = :dayOfMonth', { dayOfMonth })
       .andWhere('walletType.installmentCount IS NOT NULL')
-      .andWhere('wallet.virtualAmount IS NOT NULL')
       .getMany();
 
     const created: Installment[] = [];
     for (const wallet of wallets) {
       const installmentCount = wallet.walletType.installmentCount!;
+
+      const grant = await this.transactionsRepository.findOne({
+        where: {
+          type: TransactionType.VIRTUAL,
+          fromWalletId: wallet.repositoryWalletId!,
+          toWalletId: wallet.id,
+        },
+        order: { createdAt: 'ASC' },
+      });
+      if (!grant) continue;
+
       const existing = await this.installmentsRepository.find({
-        where: { walletId: wallet.id },
+        where: { sourceTransactionId: grant.id },
       });
       if (existing.length >= installmentCount) continue;
       if (existing.some((i) => i.dueDate === todayDate)) continue;
 
       const sequenceNumber = existing.length + 1;
       const principal = this.computeInstallmentPrincipal(
-        BigInt(wallet.virtualAmount!),
+        BigInt(grant.amount),
         installmentCount,
         sequenceNumber,
       );
@@ -124,6 +150,7 @@ export class InstallmentsService {
 
       const installment = this.installmentsRepository.create({
         walletId: wallet.id,
+        sourceTransactionId: grant.id,
         sequenceNumber,
         amount: amount.toString(),
         principalAmount: principal.toString(),
@@ -280,6 +307,19 @@ export class InstallmentsService {
         await manager.update(Wallet, wallet.id, {
           virtualAmount: restored.toString(),
         });
+        // Mirror image of the VIRTUAL draw-down recorded at spend time (see
+        // TransactionsService.settleCreditFundedPurchase) — its own ledger
+        // row so the ceiling's ups and downs are all individually visible,
+        // not just inferable from the wallet's current virtualAmount.
+        const restoreTransaction = manager.create(Transaction, {
+          type: TransactionType.VIRTUAL,
+          fromWalletId: null,
+          toWalletId: wallet.id,
+          amount: installment.amount,
+          idempotencyKey: `installment-restore:${installment.id}`,
+          note: 'Credit wallet ceiling restored by installment repayment',
+        });
+        await manager.save(restoreTransaction);
       }
     }
   }

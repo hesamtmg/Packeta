@@ -360,11 +360,14 @@ export class WalletsService {
 
     // Not a real-money transfer (nothing moves between fromWalletId's and
     // toWalletId's spendable `balance` here — that only happens once the
-    // credit wallet is actually spent from), but it's still a virtual-pool
-    // movement worth a ledger entry so it's visible in the repository
-    // owner's and personnel's transaction history like any other movement.
+    // credit wallet is actually spent from) — a VIRTUAL row, so it's visible
+    // in the repository owner's and personnel's transaction history like any
+    // other movement, and so InstallmentsService.generateDue has a fixed,
+    // immutable grant amount to build this wallet's installment plan from
+    // (see Installment.sourceTransactionId) instead of the live, constantly
+    // -fluctuating virtualAmount.
     const transaction = manager.create(Transaction, {
-      type: TransactionType.TRANSFER,
+      type: TransactionType.VIRTUAL,
       fromWalletId: repository.id,
       toWalletId: creditWallet.id,
       amount: requested.toString(),
