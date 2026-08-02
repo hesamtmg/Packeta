@@ -71,7 +71,7 @@ export class PurchaseGatewayService {
     };
   }
 
-  async requestCaptcha(): Promise<{ captchaId: string; question: string }> {
+  async requestCaptcha(): Promise<{ captchaId: string; image: string }> {
     return this.captchaService.generate();
   }
 

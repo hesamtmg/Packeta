@@ -14,7 +14,7 @@ export default {
   phone: {
     prompt: 'Enter your phone number to identify yourself and pick a wallet to pay from.',
     placeholder: '+15551234567',
-    captchaPrefix: 'Quick check: {question}',
+    captchaPrefix: 'Enter the code shown in the image',
     answerPlaceholder: 'Answer',
     sendCode: 'Send code',
   },

@@ -54,7 +54,7 @@ const chargeInfo = ref<ChargeStatus | null>(null);
 
 const phoneNumber = ref('');
 const captchaId = ref('');
-const captchaQuestion = ref('');
+const captchaImage = ref('');
 const captchaAnswer = ref('');
 const otpDigits = ref<string[]>(['', '', '', '', '', '']);
 const otpInputRefs = ref<(HTMLInputElement | null)[]>([]);
@@ -113,14 +113,14 @@ const statusMessage = computed(() => {
 
 async function loadCaptcha() {
   try {
-    const result = await packetaRequest<{ captchaId: string; question: string }>(
+    const result = await packetaRequest<{ captchaId: string; image: string }>(
       '/purchase-gateway/captcha',
     );
     captchaId.value = result.captchaId;
-    captchaQuestion.value = result.question;
+    captchaImage.value = result.image;
     captchaAnswer.value = '';
   } catch {
-    captchaQuestion.value = '';
+    captchaImage.value = '';
   }
 }
 
@@ -379,8 +379,9 @@ onUnmounted(() => {
           <p class="status">{{ t('phone.prompt') }}</p>
           <form class="gateway-form" @submit.prevent="onRequestOtp">
             <input v-model="phoneNumber" type="tel" :placeholder="t('phone.placeholder')" required />
-            <label v-if="captchaQuestion" class="captcha-label">
-              {{ t('phone.captchaPrefix', { question: captchaQuestion }) }}
+            <label v-if="captchaImage" class="captcha-label">
+              {{ t('phone.captchaPrefix') }}
+              <img :src="captchaImage" :alt="t('phone.captchaPrefix')" class="captcha-image" />
               <input v-model="captchaAnswer" type="text" inputmode="numeric" :placeholder="t('phone.answerPlaceholder')" required />
             </label>
             <button class="confirm" type="submit" :disabled="gatewayBusy">{{ t('phone.sendCode') }}</button>
@@ -751,6 +752,13 @@ onUnmounted(() => {
   gap: 0.4rem;
   color: #6b7280;
   font-size: 0.85rem;
+}
+.captcha-image {
+  width: 180px;
+  height: 56px;
+  align-self: center;
+  border-radius: 12px;
+  border: 1px solid #e3e5f2;
 }
 .link-btn {
   background: none;

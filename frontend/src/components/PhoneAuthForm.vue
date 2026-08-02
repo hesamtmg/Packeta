@@ -11,7 +11,7 @@ const step = ref<Step>('phone');
 
 const phoneNumber = ref('');
 const captchaId = ref('');
-const captchaQuestion = ref('');
+const captchaImage = ref('');
 const captchaAnswer = ref('');
 const code = ref('');
 const devCodeHint = ref('');
@@ -20,11 +20,11 @@ const busy = ref(false);
 
 async function loadCaptcha() {
   try {
-    const captcha = await apiRequest<{ captchaId: string; question: string }>(
+    const captcha = await apiRequest<{ captchaId: string; image: string }>(
       '/auth/phone/captcha',
     );
     captchaId.value = captcha.captchaId;
-    captchaQuestion.value = captcha.question;
+    captchaImage.value = captcha.image;
     captchaAnswer.value = '';
   } catch {
     // Non-critical — the captcha field just stays blank and request-otp
@@ -97,8 +97,9 @@ function backToPhone() {
         required
       />
     </label>
-    <label v-if="captchaQuestion">
-      {{ t('auth.phone.captchaLabel', { question: captchaQuestion }) }}
+    <label v-if="captchaImage" class="captcha-field">
+      {{ t('auth.phone.captchaLabel') }}
+      <img :src="captchaImage" :alt="t('auth.phone.captchaLabel')" class="captcha-image" />
       <input v-model="captchaAnswer" type="text" inputmode="numeric" class="admin-input" required />
     </label>
     <p v-if="error" class="admin-error">{{ error }}</p>
@@ -151,5 +152,14 @@ function backToPhone() {
   color: var(--accent-lime);
   font-size: 0.8rem;
   font-family: monospace;
+}
+.captcha-field {
+  gap: 6px;
+}
+.captcha-image {
+  width: 180px;
+  height: 56px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--card-border);
 }
 </style>
