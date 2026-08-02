@@ -15,9 +15,9 @@ import { Currency } from '../../currencies/entities/currency.entity';
 // defaults and to auto-create a starter wallet of each type on signup.
 export enum WalletTypeCode {
   BUY = 'BUY',
-  SELL = 'SELL',
-  CREDIT = 'CREDIT',
   GIFT = 'GIFT',
+  CREDIT = 'CREDIT',
+
   MERCHANT = 'MERCHANT',
   // A "money repository": a big real+virtual balance a business/corporate
   // user holds, then splits out to personnel as CREDIT wallets — see
