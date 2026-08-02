@@ -73,7 +73,7 @@ const busy = ref(false);
 // datalist suggestions so an admin creating a type sees REPOSITORY/CREDIT/
 // etc. rather than having to know the exact string to type. Still free text
 // underneath, since a custom code (e.g. a one-off promo type) is valid too.
-const KNOWN_WALLET_TYPE_CODES = ['BUY', 'SELL', 'CREDIT', 'GIFT', 'MERCHANT', 'REPOSITORY'];
+const KNOWN_WALLET_TYPE_CODES = ['BUY', 'SELL', 'CREDIT', 'GIFT', 'MERCHANT', 'REPOSITORY','SUPPORT'];
 
 const newType = reactive({
   code: '',
