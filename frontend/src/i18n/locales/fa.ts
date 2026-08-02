@@ -19,6 +19,8 @@ export default {
     admins: 'مدیران',
     walletTypes: 'انواع کیف پول',
     purchase: 'ایجاد پرداخت',
+    installments: 'اقساط',
+    schedulerLogs: 'گزارش زمان‌بند',
     reports: 'گزارش‌ها',
   },
   auth: {
@@ -113,6 +115,8 @@ export default {
       statusOverdue: 'معوق',
       statusPaid: 'پرداخت‌شده',
       pay: 'پرداخت',
+      viewLink: 'مشاهده اقساط',
+      none: 'هنوز قسطی وجود ندارد.',
     },
     settlement: {
       walletHint:
@@ -180,7 +184,12 @@ export default {
     },
     actions: {
       deposit: { title: 'واریز', chooseWallet: 'انتخاب کیف پول', submit: 'واریز' },
-      withdraw: { title: 'برداشت', chooseWallet: 'انتخاب کیف پول', submit: 'برداشت' },
+      withdraw: {
+        title: 'برداشت',
+        chooseWallet: 'انتخاب کیف پول',
+        chooseRail: 'روش برداشت را انتخاب کنید',
+        submit: 'برداشت',
+      },
       transfer: {
         title: 'انتقال',
         fromWallet: 'از کیف پول',
@@ -277,6 +286,35 @@ export default {
       tableDate: 'تاریخ',
       noTransactions: 'تراکنشی یافت نشد.',
       loadFailed: 'بارگذاری تراکنش‌ها ناموفق بود',
+    },
+    installments: {
+      title: 'اقساط',
+      all: 'همه اقساط ({count})',
+      searchPlaceholder: 'جستجو بر اساس مالک…',
+      tableOwner: 'مالک',
+      tableWalletType: 'نوع کیف پول',
+      tableAmount: 'مبلغ',
+      tableDeadline: 'مهلت',
+      tableStatus: 'وضعیت',
+      none: 'قسطی یافت نشد.',
+      loadFailed: 'بارگذاری اقساط ناموفق بود',
+    },
+    schedulerLogs: {
+      title: 'گزارش زمان‌بند',
+      recent: 'اجراهای اخیر ({count})',
+      refresh: 'به‌روزرسانی',
+      tableAction: 'وظیفه',
+      tableDetails: 'جزئیات',
+      tableWhen: 'زمان',
+      none: 'هنوز فعالیتی ثبت نشده است.',
+      loadFailed: 'بارگذاری گزارش زمان‌بند ناموفق بود',
+      actions: {
+        auto_withdraw_sweep: 'برداشت خودکار',
+        rail_settlement_sweep: 'تسویه ریلی',
+        installment_generate: 'ایجاد قسط',
+        installment_overdue_penalty: 'اعمال جریمه تأخیر',
+        purchase_timeout_reverse: 'برگشت پرداخت منقضی‌شده',
+      },
     },
     wallets: {
       title: 'کیف‌پول‌ها',

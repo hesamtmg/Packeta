@@ -32,6 +32,7 @@ import { SettlementSplitDto } from '../settlement/dto/settlement-split.dto';
 import { InstallmentsService } from '../installments/installments.service';
 import { InstallmentStatus } from '../installments/entities/installment.entity';
 import { RailSettlementsService } from '../rail-settlements/rail-settlements.service';
+import { SettlementRailType } from '../rail-settlements/entities/rail-settlement.entity';
 
 export interface MoneyResult {
   transactionId: string;
@@ -139,16 +140,25 @@ export class TransactionsService {
     );
   }
 
+  // Merchant-style wallet types (walletType.supportsAutoWithdraw) never
+  // withdraw manually — their balance only leaves on the auto-withdraw sweep
+  // schedule (see AutoWithdrawSweepService/SettlementRailSweepService), so
+  // this rejects the request outright rather than performing it. Every
+  // other wallet's manual withdrawal must say which interbank rail (Pol Pay
+  // / Paya / Satna / bank transfer) it goes out over — recorded as a
+  // RailSettlement audit row alongside the WITHDRAW, the same way an
+  // auto-swept payout is (see sweepAutoWithdraw's recordRailSettlement).
   async withdraw(
     userId: string,
     walletId: string,
     amount: number,
+    railType: SettlementRailType,
     idempotencyKey: string,
   ): Promise<MoneyResult> {
     return this.run(
       'withdraw',
       userId,
-      { walletId, amount },
+      { walletId, amount, railType },
       idempotencyKey,
       async (manager) => {
         const walletRef = await this.walletsService.getById(userId, walletId);
@@ -156,6 +166,11 @@ export class TransactionsService {
           throw new BadRequestException('This wallet is closed');
         }
         this.assertNotBlocked(walletRef);
+        if (walletRef.walletType.supportsAutoWithdraw) {
+          throw new ForbiddenException(
+            `${walletRef.walletType.name} wallets withdraw automatically on schedule — manual withdrawal is not available`,
+          );
+        }
         if (!walletRef.walletType.allowWithdraw) {
           throw new ForbiddenException(
             `${walletRef.walletType.name} wallets do not support withdrawals`,
@@ -184,6 +199,22 @@ export class TransactionsService {
           idempotencyKey,
         });
         await manager.save(transaction);
+
+        const settlement = await this.railSettlementsService.createForSweep(
+          manager,
+          {
+            walletId: wallet.id,
+            railType,
+            amount: amount.toString(),
+            destinationIban: null,
+            label: null,
+            transactionId: transaction.id,
+            scheduledFor: new Date(),
+          },
+        );
+        await manager.update(Transaction, transaction.id, {
+          railSettlementId: settlement.id,
+        });
 
         return {
           transactionId: transaction.id,

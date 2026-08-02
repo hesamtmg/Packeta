@@ -3,6 +3,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { WalletsModule } from '../wallets/wallets.module';
 import { TransactionsModule } from '../transactions/transactions.module';
 import { InstallmentsModule } from '../installments/installments.module';
+import { LoggingModule } from '../logging/logging.module';
 import { PurchaseTimeoutSweepService } from './purchase-timeout-sweep.service';
 import { AutoWithdrawSweepService } from './auto-withdraw-sweep.service';
 import { InstallmentSweepService } from './installment-sweep.service';
@@ -14,6 +15,7 @@ import { SettlementRailSweepService } from './settlement-rail-sweep.service';
     WalletsModule,
     TransactionsModule,
     InstallmentsModule,
+    LoggingModule,
   ],
   providers: [
     PurchaseTimeoutSweepService,

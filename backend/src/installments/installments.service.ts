@@ -216,6 +216,20 @@ export class InstallmentsService {
       .getMany();
   }
 
+  // Admin-only: every installment across every credit wallet, any customer
+  // — the admin panel's global view. Loads wallet + owner so the panel can
+  // show whose installment it is without a second round trip per row.
+  async findAll(): Promise<Installment[]> {
+    return this.installmentsRepository
+      .createQueryBuilder('installment')
+      .innerJoinAndSelect('installment.wallet', 'wallet')
+      .innerJoinAndSelect('wallet.user', 'user')
+      .innerJoinAndSelect('wallet.walletType', 'walletType')
+      .innerJoinAndSelect('walletType.currency', 'currency')
+      .orderBy('installment.deadlineDate', 'DESC')
+      .getMany();
+  }
+
   async getByIdForUser(
     userId: string,
     installmentId: string,

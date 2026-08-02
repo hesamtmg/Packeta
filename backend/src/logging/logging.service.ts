@@ -7,7 +7,7 @@ import {
 } from './schemas/activity-log.schema';
 
 interface LogEntry {
-  category: 'AUTH' | 'TRANSACTION';
+  category: 'AUTH' | 'TRANSACTION' | 'SCHEDULER';
   action: string;
   success: boolean;
   userId?: string;
@@ -33,5 +33,20 @@ export class LoggingService {
     } catch (error) {
       this.logger.error(`Failed to write activity log: ${error}`);
     }
+  }
+
+  // Admin-facing readback — most recent entries first, optionally narrowed
+  // to one category (e.g. the scheduler run history shown in the admin
+  // panel).
+  async findRecent(
+    category?: LogEntry['category'],
+    limit = 200,
+  ): Promise<ActivityLog[]> {
+    const query = category ? { category } : {};
+    return this.activityLogModel
+      .find(query)
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
   }
 }
