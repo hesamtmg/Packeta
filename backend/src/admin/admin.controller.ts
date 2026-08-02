@@ -24,8 +24,11 @@ import {
 import { UsersService } from '../users/users.service';
 import { WalletsService } from '../wallets/wallets.service';
 import { TransactionsService } from '../transactions/transactions.service';
+import { InstallmentsService } from '../installments/installments.service';
+import { LoggingService } from '../logging/logging.service';
 import { BatchImportService } from './batch-import.service';
 import { serializeWallet } from '../wallets/wallet.serializer';
+import { serializeInstallment } from '../installments/installment.serializer';
 import { AdjustWalletDto } from './dto/adjust-wallet.dto';
 import { UpdateUserRoleDto } from './dto/update-user-role.dto';
 import { AdminCreateChargeDto } from './dto/admin-create-charge.dto';
@@ -40,6 +43,8 @@ export class AdminController {
     private readonly usersService: UsersService,
     private readonly walletsService: WalletsService,
     private readonly transactionsService: TransactionsService,
+    private readonly installmentsService: InstallmentsService,
+    private readonly loggingService: LoggingService,
     private readonly batchImportService: BatchImportService,
   ) {}
 
@@ -164,6 +169,29 @@ export class AdminController {
   @Get('transactions/:id')
   async getTransaction(@Param('id') id: string) {
     return this.transactionsService.getByIdUnscoped(id);
+  }
+
+  // Every installment across every credit wallet, any customer — the panel
+  // counterpart to a customer's own per-wallet installments view.
+  @Get('installments')
+  async listInstallments() {
+    const installments = await this.installmentsService.findAll();
+    return installments.map((installment) => ({
+      ...serializeInstallment(installment),
+      ownerEmail: installment.wallet.user.email,
+      ownerPhoneNumber: installment.wallet.user.phoneNumber,
+      walletTypeName: installment.wallet.walletType.name,
+      currency: installment.wallet.walletType.currency,
+    }));
+  }
+
+  // Recent scheduler runs (installment generation/penalties, auto-withdraw
+  // and rail-settlement sweeps, purchase-timeout reversals) — the panel's
+  // window into background jobs that otherwise only show up in server logs.
+  @Get('scheduler-logs')
+  async listSchedulerLogs(@Query('limit') limit?: string) {
+    const parsedLimit = limit ? parseInt(limit, 10) : undefined;
+    return this.loggingService.findRecent('SCHEDULER', parsedLimit);
   }
 
   @Post('wallets/:id/adjust')

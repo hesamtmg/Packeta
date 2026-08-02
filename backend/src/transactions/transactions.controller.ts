@@ -52,6 +52,7 @@ export class TransactionsController {
       user.userId,
       dto.walletId,
       dto.amount,
+      dto.railType,
       idempotencyKey,
     );
   }

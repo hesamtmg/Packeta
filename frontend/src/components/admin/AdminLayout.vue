@@ -50,6 +50,16 @@ const navItems = computed(() => [
     icon: 'M3 6h18M3 6l1.5 12a2 2 0 002 2h11a2 2 0 002-2L21 6M8 10v4m4-4v4m4-4v4',
   },
   {
+    name: 'admin-installments',
+    label: t('adminNav.installments'),
+    icon: 'M9 7h6M9 11h6M9 15h4M5 3h14a2 2 0 012 2v14l-4-2-3 2-3-2-3 2-3-2V5a2 2 0 012-2z',
+  },
+  {
+    name: 'admin-scheduler-logs',
+    label: t('adminNav.schedulerLogs'),
+    icon: 'M12 8v4l3 3M12 3a9 9 0 100 18 9 9 0 000-18z',
+  },
+  {
     name: 'admin-reports',
     label: t('adminNav.reports'),
     icon: 'M4 19V9m6 10V4m6 15v-6',

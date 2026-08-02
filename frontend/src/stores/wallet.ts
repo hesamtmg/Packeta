@@ -170,6 +170,12 @@ export const useWalletStore = defineStore('wallet', {
     async fetchInstallments() {
       this.installments = await apiRequest<Installment[]>('/installments');
     },
+    // One credit wallet's own installment schedule — the dedicated
+    // per-wallet view linked from that wallet's card, as opposed to
+    // fetchInstallments() which mixes every credit wallet together.
+    async fetchInstallmentsForWallet(walletId: string) {
+      return apiRequest<Installment[]>(`/installments/wallet/${walletId}`);
+    },
     async payInstallment(installmentId: string) {
       return apiRequest<{ transactionId: string; redirectUrl: string; expiresAt: string }>(
         `/transactions/installments/${installmentId}/pay`,
@@ -215,10 +221,10 @@ export const useWalletStore = defineStore('wallet', {
         },
       );
     },
-    async withdraw(walletId: string, amount: number) {
+    async withdraw(walletId: string, amount: number, railType: SettlementRailType) {
       await apiRequest('/transactions/withdraw', {
         method: 'POST',
-        body: { walletId, amount },
+        body: { walletId, amount, railType },
         idempotent: true,
       });
       await Promise.all([this.fetchWallets(), this.fetchTransactions()]);

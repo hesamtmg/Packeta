@@ -19,6 +19,8 @@ export default {
     admins: 'Admins',
     walletTypes: 'Wallet Types',
     purchase: 'Create Charge',
+    installments: 'Installments',
+    schedulerLogs: 'Scheduler Logs',
     reports: 'Reports',
   },
   auth: {
@@ -113,6 +115,8 @@ export default {
       statusOverdue: 'Overdue',
       statusPaid: 'Paid',
       pay: 'Pay',
+      viewLink: 'View installments',
+      none: 'No installments yet.',
     },
     settlement: {
       walletHint:
@@ -180,7 +184,12 @@ export default {
     },
     actions: {
       deposit: { title: 'Deposit', chooseWallet: 'Choose wallet', submit: 'Deposit' },
-      withdraw: { title: 'Withdraw', chooseWallet: 'Choose wallet', submit: 'Withdraw' },
+      withdraw: {
+        title: 'Withdraw',
+        chooseWallet: 'Choose wallet',
+        chooseRail: 'Choose how you want to withdraw',
+        submit: 'Withdraw',
+      },
       transfer: {
         title: 'Transfer',
         fromWallet: 'From wallet',
@@ -277,6 +286,35 @@ export default {
       tableDate: 'Date',
       noTransactions: 'No transactions found.',
       loadFailed: 'Failed to load transactions',
+    },
+    installments: {
+      title: 'Installments',
+      all: 'All installments ({count})',
+      searchPlaceholder: 'Search by owner…',
+      tableOwner: 'Owner',
+      tableWalletType: 'Wallet type',
+      tableAmount: 'Amount',
+      tableDeadline: 'Deadline',
+      tableStatus: 'Status',
+      none: 'No installments found.',
+      loadFailed: 'Failed to load installments',
+    },
+    schedulerLogs: {
+      title: 'Scheduler Logs',
+      recent: 'Recent runs ({count})',
+      refresh: 'Refresh',
+      tableAction: 'Job',
+      tableDetails: 'Details',
+      tableWhen: 'When',
+      none: 'No scheduler activity yet.',
+      loadFailed: 'Failed to load scheduler logs',
+      actions: {
+        auto_withdraw_sweep: 'Auto-withdraw sweep',
+        rail_settlement_sweep: 'Rail-settlement sweep',
+        installment_generate: 'Installment generation',
+        installment_overdue_penalty: 'Overdue penalty applied',
+        purchase_timeout_reverse: 'Purchase timeout reversal',
+      },
     },
     wallets: {
       title: 'Wallets',

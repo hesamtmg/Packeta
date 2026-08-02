@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { WalletsService } from '../wallets/wallets.service';
 import { TransactionsService } from '../transactions/transactions.service';
 import { effectiveRailScheduleTimes } from '../rail-settlements/rail-schedule';
+import { LoggingService } from '../logging/logging.service';
 
 // Merchant wallets configured with a withdrawal-schedule rail (Pol Pay /
 // Paya / Satna / bank transfer — see Wallet.railType) get swept on that
@@ -18,6 +19,7 @@ export class SettlementRailSweepService {
   constructor(
     private readonly walletsService: WalletsService,
     private readonly transactionsService: TransactionsService,
+    private readonly loggingService: LoggingService,
   ) {}
 
   @Cron('* * * * *')
@@ -41,6 +43,16 @@ export class SettlementRailSweepService {
       this.logger.log(
         `Rail-settled wallet ${wallet.id} via ${wallet.railType} at ${currentTime}`,
       );
+      await this.loggingService.log({
+        category: 'SCHEDULER',
+        action: 'rail_settlement_sweep',
+        success: true,
+        metadata: {
+          walletId: wallet.id,
+          railType: wallet.railType,
+          currentTime,
+        },
+      });
     }
   }
 }
