@@ -97,7 +97,7 @@ export class AuthService {
     return this.issueToken(user);
   }
 
-  requestPhoneCaptcha(): { captchaId: string; question: string } {
+  requestPhoneCaptcha(): { captchaId: string; image: string } {
     return this.captchaService.generate();
   }
 

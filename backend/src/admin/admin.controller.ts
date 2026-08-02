@@ -230,6 +230,11 @@ export class AdminController {
         'CREDIT wallets can only be created by a repository owner via POST /wallets/credit-grant',
       );
     }
+    if (walletType.code === WalletTypeCode.SUPPORT) {
+      throw new BadRequestException(
+        'SUPPORT wallets are provisioned automatically when a credit purchase needs a top-up',
+      );
+    }
     if (dto.virtualAmount !== undefined && !walletType.hasVirtualBalance) {
       throw new BadRequestException(
         'This wallet type does not support a virtual balance',

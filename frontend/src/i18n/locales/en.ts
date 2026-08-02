@@ -46,7 +46,7 @@ export default {
     },
     phone: {
       phoneLabel: 'Phone number',
-      captchaLabel: 'Quick check: {question}',
+      captchaLabel: 'Enter the code shown in the image',
       sendCode: 'Send code',
       codeSentTo: 'Enter the code sent to {phone}',
       devHint: 'Sandbox — your code is {code} (no SMS is actually sent)',

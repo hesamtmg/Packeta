@@ -122,6 +122,15 @@ export class Transaction {
   @Column({ type: 'uuid', nullable: true })
   railSettlementId: string | null;
 
+  // Only set on a real-money DEPOSIT-style row created by
+  // TransactionsService.initiateSupportTopUp: the PENDING PURCHASE this
+  // ZarinPal payment exists to cover the credit-line shortfall of. Once this
+  // row verifies, verifyPurchase uses it to fund and complete that purchase
+  // — see the support top-up branch there.
+  @Index()
+  @Column({ type: 'uuid', nullable: true })
+  completesPurchaseId: string | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }
