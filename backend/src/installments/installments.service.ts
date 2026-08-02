@@ -246,8 +246,16 @@ export class InstallmentsService {
   }
 
   // Called from inside TransactionsService.verifyPurchase's transaction once
-  // the repayment purchase completes: marks the installment PAID and, if its
-  // wallet was blocked, clears the block.
+  // the repayment purchase completes: marks the installment PAID, and, if
+  // its wallet was blocked, clears the block. Also restores the wallet's
+  // virtualAmount (credit ceiling) by the installment's own amount — the
+  // mirror image of the draw at spend time (see verifyPurchase's
+  // WalletTypeCode.CREDIT branch), so repaying an installment frees up that
+  // much credit to draw on again. Deliberately the installment's `amount`
+  // alone, not any unblockFee folded into the charge (that's a penalty, not
+  // principal) — the repository's real balance already gets the full
+  // charge (amount + unblockFee) via verifyPurchase's generic
+  // real-money-in crediting of toWallet before this runs.
   async markPaid(
     manager: EntityManager,
     installmentId: string,
@@ -263,6 +271,16 @@ export class InstallmentsService {
     });
     if (installment) {
       await manager.update(Wallet, installment.walletId, { blockedAt: null });
+      const wallet = await manager.findOne(Wallet, {
+        where: { id: installment.walletId },
+      });
+      if (wallet) {
+        const restored =
+          BigInt(wallet.virtualAmount ?? '0') + BigInt(installment.amount);
+        await manager.update(Wallet, wallet.id, {
+          virtualAmount: restored.toString(),
+        });
+      }
     }
   }
 }
