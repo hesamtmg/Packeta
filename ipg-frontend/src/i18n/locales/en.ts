@@ -29,6 +29,15 @@ export default {
     none: 'You have no wallet eligible for this purchase.',
     continue: 'Continue',
   },
+  insufficientCredit: {
+    message: 'This wallet\'s credit line falls {amount} short of this purchase.',
+    payDifference: 'Pay {amount} by card to continue',
+    chooseDifferent: 'Choose a different wallet',
+  },
+  topUpResult: {
+    success: 'Payment completed — thanks!',
+    failed: 'The top-up could not be verified.',
+  },
   redirecting: {
     message: 'Redirecting you back to the merchant in {seconds}s…',
     continueNow: 'Continue now',
@@ -47,5 +56,6 @@ export default {
     sendCodeFailed: 'Failed to send code',
     invalidCode: 'Invalid or expired code',
     walletSelectFailed: 'Failed to select wallet',
+    topUpFailed: 'Failed to start the top-up payment',
   },
 };

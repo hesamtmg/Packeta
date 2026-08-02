@@ -7,6 +7,7 @@ import {
 import { TransactionsService } from '../transactions/transactions.service';
 import { UsersService } from '../users/users.service';
 import { WalletsService } from '../wallets/wallets.service';
+import { WalletTypeCode } from '../wallet-types/entities/wallet-type.entity';
 import { OtpService } from './otp.service';
 import { CaptchaService } from './captcha.service';
 import { serializeWallet } from '../wallets/wallet.serializer';
@@ -130,7 +131,90 @@ export class PurchaseGatewayService {
     authority: string,
     sessionToken: string,
     walletId: string,
-  ): Promise<{ transactionId: string }> {
+  ): Promise<{
+    transactionId: string;
+    insufficientCredit?: { shortfall: string; availableCredit: string };
+  }> {
+    const { charge, wallet } = await this.validateWalletChoice(
+      authority,
+      sessionToken,
+      walletId,
+    );
+
+    // A CREDIT wallet that can't cover this charge on its own isn't
+    // attached yet — the customer needs to see the shortfall and explicitly
+    // agree to pay it (see confirmSupportTopUp) before anything's
+    // committed. Every other case attaches immediately, unchanged.
+    if (
+      wallet.walletType.code === WalletTypeCode.CREDIT &&
+      wallet.repositoryWalletId
+    ) {
+      const availableCredit =
+        await this.walletsService.getAvailableCredit(wallet);
+      const chargeAmount = BigInt(charge.amount);
+      if (chargeAmount > availableCredit) {
+        return {
+          transactionId: charge.id,
+          insufficientCredit: {
+            shortfall: (chargeAmount - availableCredit).toString(),
+            availableCredit: availableCredit.toString(),
+          },
+        };
+      }
+    }
+
+    await this.transactionsService.attachPurchaseWallet(authority, wallet.id);
+    return { transactionId: charge.id };
+  }
+
+  // Called once the customer has seen the shortfall attachWallet reported
+  // and clicked through to pay it — re-derives the shortfall server-side
+  // (never trusts the client's own number), attaches the credit wallet to
+  // the charge, and kicks off a real ZarinPal payment for the difference.
+  async confirmSupportTopUp(
+    authority: string,
+    sessionToken: string,
+    walletId: string,
+  ): Promise<{ redirectUrl: string }> {
+    const { charge, wallet } = await this.validateWalletChoice(
+      authority,
+      sessionToken,
+      walletId,
+    );
+    if (
+      wallet.walletType.code !== WalletTypeCode.CREDIT ||
+      !wallet.repositoryWalletId
+    ) {
+      throw new BadRequestException(
+        'This wallet does not support a credit top-up',
+      );
+    }
+
+    const availableCredit =
+      await this.walletsService.getAvailableCredit(wallet);
+    const chargeAmount = BigInt(charge.amount);
+    if (chargeAmount <= availableCredit) {
+      throw new BadRequestException(
+        'This wallet now has enough credit to cover the purchase — go back and continue normally',
+      );
+    }
+
+    await this.transactionsService.attachPurchaseWallet(authority, wallet.id);
+    const { redirectUrl } = await this.transactionsService.initiateSupportTopUp(
+      charge.id,
+      chargeAmount - availableCredit,
+    );
+    return { redirectUrl };
+  }
+
+  // Shared by attachWallet and confirmSupportTopUp: resolves the session,
+  // loads the customer's chosen wallet, and runs every eligibility check
+  // that doesn't depend on whether a top-up is involved.
+  private async validateWalletChoice(
+    authority: string,
+    sessionToken: string,
+    walletId: string,
+  ) {
     const charge = await this.getPendingCharge(authority);
 
     const userId = this.otpService.resolveSession(authority, sessionToken);
@@ -177,8 +261,7 @@ export class PurchaseGatewayService {
       BigInt(charge.amount),
     );
 
-    await this.transactionsService.attachPurchaseWallet(authority, wallet.id);
-    return { transactionId: charge.id };
+    return { charge, wallet };
   }
 
   private async getPendingCharge(authority: string) {

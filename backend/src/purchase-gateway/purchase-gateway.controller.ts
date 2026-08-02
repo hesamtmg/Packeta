@@ -46,4 +46,13 @@ export class PurchaseGatewayController {
       dto.walletId,
     );
   }
+
+  @Post('support-topup')
+  confirmSupportTopUp(@Body() dto: AttachWalletDto) {
+    return this.purchaseGatewayService.confirmSupportTopUp(
+      dto.authority,
+      dto.sessionToken,
+      dto.walletId,
+    );
+  }
 }

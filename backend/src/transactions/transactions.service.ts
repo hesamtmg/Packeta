@@ -757,6 +757,91 @@ export class TransactionsService {
       .execute();
   }
 
+  // Step 1 of the credit-shortfall top-up: called once the customer has seen
+  // the shortfall and explicitly agreed to pay it (see
+  // PurchaseGatewayService.confirmSupportTopUp) — creates a real ZarinPal
+  // payment for exactly the shortfall and links it back to the PENDING
+  // purchase via completesPurchaseId. Idempotent: a second call while one is
+  // already PENDING just hands back the same redirect instead of charging
+  // twice. Also extends the purchase's own expiresAt to a full window, since
+  // the sandbox-IPG timeout it was created with may be far shorter than what
+  // a second, real payment gateway detour actually needs.
+  async initiateSupportTopUp(
+    purchaseTransactionId: string,
+    shortfall: bigint,
+  ): Promise<{ redirectUrl: string; topUpTransactionId: string }> {
+    return this.dataSource.transaction(async (manager) => {
+      const existing = await manager.findOne(Transaction, {
+        where: {
+          completesPurchaseId: purchaseTransactionId,
+          status: TransactionStatus.PENDING,
+        },
+      });
+      if (existing) {
+        return {
+          redirectUrl: existing.ipgPaymentUrl!,
+          topUpTransactionId: existing.id,
+        };
+      }
+
+      const purchase = await manager.findOne(Transaction, {
+        where: { id: purchaseTransactionId },
+      });
+      if (
+        !purchase ||
+        purchase.status !== TransactionStatus.PENDING ||
+        !purchase.fromWalletId
+      ) {
+        throw new NotFoundException(
+          'Purchase not found, already resolved, or has no wallet attached yet',
+        );
+      }
+
+      const expiresAt = new Date(
+        Date.now() + DEFAULT_PURCHASE_TIMEOUT_SECONDS * 1000,
+      );
+      await manager.update(Transaction, purchase.id, { expiresAt });
+
+      const creditWallet = await this.walletsService.getByIdUnscoped(
+        purchase.fromWalletId,
+      );
+      const ipgFrontendUrl = this.configService.get<string>('ipgFrontendUrl');
+
+      const topUp = manager.create(Transaction, {
+        type: TransactionType.DEPOSIT,
+        status: TransactionStatus.PENDING,
+        fromWalletId: null,
+        toWalletId: null,
+        amount: shortfall.toString(),
+        idempotencyKey: `support-topup:${purchase.id}`,
+        completesPurchaseId: purchase.id,
+        expiresAt,
+      });
+      await manager.save(topUp);
+
+      // Callback lands back on the IPG's own pay page (not Packeta's app —
+      // this customer never had a Packeta session) for the same authority,
+      // carrying the top-up's own id so it knows to verify it on mount.
+      const { authority, paymentUrl } =
+        await this.zarinpalClientService.createPayment({
+          merchantName: 'Credit top-up',
+          amount: topUp.amount,
+          displayAmount: formatAmount(
+            topUp.amount,
+            creditWallet.walletType.currency,
+          ),
+          callbackUrl: `${ipgFrontendUrl}/pay/${purchase.ipgAuthority}?topupTxnId=${topUp.id}`,
+          timeoutSeconds: DEFAULT_PURCHASE_TIMEOUT_SECONDS,
+        });
+
+      topUp.ipgAuthority = authority;
+      topUp.ipgPaymentUrl = paymentUrl;
+      await manager.save(topUp);
+
+      return { redirectUrl: paymentUrl, topUpTransactionId: topUp.id };
+    });
+  }
+
   // Used by the purchase gateway to look up a charge's currency/merchant
   // before showing the customer their eligible wallets.
   async findPendingChargeByAuthority(
