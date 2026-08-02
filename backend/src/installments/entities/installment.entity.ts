@@ -16,10 +16,12 @@ export enum InstallmentStatus {
   PAID = 'PAID',
 }
 
-// One scheduled repayment of a credit wallet's granted virtualAmount back to
-// its repository — see InstallmentsService (generation + overdue sweep) and
-// TransactionsService.payInstallment (repayment, via the same IPG purchase
-// flow as any other purchase, paid into the repository's real balance).
+// One scheduled repayment of a credit wallet's virtualAmount activity over a
+// billing period back to its repository — see InstallmentsService
+// (generation from that period's VIRTUAL transactions + the overdue sweep)
+// and TransactionsService.payInstallment (repayment, via the same IPG
+// purchase flow as any other purchase, paid into the repository's real
+// balance).
 @Entity('installments')
 export class Installment {
   @PrimaryGeneratedColumn('uuid')
@@ -33,15 +35,17 @@ export class Installment {
   @JoinColumn({ name: 'walletId' })
   wallet: Wallet;
 
-  // The VIRTUAL transaction that granted this wallet the credit ceiling this
-  // installment plan repays (see WalletsService.grantCredit) — the fixed,
-  // never-mutated source InstallmentsService.generateDue splits across the
-  // schedule, unlike the wallet's live virtualAmount ceiling, which
-  // fluctuates as it's spent and repaid. Also how generateDue tells which
-  // grants already have their installmentCount rows generated.
+  // The exact one-month billing window (see InstallmentsService.generateDue)
+  // this installment's batch summed this wallet's own VIRTUAL transactions
+  // over — [periodStart, periodEnd). Shared by every row generated in the
+  // same batch (sequenceNumber 1..installmentCount); periodEnd is also how
+  // generateDue tells a period already has its batch on record.
+  @Column({ type: 'date' })
+  periodStart: string;
+
   @Index()
-  @Column({ type: 'uuid', nullable: true })
-  sourceTransactionId: string | null;
+  @Column({ type: 'date' })
+  periodEnd: string;
 
   // 1-based position within the credit line's WalletType.installmentCount
   // schedule.

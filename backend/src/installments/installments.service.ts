@@ -44,18 +44,18 @@ export class InstallmentsService {
     private readonly transactionsRepository: Repository<Transaction>,
   ) {}
 
-  // Splits a grant amount (a VIRTUAL transaction's amount — see
-  // WalletsService.grantCredit) into installmentCount equal shares — the
-  // remainder, if any, folds into the last installment so the total always
-  // reconciles exactly. This is the fee/penalty percentage base
-  // (Installment.principalAmount), fixed at generation time.
+  // Splits a billing period's total (the sum of a credit wallet's VIRTUAL
+  // transactions over that period — see generateDue) into installmentCount
+  // equal shares — the remainder, if any, folds into the last installment so
+  // the total always reconciles exactly. This is the fee/penalty percentage
+  // base (Installment.principalAmount), fixed at generation time.
   computeInstallmentPrincipal(
-    grantAmount: bigint,
+    periodTotal: bigint,
     installmentCount: number,
     sequenceNumber: number,
   ): bigint {
-    const share = grantAmount / BigInt(installmentCount);
-    const remainder = grantAmount % BigInt(installmentCount);
+    const share = periodTotal / BigInt(installmentCount);
+    const remainder = periodTotal % BigInt(installmentCount);
     const isLast = sequenceNumber === installmentCount;
     return share + (isLast ? remainder : 0n);
   }
@@ -89,23 +89,30 @@ export class InstallmentsService {
     return candidate;
   }
 
-  // Generates the next scheduled installment for every repository-backed
-  // credit wallet whose type's installmentDate matches today, and whose
-  // originating grant (the VIRTUAL transaction WalletsService.grantCredit
-  // recorded — see Installment.sourceTransactionId) hasn't yet had all
-  // installmentCount installments generated from it. Idempotent within a
-  // single day — skips a wallet that already has an installment dated
-  // today.
+  // Once a month, on the day matching its type's installmentDate, every
+  // repository-backed credit wallet gets a brand-new installmentCount-row
+  // repayment plan (sequenceNumber 1..installmentCount, due this month,
+  // +1 month, ... up to installmentCount-1 months later) covering exactly
+  // what happened to *that wallet's own* virtualAmount over the one month
+  // preceding today — its VIRTUAL transactions (see WalletsService
+  // .grantCredit's grant, TransactionsService.settleCreditFundedPurchase's
+  // draw-downs, and markPaid's restores below — all three touch this
+  // wallet), not the repository's. Idempotent per period: skips a wallet
+  // that already has a batch on record for a period ending today.
   //
-  // Splits that grant's fixed amount, not the wallet's live virtualAmount:
-  // the ceiling moves constantly as the wallet spends and repays (see
-  // TransactionsService.settleCreditFundedPurchase and markPaid below), so
-  // reading it at generation time would mean the schedule's total no longer
-  // matches what was actually lent, depending on how much the customer had
-  // already drawn down or repaid by the time this tick ran.
+  // The window is [oneMonthBefore(today), today) — a half-open interval so
+  // consecutive months tile exactly, with no gap and no overlap; a
+  // transaction landing exactly at today's boundary belongs to the next
+  // period, not this one.
   async generateDue(today: Date = new Date()): Promise<Installment[]> {
     const dayOfMonth = today.getDate();
     const todayDate = toDateOnly(today);
+    const periodStartAt = dateForDayOfMonth(
+      today.getFullYear(),
+      today.getMonth() - 1,
+      today.getDate(),
+    );
+    const periodStart = toDateOnly(periodStartAt);
 
     const wallets = await this.walletsRepository
       .createQueryBuilder('wallet')
@@ -120,45 +127,61 @@ export class InstallmentsService {
     for (const wallet of wallets) {
       const installmentCount = wallet.walletType.installmentCount!;
 
-      const grant = await this.transactionsRepository.findOne({
-        where: {
-          type: TransactionType.VIRTUAL,
-          fromWalletId: wallet.repositoryWalletId!,
-          toWalletId: wallet.id,
-        },
-        order: { createdAt: 'ASC' },
+      const alreadyGenerated = await this.installmentsRepository.find({
+        where: { walletId: wallet.id, periodEnd: todayDate },
       });
-      if (!grant) continue;
+      if (alreadyGenerated.length > 0) continue;
 
-      const existing = await this.installmentsRepository.find({
-        where: { sourceTransactionId: grant.id },
-      });
-      if (existing.length >= installmentCount) continue;
-      if (existing.some((i) => i.dueDate === todayDate)) continue;
+      const { total } = (await this.transactionsRepository
+        .createQueryBuilder('t')
+        .select('COALESCE(SUM(t.amount), 0)', 'total')
+        .where('t.type = :type', { type: TransactionType.VIRTUAL })
+        .andWhere('(t.fromWalletId = :walletId OR t.toWalletId = :walletId)', {
+          walletId: wallet.id,
+        })
+        .andWhere('t.createdAt >= :periodStartAt', { periodStartAt })
+        .andWhere('t.createdAt < :today', { today })
+        .getRawOne()) ?? { total: '0' };
+      const periodTotal = BigInt(total ?? '0');
+      if (periodTotal <= 0n) continue;
 
-      const sequenceNumber = existing.length + 1;
-      const principal = this.computeInstallmentPrincipal(
-        BigInt(grant.amount),
-        installmentCount,
-        sequenceNumber,
-      );
-      const fee = this.percentOf(principal, wallet.walletType.feePercent);
-      const amount = principal + fee;
-      const deadlineDate = wallet.walletType.paymentDeadlineDate
-        ? this.computeDeadlineDate(today, wallet.walletType.paymentDeadlineDate)
-        : today;
+      for (
+        let sequenceNumber = 1;
+        sequenceNumber <= installmentCount;
+        sequenceNumber++
+      ) {
+        const principal = this.computeInstallmentPrincipal(
+          periodTotal,
+          installmentCount,
+          sequenceNumber,
+        );
+        const fee = this.percentOf(principal, wallet.walletType.feePercent);
+        const amount = principal + fee;
+        const dueDateForSequence = dateForDayOfMonth(
+          today.getFullYear(),
+          today.getMonth() + (sequenceNumber - 1),
+          today.getDate(),
+        );
+        const deadlineDate = wallet.walletType.paymentDeadlineDate
+          ? this.computeDeadlineDate(
+              dueDateForSequence,
+              wallet.walletType.paymentDeadlineDate,
+            )
+          : dueDateForSequence;
 
-      const installment = this.installmentsRepository.create({
-        walletId: wallet.id,
-        sourceTransactionId: grant.id,
-        sequenceNumber,
-        amount: amount.toString(),
-        principalAmount: principal.toString(),
-        dueDate: todayDate,
-        deadlineDate: toDateOnly(deadlineDate),
-        status: InstallmentStatus.PENDING,
-      });
-      created.push(await this.installmentsRepository.save(installment));
+        const installment = this.installmentsRepository.create({
+          walletId: wallet.id,
+          periodStart,
+          periodEnd: todayDate,
+          sequenceNumber,
+          amount: amount.toString(),
+          principalAmount: principal.toString(),
+          dueDate: toDateOnly(dueDateForSequence),
+          deadlineDate: toDateOnly(deadlineDate),
+          status: InstallmentStatus.PENDING,
+        });
+        created.push(await this.installmentsRepository.save(installment));
+      }
     }
     return created;
   }
