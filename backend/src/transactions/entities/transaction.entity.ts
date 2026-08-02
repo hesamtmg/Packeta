@@ -12,6 +12,14 @@ export enum TransactionType {
   TRANSFER = 'TRANSFER',
   ADJUSTMENT = 'ADJUSTMENT',
   PURCHASE = 'PURCHASE',
+  // A movement of virtualAmount only — a repository's unallocated pool
+  // shrinking to grant a CREDIT wallet its ceiling, that ceiling shrinking as
+  // it's drawn on to fund a purchase, or growing back as an installment is
+  // repaid. Never moves real balance (see grantCredit, settleCreditFunded
+  // Purchase, and InstallmentsService.markPaid) — kept as its own type so a
+  // credit wallet's installment plan can be built from the actual grant
+  // events instead of its live, constantly-fluctuating virtualAmount.
+  VIRTUAL = 'VIRTUAL',
 }
 
 // Every WITHDRAW/TRANSFER/ADJUSTMENT row is COMPLETED the instant it's

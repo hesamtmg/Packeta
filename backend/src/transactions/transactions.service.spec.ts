@@ -1073,6 +1073,18 @@ describe('TransactionsService.verifyPurchase', () => {
         idempotencyKey: 'credit-fund:purchase-tx-1',
       }),
     );
+    // 2b. the ceiling draw-down itself gets its own VIRTUAL ledger row,
+    // separate from the real-money TRANSFER above.
+    expect(manager.create).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: TransactionType.VIRTUAL,
+        fromWalletId: creditWallet.id,
+        toWalletId: null,
+        amount: '150',
+        idempotencyKey: 'credit-draw:purchase-tx-1',
+      }),
+    );
     // 3. only now does the purchase itself debit the (now-funded) credit
     // wallet and credit the merchant, same as any regular purchase.
     expect(manager.update).toHaveBeenCalledWith(
@@ -1231,6 +1243,10 @@ describe('TransactionsService.verifyPurchase', () => {
     expect(manager.create).not.toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ type: TransactionType.TRANSFER }),
+    );
+    expect(manager.create).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ type: TransactionType.VIRTUAL }),
     );
   });
 
