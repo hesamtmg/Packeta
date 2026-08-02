@@ -36,12 +36,14 @@ interface WalletFixture {
   blockedAt?: Date | null;
   closedAt?: Date | null;
   virtualAmount?: string | null;
+  callbackUrl?: string | null;
 }
 
 function buildService(options: {
   senderWallet: WalletFixture;
   recipientWallet?: WalletFixture | null;
   repositoryWallet?: WalletFixture | null;
+  supportWallet?: WalletFixture | null;
   ipgOverrides?: Record<string, jest.Mock>;
   installmentsService?: Record<string, jest.Mock>;
 }) {
@@ -49,6 +51,7 @@ function buildService(options: {
     senderWallet,
     recipientWallet,
     repositoryWallet,
+    supportWallet,
     ipgOverrides,
     installmentsService,
   } = options;
@@ -56,6 +59,7 @@ function buildService(options: {
 
   const walletsById = new Map<string, WalletFixture>([
     [senderWallet.id, senderWallet],
+    ...(supportWallet ? [[supportWallet.id, supportWallet] as const] : []),
     ...(recipientWallet
       ? [[recipientWallet.id, recipientWallet] as const]
       : []),
@@ -99,6 +103,10 @@ function buildService(options: {
     }),
     isCounterpartyAllowed: jest.fn(() => true),
     assertWithinTransactionLimits: jest.fn(),
+    findOrCreateSupportWallet: jest.fn(async () => {
+      if (!supportWallet) throw new NotFoundException('No support wallet');
+      return supportWallet;
+    }),
   };
 
   const idempotencyService = {
@@ -1277,6 +1285,142 @@ describe('TransactionsService.verifyPurchase', () => {
       manager,
       'installment-1',
       'installment-tx-1',
+    );
+  });
+});
+
+describe('TransactionsService.verifyPurchase support top-up completion', () => {
+  const repositoryWallet: WalletFixture = {
+    id: 'repo-1',
+    balance: '5000',
+    walletType: walletType({ name: 'Repository', allowPurchaseIn: true }),
+  };
+  const creditWallet: WalletFixture = {
+    id: 'credit-wallet-1',
+    userId: 'personnel-1',
+    balance: '0',
+    virtualAmount: '100',
+    repositoryWalletId: 'repo-1',
+    walletType: walletType({ code: 'CREDIT', allowPurchaseOut: true }),
+  };
+  const merchantWallet: WalletFixture = {
+    id: 'merchant-wallet-1',
+    balance: '0',
+    callbackUrl: 'https://merchant.example.com/return',
+    walletType: walletType({ allowPurchaseIn: true }),
+  };
+  const supportWallet: WalletFixture = {
+    id: 'support-wallet-1',
+    userId: 'personnel-1',
+    balance: '0',
+    walletType: walletType({ code: 'SUPPORT' }),
+  };
+
+  function buildTopUpTransactions() {
+    const purchase = {
+      id: 'purchase-tx-1',
+      type: TransactionType.PURCHASE,
+      status: 'PENDING',
+      fromWalletId: creditWallet.id,
+      toWalletId: merchantWallet.id,
+      amount: '150',
+      installmentId: null,
+      expiresAt: null,
+      completesPurchaseId: null,
+    };
+    const topUp = {
+      id: 'topup-tx-1',
+      type: TransactionType.DEPOSIT,
+      status: 'PENDING',
+      fromWalletId: null,
+      toWalletId: null,
+      amount: '50',
+      installmentId: null,
+      expiresAt: null,
+      completesPurchaseId: purchase.id,
+      ipgAuthority: 'zarinpal-topup-auth',
+    };
+    return { purchase, topUp };
+  }
+
+  // completeSupportTopUp does its own second createQueryBuilder(...).getOne()
+  // call (for the linked purchase) on top of verifyPurchase's own initial
+  // lookup (for the top-up itself) — this mock serves whichever of the two
+  // rows the current query's id matches.
+  function mockQueryBuilderFor(manager: any, rows: Record<string, any>) {
+    manager.createQueryBuilder = jest.fn(() => {
+      let queriedId: string | undefined;
+      const builder: any = {
+        setLock: () => builder,
+        where: (_cond: string, params: Record<string, string>) => {
+          queriedId = Object.values(params)[0];
+          return builder;
+        },
+        andWhere: () => builder,
+        getOne: async () => (queriedId ? rows[queriedId] : undefined),
+      };
+      return builder;
+    });
+  }
+
+  it('credits the support wallet, completes the purchase, and redirects to the merchant callback', async () => {
+    const { service, manager } = buildService({
+      senderWallet: creditWallet,
+      recipientWallet: merchantWallet,
+      repositoryWallet,
+      supportWallet,
+    });
+    const { purchase, topUp } = buildTopUpTransactions();
+    mockQueryBuilderFor(manager, {
+      [topUp.id]: topUp,
+      [purchase.id]: purchase,
+    });
+
+    const result = await service.verifyPurchase(topUp.id);
+
+    expect(result).toEqual({
+      transactionId: purchase.id,
+      status: 'COMPLETED',
+      redirectUrl:
+        'https://merchant.example.com/return?transactionId=purchase-tx-1&status=COMPLETED',
+    });
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      supportWallet.id,
+      { balance: '50' },
+    );
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      merchantWallet.id,
+      { balance: '150' },
+    );
+  });
+
+  it('does not re-credit the support wallet on a repeat verify call for an already-completed top-up', async () => {
+    const { service, manager } = buildService({
+      senderWallet: creditWallet,
+      recipientWallet: merchantWallet,
+      repositoryWallet,
+      supportWallet: { ...supportWallet, balance: '50' },
+    });
+    const { purchase, topUp } = buildTopUpTransactions();
+    topUp.status = 'COMPLETED';
+    purchase.status = 'COMPLETED';
+    mockQueryBuilderFor(manager, {
+      [topUp.id]: topUp,
+      [purchase.id]: purchase,
+    });
+
+    const result = await service.verifyPurchase(topUp.id);
+
+    expect(result.status).toBe('COMPLETED');
+    expect(result.redirectUrl).toBe(
+      'https://merchant.example.com/return?transactionId=purchase-tx-1&status=COMPLETED',
+    );
+    expect(manager.update).not.toHaveBeenCalledWith(
+      expect.anything(),
+      supportWallet.id,
+      expect.anything(),
     );
   });
 });

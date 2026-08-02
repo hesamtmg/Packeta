@@ -51,6 +51,12 @@ export interface PurchaseVerifyResult {
   transactionId: string;
   status: TransactionStatus;
   reason?: string;
+  // Only set when this verify call resolves a credit-shortfall top-up (see
+  // completeSupportTopUp): the merchant's own callbackUrl to send the
+  // customer's browser back to now that the purchase is settled, one way
+  // or the other — not the server-to-server webhook notifyMerchantCallback
+  // already fired, but the customer-facing return trip.
+  redirectUrl?: string;
 }
 
 const DEFAULT_PURCHASE_TIMEOUT_SECONDS = 900;
@@ -909,7 +915,13 @@ export class TransactionsService {
       }
 
       if (transaction.status === TransactionStatus.COMPLETED) {
-        return { transactionId: transaction.id, status: transaction.status };
+        // A repeat call for an already-resolved top-up still needs to hand
+        // back the merchant redirect — completeSupportTopUp is idempotent
+        // (it only re-credits the support wallet / re-settles the purchase
+        // the first time through) — everything else just returns as-is.
+        return isSupportTopUp
+          ? this.completeSupportTopUp(manager, transaction)
+          : { transactionId: transaction.id, status: transaction.status };
       }
       if (transaction.status === TransactionStatus.REVERSED) {
         throw new UnprocessableEntityException(
@@ -1213,15 +1225,24 @@ export class TransactionsService {
     );
 
     const topUpAmount = BigInt(topUp.amount);
-    await manager.update(Wallet, supportWallet.id, {
-      balance: (BigInt(supportWallet.balance) + topUpAmount).toString(),
-    });
-    supportWallet.balance = (
-      BigInt(supportWallet.balance) + topUpAmount
-    ).toString();
-    topUp.toWalletId = supportWallet.id;
-    topUp.status = TransactionStatus.COMPLETED;
-    await manager.save(topUp);
+    // Guards a repeat call (e.g. the top-level COMPLETED short-circuit
+    // re-entering here just to rebuild the merchant redirect) from
+    // re-crediting the support wallet a second time.
+    if (topUp.status !== TransactionStatus.COMPLETED) {
+      await manager.update(Wallet, supportWallet.id, {
+        balance: (BigInt(supportWallet.balance) + topUpAmount).toString(),
+      });
+      supportWallet.balance = (
+        BigInt(supportWallet.balance) + topUpAmount
+      ).toString();
+      topUp.toWalletId = supportWallet.id;
+      topUp.status = TransactionStatus.COMPLETED;
+      await manager.save(topUp);
+    }
+
+    const merchantWalletRef = await this.walletsService.getByIdUnscoped(
+      purchase.toWalletId,
+    );
 
     if (purchase.status !== TransactionStatus.COMPLETED) {
       if (fromWallet.closedAt || toWallet.closedAt) {
@@ -1240,14 +1261,19 @@ export class TransactionsService {
         toWallet,
         { supportWallet, amount: topUpAmount },
       );
-
-      const merchantWalletRef = await this.walletsService.getByIdUnscoped(
-        purchase.toWalletId,
-      );
       this.notifyMerchantCallback(merchantWalletRef, purchase);
     }
 
-    return { transactionId: purchase.id, status: purchase.status };
+    // The purchase is settled one way or the other by this point (completed
+    // just now, or already completed on a repeat call) — only now does the
+    // customer's own browser head back to the merchant.
+    const redirectUrl = this.buildMerchantRedirectUrl(
+      merchantWalletRef.callbackUrl,
+      purchase.id,
+      purchase.status,
+    );
+
+    return { transactionId: purchase.id, status: purchase.status, redirectUrl };
   }
 
   // Cancels a still-PENDING purchase (customer backed out on the IPG page,
@@ -1650,6 +1676,22 @@ export class TransactionsService {
       // Best-effort: the merchant's webhook being unreachable doesn't affect
       // the purchase itself, which has already completed on our ledger.
     });
+  }
+
+  // Where the customer's own browser goes back to once a credit-shortfall
+  // top-up is resolved (see completeSupportTopUp) — the merchant's own
+  // callbackUrl, the same one notifyMerchantCallback posts to server-to-
+  // server, just as a browser redirect instead of a webhook. No callbackUrl
+  // configured means no redirect target: the caller falls back to showing
+  // the result on the IPG's own pay page instead.
+  private buildMerchantRedirectUrl(
+    callbackUrl: string | null,
+    transactionId: string,
+    status: TransactionStatus,
+  ): string | undefined {
+    if (!callbackUrl) return undefined;
+    const separator = callbackUrl.includes('?') ? '&' : '?';
+    return `${callbackUrl}${separator}transactionId=${transactionId}&status=${status}`;
   }
 
   private async assertOwnsEitherSide(

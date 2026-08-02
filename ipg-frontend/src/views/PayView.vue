@@ -364,22 +364,35 @@ async function goToPhoneStep() {
 // then shows the outcome right here instead of bouncing to Packeta's own
 // app, since this customer never had a Packeta session to begin with.
 async function resolveTopUpCallback(topUpTransactionId: string) {
+  let redirectUrlFromServer = '';
   try {
-    const result = await packetaRequest<{ status: string; reason?: string }>(
-      `/transactions/purchase/${topUpTransactionId}/verify`,
-      { method: 'POST' },
-    );
+    const result = await packetaRequest<{
+      status: string;
+      reason?: string;
+      redirectUrl?: string;
+    }>(`/transactions/purchase/${topUpTransactionId}/verify`, { method: 'POST' });
     if (result.status === 'COMPLETED') {
       topUpResult.value = 'success';
     } else {
       topUpResult.value = 'failed';
       topUpResultMessage.value = result.reason ?? '';
     }
+    redirectUrlFromServer = result.redirectUrl ?? '';
   } catch (err) {
     topUpResult.value = 'failed';
     topUpResultMessage.value = err instanceof ApiError ? err.message : '';
   }
-  step.value = 'topup-result';
+
+  // The purchase is fully settled server-side by this point (or definitively
+  // failed) — only now does the customer head back to the merchant, the same
+  // "redirecting in a few seconds" handoff the sandbox-IPG confirm step uses.
+  // No merchant callbackUrl configured just means staying here with the
+  // plain result message instead.
+  if (redirectUrlFromServer) {
+    enterRedirectStep(redirectUrlFromServer);
+  } else {
+    step.value = 'topup-result';
+  }
 
   try {
     const status = await packetaRequest<ChargeStatus>(
