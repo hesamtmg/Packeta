@@ -6,7 +6,7 @@ export type ActivityLogDocument = ActivityLog & Document;
 @Schema({ timestamps: true })
 export class ActivityLog {
   @Prop({ required: true })
-  category: 'AUTH' | 'TRANSACTION';
+  category: 'AUTH' | 'TRANSACTION' | 'SCHEDULER';
 
   @Prop({ required: true })
   action: string;

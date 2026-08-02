@@ -23,6 +23,7 @@ interface WalletTypeFixture {
   allowPurchaseIn?: boolean;
   depositable?: boolean;
   unblockFee?: string | null;
+  supportsAutoWithdraw?: boolean;
 }
 
 interface WalletFixture {
@@ -164,7 +165,7 @@ function buildService(options: {
   };
 
   const railSettlementsService = {
-    createForSweep: jest.fn(),
+    createForSweep: jest.fn().mockResolvedValue({ id: 'rail-settlement-1' }),
   };
 
   const service = new TransactionsService(
@@ -188,6 +189,7 @@ function buildService(options: {
     manager,
     ipgClientService,
     zarinpalClientService,
+    railSettlementsService,
   };
 }
 
@@ -557,11 +559,36 @@ describe('TransactionsService.withdraw', () => {
     const { service } = buildService({ senderWallet });
 
     await expect(
-      service.withdraw('sender', senderWallet.id, 100, 'idem-7'),
+      service.withdraw(
+        'sender',
+        senderWallet.id,
+        100,
+        SettlementRailType.POL_PAY,
+        'idem-7',
+      ),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('allows withdrawing a credit wallet into its credit limit', async () => {
+  it('rejects a manual withdrawal from a merchant-style (auto-withdraw) wallet type', async () => {
+    const senderWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '500',
+      walletType: walletType({ name: 'Merchant', supportsAutoWithdraw: true }),
+    };
+    const { service } = buildService({ senderWallet });
+
+    await expect(
+      service.withdraw(
+        'sender',
+        senderWallet.id,
+        100,
+        SettlementRailType.POL_PAY,
+        'idem-7b',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('allows withdrawing a credit wallet into its credit limit and records the chosen rail', async () => {
     const senderWallet: WalletFixture = {
       id: 'wallet-a',
       balance: '0',
@@ -571,15 +598,31 @@ describe('TransactionsService.withdraw', () => {
         creditLimit: '500',
       }),
     };
-    const { service } = buildService({ senderWallet });
+    const { service, manager, railSettlementsService } = buildService({
+      senderWallet,
+    });
 
     const result = await service.withdraw(
       'sender',
       senderWallet.id,
       500,
+      SettlementRailType.PAYA,
       'idem-8',
     );
     expect(result.balance).toBe('-500');
+    expect(railSettlementsService.createForSweep).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        walletId: senderWallet.id,
+        railType: 'PAYA',
+        amount: '500',
+      }),
+    );
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      result.transactionId,
+      { railSettlementId: 'rail-settlement-1' },
+    );
   });
 
   it('rejects withdrawing a credit wallet beyond its credit limit', async () => {
@@ -595,7 +638,13 @@ describe('TransactionsService.withdraw', () => {
     const { service } = buildService({ senderWallet });
 
     await expect(
-      service.withdraw('sender', senderWallet.id, 501, 'idem-9'),
+      service.withdraw(
+        'sender',
+        senderWallet.id,
+        501,
+        SettlementRailType.POL_PAY,
+        'idem-9',
+      ),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 
@@ -620,6 +669,7 @@ describe('TransactionsService.withdraw', () => {
       'sender',
       senderWallet.id,
       300,
+      SettlementRailType.POL_PAY,
       'idem-repo-1',
     );
 
@@ -644,7 +694,13 @@ describe('TransactionsService.withdraw', () => {
     const { service } = buildService({ senderWallet, repositoryWallet });
 
     await expect(
-      service.withdraw('sender', senderWallet.id, 300, 'idem-repo-2'),
+      service.withdraw(
+        'sender',
+        senderWallet.id,
+        300,
+        SettlementRailType.POL_PAY,
+        'idem-repo-2',
+      ),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 
@@ -658,7 +714,13 @@ describe('TransactionsService.withdraw', () => {
     const { service } = buildService({ senderWallet });
 
     await expect(
-      service.withdraw('sender', senderWallet.id, 100, 'idem-blocked-1'),
+      service.withdraw(
+        'sender',
+        senderWallet.id,
+        100,
+        SettlementRailType.POL_PAY,
+        'idem-blocked-1',
+      ),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 });
@@ -1048,6 +1110,60 @@ describe('TransactionsService.verifyPurchase', () => {
       expect.objectContaining({ type: TransactionType.TRANSFER }),
     );
   });
+
+  it('verifies an installment repayment through ZarinPal (not the sandbox IPG) and marks the installment paid', async () => {
+    const repositoryWallet: WalletFixture = {
+      id: 'repo-1',
+      balance: '1000',
+      walletType: walletType({ name: 'Repository', allowPurchaseIn: true }),
+    };
+    const installmentsService = { markPaid: jest.fn(async () => undefined) };
+    const { service, manager, ipgClientService, zarinpalClientService } =
+      buildService({
+        senderWallet: repositoryWallet,
+        installmentsService: installmentsService as any,
+      });
+
+    const pendingPurchase = {
+      id: 'installment-tx-1',
+      type: TransactionType.PURCHASE,
+      status: 'PENDING',
+      fromWalletId: null,
+      toWalletId: repositoryWallet.id,
+      amount: '400',
+      installmentId: 'installment-1',
+      expiresAt: null,
+      ipgAuthority: 'zarinpal-auth-1',
+    };
+    manager.createQueryBuilder = jest.fn(() => {
+      const builder: any = {
+        setLock: () => builder,
+        where: () => builder,
+        andWhere: () => builder,
+        getOne: async () => pendingPurchase,
+      };
+      return builder;
+    });
+
+    const result = await service.verifyPurchase('installment-tx-1');
+
+    expect(result.status).toBe('COMPLETED');
+    expect(zarinpalClientService.verifyPayment).toHaveBeenCalledWith(
+      'zarinpal-auth-1',
+      '400',
+    );
+    expect(ipgClientService.verifyPayment).not.toHaveBeenCalled();
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      repositoryWallet.id,
+      { balance: '1400' },
+    );
+    expect(installmentsService.markPaid).toHaveBeenCalledWith(
+      manager,
+      'installment-1',
+      'installment-tx-1',
+    );
+  });
 });
 
 describe('TransactionsService.sweepAutoWithdraw', () => {
@@ -1302,7 +1418,9 @@ describe('TransactionsService.payInstallment', () => {
       'idem-inst-5',
     );
 
-    expect(result.redirectUrl).toBe('http://ipg/pay/auth-1');
+    expect(result.redirectUrl).toBe(
+      'https://sandbox.zarinpal.com/pg/StartPay/zarinpal-auth-1',
+    );
     expect(manager.save).toHaveBeenCalledWith(
       expect.objectContaining({
         toWalletId: 'repo-1',

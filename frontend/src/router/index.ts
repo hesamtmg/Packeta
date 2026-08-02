@@ -4,6 +4,7 @@ import LoginView from '../views/LoginView.vue';
 import SignupView from '../views/SignupView.vue';
 import DashboardView from '../views/DashboardView.vue';
 import TransactionDetailView from '../views/TransactionDetailView.vue';
+import WalletInstallmentsView from '../views/WalletInstallmentsView.vue';
 import PurchaseCallbackView from '../views/PurchaseCallbackView.vue';
 import AdminDashboardView from '../views/admin/AdminDashboardView.vue';
 import AdminTransactionsView from '../views/admin/AdminTransactionsView.vue';
@@ -14,6 +15,8 @@ import AdminWalletTypesView from '../views/admin/AdminWalletTypesView.vue';
 import AdminReportsView from '../views/admin/AdminReportsView.vue';
 import AdminTransactionDetailView from '../views/admin/AdminTransactionDetailView.vue';
 import AdminPurchaseView from '../views/admin/AdminPurchaseView.vue';
+import AdminInstallmentsView from '../views/admin/AdminInstallmentsView.vue';
+import AdminSchedulerLogsView from '../views/admin/AdminSchedulerLogsView.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -30,6 +33,12 @@ const router = createRouter({
       path: '/transactions/:id',
       name: 'transaction-detail',
       component: TransactionDetailView,
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/wallets/:walletId/installments',
+      name: 'wallet-installments',
+      component: WalletInstallmentsView,
       meta: { requiresAuth: true },
     },
     {
@@ -93,6 +102,18 @@ const router = createRouter({
       path: '/admin/purchase',
       name: 'admin-purchase',
       component: AdminPurchaseView,
+      meta: { requiresAuth: true, requiresAdmin: true },
+    },
+    {
+      path: '/admin/installments',
+      name: 'admin-installments',
+      component: AdminInstallmentsView,
+      meta: { requiresAuth: true, requiresAdmin: true },
+    },
+    {
+      path: '/admin/scheduler-logs',
+      name: 'admin-scheduler-logs',
+      component: AdminSchedulerLogsView,
       meta: { requiresAuth: true, requiresAdmin: true },
     },
   ],

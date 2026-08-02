@@ -14,6 +14,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { SuperAdminGuard } from '../auth/guards/super-admin.guard';
@@ -23,12 +24,18 @@ import {
 } from '../common/decorators/current-user.decorator';
 import { UsersService } from '../users/users.service';
 import { WalletsService } from '../wallets/wallets.service';
+import { WalletTypesService } from '../wallet-types/wallet-types.service';
+import { WalletTypeCode } from '../wallet-types/entities/wallet-type.entity';
 import { TransactionsService } from '../transactions/transactions.service';
+import { InstallmentsService } from '../installments/installments.service';
+import { LoggingService } from '../logging/logging.service';
 import { BatchImportService } from './batch-import.service';
 import { serializeWallet } from '../wallets/wallet.serializer';
+import { serializeInstallment } from '../installments/installment.serializer';
 import { AdjustWalletDto } from './dto/adjust-wallet.dto';
 import { UpdateUserRoleDto } from './dto/update-user-role.dto';
 import { AdminCreateChargeDto } from './dto/admin-create-charge.dto';
+import { AdminCreateWalletDto } from './dto/admin-create-wallet.dto';
 import { normalizePhoneNumber } from '../common/phone-number';
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
@@ -39,8 +46,12 @@ export class AdminController {
   constructor(
     private readonly usersService: UsersService,
     private readonly walletsService: WalletsService,
+    private readonly walletTypesService: WalletTypesService,
     private readonly transactionsService: TransactionsService,
+    private readonly installmentsService: InstallmentsService,
+    private readonly loggingService: LoggingService,
     private readonly batchImportService: BatchImportService,
+    private readonly dataSource: DataSource,
   ) {}
 
   @Get('users')
@@ -166,6 +177,29 @@ export class AdminController {
     return this.transactionsService.getByIdUnscoped(id);
   }
 
+  // Every installment across every credit wallet, any customer — the panel
+  // counterpart to a customer's own per-wallet installments view.
+  @Get('installments')
+  async listInstallments() {
+    const installments = await this.installmentsService.findAll();
+    return installments.map((installment) => ({
+      ...serializeInstallment(installment),
+      ownerEmail: installment.wallet.user.email,
+      ownerPhoneNumber: installment.wallet.user.phoneNumber,
+      walletTypeName: installment.wallet.walletType.name,
+      currency: installment.wallet.walletType.currency,
+    }));
+  }
+
+  // Recent scheduler runs (installment generation/penalties, auto-withdraw
+  // and rail-settlement sweeps, purchase-timeout reversals) — the panel's
+  // window into background jobs that otherwise only show up in server logs.
+  @Get('scheduler-logs')
+  async listSchedulerLogs(@Query('limit') limit?: string) {
+    const parsedLimit = limit ? parseInt(limit, 10) : undefined;
+    return this.loggingService.findRecent('SCHEDULER', parsedLimit);
+  }
+
   @Post('wallets/:id/adjust')
   adjustWallet(
     @CurrentUser() admin: AuthenticatedUser,
@@ -180,6 +214,42 @@ export class AdminController {
       dto.reason,
       idempotencyKey,
     );
+  }
+
+  // Admin panel's "Add wallet" action on a customer — a narrower version of
+  // the self-service POST /wallets (see AdminCreateWalletDto), for quickly
+  // provisioning a customer a wallet without them doing it themselves.
+  @Post('customers/:userId/wallets')
+  async createWalletForCustomer(
+    @Param('userId') userId: string,
+    @Body() dto: AdminCreateWalletDto,
+  ) {
+    const walletType = await this.walletTypesService.findById(dto.walletTypeId);
+    if (walletType.code === WalletTypeCode.CREDIT) {
+      throw new BadRequestException(
+        'CREDIT wallets can only be created by a repository owner via POST /wallets/credit-grant',
+      );
+    }
+    if (dto.virtualAmount !== undefined && !walletType.hasVirtualBalance) {
+      throw new BadRequestException(
+        'This wallet type does not support a virtual balance',
+      );
+    }
+    const wallet = await this.dataSource.transaction((manager) =>
+      this.walletsService.createForUser(manager, userId, walletType.id, {
+        virtualAmount: dto.virtualAmount,
+        nationalCode: dto.nationalCode,
+      }),
+    );
+    return serializeWallet({ ...wallet, walletType });
+  }
+
+  // Reopens a wallet a customer (or a previous admin action) closed —
+  // counterpart to the customer's own DELETE /wallets/:id soft-close.
+  @Post('wallets/:id/reopen')
+  async reopenWallet(@Param('id') walletId: string) {
+    const wallet = await this.walletsService.reopenAsAdmin(walletId);
+    return serializeWallet(wallet);
   }
 
   // Bulk onboarding: an admin uploads a spreadsheet of customers/wallets

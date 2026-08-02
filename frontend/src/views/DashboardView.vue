@@ -1,12 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import {
-  useWalletStore,
-  type Wallet,
-  type WalletOptionsInput,
-  type Installment,
-} from '../stores/wallet';
+import { useWalletStore, type Wallet, type WalletOptionsInput, type SettlementRailType } from '../stores/wallet';
 import { apiRequest, ApiError } from '../api/client';
 import { amountStep, formatAmount, toMinorUnits, type CurrencyInfo } from '../utils/currency';
 import AppLayout from '../components/AppLayout.vue';
@@ -70,6 +65,7 @@ const depositWalletId = ref('');
 const depositAmount = ref('');
 const withdrawWalletId = ref('');
 const withdrawAmount = ref('');
+const withdrawRailType = ref<SettlementRailType | ''>('');
 const transferFromWalletId = ref('');
 const transferEmail = ref('');
 const transferAmount = ref('');
@@ -88,11 +84,11 @@ const grantBusy = ref(false);
 const grantError = ref('');
 const grantSuccess = ref('');
 
-const payBusy = ref<string | null>(null);
-const payError = ref('');
-
+// Merchant-style (supportsAutoWithdraw) wallets never withdraw manually —
+// their balance only leaves on the auto-withdraw sweep schedule — so they're
+// excluded here even if allowWithdraw happens to also be true.
 const withdrawableWallets = computed(() =>
-  wallet.wallets.filter((w) => w.walletType.allowWithdraw),
+  wallet.wallets.filter((w) => w.walletType.allowWithdraw && !w.walletType.supportsAutoWithdraw),
 );
 const p2pWallets = computed(() =>
   wallet.wallets.filter((w) => w.walletType.allowP2pOut),
@@ -115,10 +111,6 @@ const grantRepositoryWallet = computed(() =>
 );
 const grantAmountStep = computed(() =>
   grantRepositoryWallet.value ? amountStep(grantRepositoryWallet.value.walletType.currency) : '0.01',
-);
-
-const sortedInstallments = computed(() =>
-  [...wallet.installments].sort((a, b) => a.deadlineDate.localeCompare(b.deadlineDate)),
 );
 
 // Currencies the user could charge a customer in (i.e. they hold at least
@@ -268,7 +260,6 @@ onMounted(async () => {
     wallet.fetchWallets(),
     wallet.fetchWalletTypes(),
     wallet.fetchTransactions(),
-    wallet.fetchInstallments(),
   ]);
   try {
     const me = await apiRequest<{ phoneNumber: string | null }>('/users/me');
@@ -566,9 +557,10 @@ function onDeposit() {
 function onWithdraw() {
   runAction(async () => {
     const w = findWallet(withdrawWalletId.value);
-    if (!w) return;
-    await wallet.withdraw(w.id, toMinorUnits(withdrawAmount.value, w.walletType.currency));
+    if (!w || !withdrawRailType.value) return;
+    await wallet.withdraw(w.id, toMinorUnits(withdrawAmount.value, w.walletType.currency), withdrawRailType.value);
     withdrawAmount.value = '';
+    withdrawRailType.value = '';
   });
 }
 
@@ -624,23 +616,7 @@ async function onGrantCredit() {
   }
 }
 
-function installmentStatusLabel(status: Installment['status']): string {
-  if (status === 'PAID') return t('dashboard.installments.statusPaid');
-  if (status === 'OVERDUE') return t('dashboard.installments.statusOverdue');
-  return t('dashboard.installments.statusPending');
-}
 
-async function onPayInstallment(installment: Installment) {
-  payError.value = '';
-  payBusy.value = installment.id;
-  try {
-    const result = await wallet.payInstallment(installment.id);
-    window.location.href = result.redirectUrl;
-  } catch (err) {
-    payError.value = err instanceof ApiError ? err.message : t('dashboard.actions.error');
-    payBusy.value = null;
-  }
-}
 </script>
 
 <template>
@@ -811,46 +787,6 @@ async function onPayInstallment(installment: Installment) {
       </div>
     </div>
 
-    <div v-if="sortedInstallments.length" class="admin-card">
-      <h2>{{ t('dashboard.installments.title') }}</h2>
-      <p class="hint">{{ t('dashboard.installments.hint') }}</p>
-      <table class="admin-table">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>{{ t('dashboard.installments.dueDate') }}</th>
-            <th>{{ t('dashboard.installments.deadlineDate') }}</th>
-            <th>{{ t('dashboard.installments.amount') }}</th>
-            <th>{{ t('dashboard.installments.status') }}</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="i in sortedInstallments" :key="i.id">
-            <td>{{ i.sequenceNumber }}</td>
-            <td>{{ i.dueDate }}</td>
-            <td>{{ i.deadlineDate }}</td>
-            <td>{{ formatAmount(i.amount, findWallet(i.walletId)?.walletType.currency ?? { code: '', symbol: '', symbolPosition: 'PREFIX', decimalPlaces: 0 }) }}</td>
-            <td>
-              <span class="admin-badge" :class="`installment-status-${i.status.toLowerCase()}`">{{ installmentStatusLabel(i.status) }}</span>
-            </td>
-            <td>
-              <button
-                v-if="i.status !== 'PAID'"
-                type="button"
-                class="admin-btn admin-btn-primary"
-                :disabled="payBusy === i.id"
-                @click="onPayInstallment(i)"
-              >
-                {{ t('dashboard.installments.pay') }}
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-if="payError" class="admin-error">{{ payError }}</p>
-    </div>
-
     <div class="admin-card">
       <h2>{{ t('dashboard.wallets.title') }}</h2>
       <div class="wallets">
@@ -861,6 +797,13 @@ async function onPayInstallment(installment: Installment) {
             <span v-for="b in badges(w)" :key="b" class="admin-badge">{{ b }}</span>
           </div>
           <div class="wallet-card-actions">
+            <router-link
+              v-if="w.walletType.code === 'CREDIT'"
+              :to="{ name: 'wallet-installments', params: { walletId: w.id } }"
+              class="admin-btn admin-btn-ghost"
+            >
+              {{ t('dashboard.installments.viewLink') }}
+            </router-link>
             <button
               type="button"
               class="admin-btn admin-btn-ghost"
@@ -1140,6 +1083,13 @@ async function onPayInstallment(installment: Installment) {
           </option>
         </select>
         <input v-model="withdrawAmount" type="number" min="0" :step="withdrawStep" class="admin-input" required />
+        <select v-model="withdrawRailType" class="admin-input" required>
+          <option value="" disabled>{{ t('dashboard.actions.withdraw.chooseRail') }}</option>
+          <option value="POL_PAY">{{ t('dashboard.settlement.rail.POL_PAY') }}</option>
+          <option value="PAYA">{{ t('dashboard.settlement.rail.PAYA') }}</option>
+          <option value="SATNA">{{ t('dashboard.settlement.rail.SATNA') }}</option>
+          <option value="BANK_TRANSFER">{{ t('dashboard.settlement.rail.BANK_TRANSFER') }}</option>
+        </select>
         <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.actions.withdraw.submit') }}</button>
       </form>
 

@@ -382,6 +382,19 @@ export class WalletsService {
     return this.getById(userId, walletId);
   }
 
+  // Admin-only counterpart to closeForUser: reopens a wallet a customer
+  // closed themselves (or that was closed in error), clearing closedAt so
+  // it's usable again. No ownership check — same reasoning as
+  // getByIdUnscoped, the caller is explicitly allowed to act on any wallet.
+  async reopenAsAdmin(walletId: string): Promise<Wallet> {
+    const wallet = await this.getByIdUnscoped(walletId);
+    if (!wallet.closedAt) {
+      throw new BadRequestException('This wallet is not closed');
+    }
+    await this.walletsRepository.update(walletId, { closedAt: null });
+    return this.getByIdUnscoped(walletId);
+  }
+
   // Rejects a min/max pair where both are set and min exceeds max — checked
   // whenever either bound changes, using the other's current value when only
   // one side of the pair is being updated.

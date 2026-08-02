@@ -22,6 +22,7 @@ interface WalletType {
   allowWithdraw: boolean;
   allowP2pOut: boolean;
   allowP2pIn: boolean;
+  hasVirtualBalance: boolean;
 }
 
 interface Wallet {
@@ -47,14 +48,25 @@ interface AdminTransaction {
 const users = ref<AdminUser[]>([]);
 const selected = ref<UserDetail | null>(null);
 const transactions = ref<AdminTransaction[]>([]);
+const walletTypes = ref<WalletType[]>([]);
 const listError = ref('');
 const detailError = ref('');
 const adjustError = ref('');
+const addWalletError = ref('');
 const busy = ref(false);
+const addWalletBusy = ref(false);
 const search = ref('');
 
 const adjustAmount = ref<Record<string, string>>({});
 const adjustReason = ref<Record<string, string>>({});
+
+const newWalletTypeId = ref('');
+const newWalletVirtualAmount = ref('');
+const newWalletNationalCode = ref('');
+
+const newWalletType = computed(() =>
+  walletTypes.value.find((t) => t.id === newWalletTypeId.value) ?? null,
+);
 
 const customers = computed(() => users.value.filter((u) => u.role === 'USER'));
 const filtered = computed(() => {
@@ -75,6 +87,14 @@ async function loadUsers() {
     users.value = await apiRequest<AdminUser[]>('/admin/users');
   } catch (err) {
     listError.value = err instanceof ApiError ? err.message : t('admin.customers.loadFailed');
+  }
+}
+
+async function loadWalletTypes() {
+  try {
+    walletTypes.value = await apiRequest<WalletType[]>('/wallet-types');
+  } catch {
+    // Non-critical — the "Add wallet" form just stays empty.
   }
 }
 
@@ -114,7 +134,35 @@ async function adjust(wallet: Wallet) {
   }
 }
 
+async function onAddWallet() {
+  if (!selected.value || !newWalletTypeId.value) return;
+  addWalletError.value = '';
+  addWalletBusy.value = true;
+  try {
+    await apiRequest(`/admin/customers/${selected.value.id}/wallets`, {
+      method: 'POST',
+      body: {
+        walletTypeId: newWalletTypeId.value,
+        virtualAmount:
+          newWalletType.value?.hasVirtualBalance && newWalletVirtualAmount.value
+            ? toMinorUnits(newWalletVirtualAmount.value, newWalletType.value.currency)
+            : undefined,
+        nationalCode: newWalletNationalCode.value || undefined,
+      },
+    });
+    newWalletTypeId.value = '';
+    newWalletVirtualAmount.value = '';
+    newWalletNationalCode.value = '';
+    await selectUser(selected.value.id);
+  } catch (err) {
+    addWalletError.value = err instanceof ApiError ? err.message : t('admin.customers.addWalletFailed');
+  } finally {
+    addWalletBusy.value = false;
+  }
+}
+
 loadUsers();
+loadWalletTypes();
 </script>
 
 <template>
@@ -176,6 +224,35 @@ loadUsers();
           </div>
         </article>
       </div>
+
+      <h3>{{ t('admin.customers.addWalletHeading') }}</h3>
+      <p v-if="addWalletError" class="admin-error">{{ addWalletError }}</p>
+      <form class="add-wallet-form" @submit.prevent="onAddWallet">
+        <select v-model="newWalletTypeId" class="admin-input" required>
+          <option value="" disabled>{{ t('admin.customers.addWalletChooseType') }}</option>
+          <option v-for="wt in walletTypes" :key="wt.id" :value="wt.id">
+            {{ wt.name }} ({{ wt.currency.code }})
+          </option>
+        </select>
+        <input
+          v-if="newWalletType?.hasVirtualBalance"
+          v-model="newWalletVirtualAmount"
+          type="number"
+          min="0"
+          :step="amountStep(newWalletType.currency)"
+          class="admin-input"
+          :placeholder="t('admin.customers.addWalletVirtualAmountPlaceholder')"
+        />
+        <input
+          v-model="newWalletNationalCode"
+          type="text"
+          class="admin-input"
+          :placeholder="t('admin.customers.addWalletNationalCodePlaceholder')"
+        />
+        <button type="submit" class="admin-btn admin-btn-primary" :disabled="addWalletBusy">
+          {{ t('admin.customers.addWallet') }}
+        </button>
+      </form>
 
       <h3>{{ t('admin.customers.historyHeading') }}</h3>
       <table class="admin-table">
@@ -258,5 +335,15 @@ h3 {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+.add-wallet-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.add-wallet-form .admin-input {
+  flex: 1;
+  min-width: 180px;
 }
 </style>
