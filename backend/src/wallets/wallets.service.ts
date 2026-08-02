@@ -324,30 +324,32 @@ export class WalletsService {
         nationalCode: dto.nationalCode,
       },
     );
-    // The grant preloads the wallet's spendable balance up to its ceiling —
-    // virtualAmount stays the fixed ceiling this wallet was granted, while
-    // balance is what's actually left to spend right now (drawn down by
-    // ordinary spends, same as any other wallet's balance).
+    // No real money moves yet — the grant only links the wallet to its
+    // repository and sets its spending ceiling (virtualAmount). The credit
+    // wallet's real `balance` stays at 0 until it's actually spent: each
+    // purchase funds it with a real transfer from the repository for
+    // exactly that purchase's amount before debiting it like any other
+    // wallet (see TransactionsService.verifyPurchase), draining this same
+    // ceiling as it goes.
     await manager.update(Wallet, creditWallet.id, {
       repositoryWalletId: repository.id,
-      balance: requested.toString(),
     });
     await manager.update(Wallet, repository.id, {
       virtualAmount: (availablePool - requested).toString(),
     });
 
     // Not a real-money transfer (nothing moves between fromWalletId's and
-    // toWalletId's spendable `balance` — the credit wallet's balance was
-    // already preloaded above), but it's still a virtual-pool movement worth
-    // a ledger entry so it's visible in the repository owner's and
-    // personnel's transaction history like any other movement.
+    // toWalletId's spendable `balance` here — that only happens once the
+    // credit wallet is actually spent from), but it's still a virtual-pool
+    // movement worth a ledger entry so it's visible in the repository
+    // owner's and personnel's transaction history like any other movement.
     const transaction = manager.create(Transaction, {
       type: TransactionType.TRANSFER,
       fromWalletId: repository.id,
       toWalletId: creditWallet.id,
       amount: requested.toString(),
       idempotencyKey,
-      note: 'Credit grant: repository virtual balance -> credit wallet',
+      note: 'Credit grant: repository virtual pool -> credit wallet ceiling',
     });
     await manager.save(transaction);
 

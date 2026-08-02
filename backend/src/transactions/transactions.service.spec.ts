@@ -995,11 +995,17 @@ function buildSweepService(options: {
 }
 
 describe('TransactionsService.verifyPurchase', () => {
-  it("draws down a CREDIT wallet's virtual balance and logs a TRANSFER when paying a merchant", async () => {
+  it('funds a CREDIT wallet from its repository before paying a merchant, then draws down the virtual ceiling', async () => {
+    const repositoryWallet: WalletFixture = {
+      id: 'repo-1',
+      balance: '5000',
+      walletType: walletType({ name: 'Repository', allowPurchaseIn: true }),
+    };
     const creditWallet: WalletFixture = {
       id: 'credit-wallet-1',
-      balance: '1000',
+      balance: '0',
       virtualAmount: '400',
+      repositoryWalletId: 'repo-1',
       walletType: walletType({ code: 'CREDIT', allowPurchaseOut: true }),
     };
     const merchantWallet: WalletFixture = {
@@ -1010,6 +1016,7 @@ describe('TransactionsService.verifyPurchase', () => {
     const { service, manager } = buildService({
       senderWallet: creditWallet,
       recipientWallet: merchantWallet,
+      repositoryWallet,
     });
 
     const pendingPurchase = {
@@ -1035,31 +1042,139 @@ describe('TransactionsService.verifyPurchase', () => {
     const result = await service.verifyPurchase('purchase-tx-1');
 
     expect(result.status).toBe('COMPLETED');
+    // 1. repository's real balance is debited to fund the purchase.
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      repositoryWallet.id,
+      { balance: '4850' },
+    );
+    // 2. the credit wallet is funded with that real money and its
+    // remaining credit ceiling (virtualAmount) is drawn down.
     expect(manager.update).toHaveBeenCalledWith(
       expect.anything(),
       creditWallet.id,
-      { virtualAmount: '250' },
+      { balance: '150', virtualAmount: '250' },
     );
     expect(manager.create).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         type: TransactionType.TRANSFER,
-        fromWalletId: creditWallet.id,
+        fromWalletId: repositoryWallet.id,
         toWalletId: creditWallet.id,
         amount: '150',
-        idempotencyKey: 'credit-draw:purchase-tx-1',
+        idempotencyKey: 'credit-fund:purchase-tx-1',
       }),
     );
+    // 3. only now does the purchase itself debit the (now-funded) credit
+    // wallet and credit the merchant, same as any regular purchase.
     expect(manager.update).toHaveBeenCalledWith(
       expect.anything(),
       creditWallet.id,
-      { balance: '850' },
+      { balance: '0' },
     );
     expect(manager.update).toHaveBeenCalledWith(
       expect.anything(),
       merchantWallet.id,
       { balance: '150' },
     );
+  });
+
+  it('rejects a CREDIT purchase that exceeds the remaining credit line', async () => {
+    const repositoryWallet: WalletFixture = {
+      id: 'repo-1',
+      balance: '5000',
+      walletType: walletType({ name: 'Repository', allowPurchaseIn: true }),
+    };
+    const creditWallet: WalletFixture = {
+      id: 'credit-wallet-1',
+      balance: '0',
+      virtualAmount: '100',
+      repositoryWalletId: 'repo-1',
+      walletType: walletType({ code: 'CREDIT', allowPurchaseOut: true }),
+    };
+    const merchantWallet: WalletFixture = {
+      id: 'merchant-wallet-1',
+      balance: '0',
+      walletType: walletType({ allowPurchaseIn: true }),
+    };
+    const { service, manager } = buildService({
+      senderWallet: creditWallet,
+      recipientWallet: merchantWallet,
+      repositoryWallet,
+    });
+
+    const pendingPurchase = {
+      id: 'purchase-tx-2',
+      type: TransactionType.PURCHASE,
+      status: 'PENDING',
+      fromWalletId: creditWallet.id,
+      toWalletId: merchantWallet.id,
+      amount: '150',
+      installmentId: null,
+      expiresAt: null,
+    };
+    manager.createQueryBuilder = jest.fn(() => {
+      const builder: any = {
+        setLock: () => builder,
+        where: () => builder,
+        andWhere: () => builder,
+        getOne: async () => pendingPurchase,
+      };
+      return builder;
+    });
+
+    await expect(
+      service.verifyPurchase('purchase-tx-2'),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+  });
+
+  it('rejects a CREDIT purchase when the backing repository lacks enough real balance', async () => {
+    const repositoryWallet: WalletFixture = {
+      id: 'repo-1',
+      balance: '100',
+      walletType: walletType({ name: 'Repository', allowPurchaseIn: true }),
+    };
+    const creditWallet: WalletFixture = {
+      id: 'credit-wallet-1',
+      balance: '0',
+      virtualAmount: '400',
+      repositoryWalletId: 'repo-1',
+      walletType: walletType({ code: 'CREDIT', allowPurchaseOut: true }),
+    };
+    const merchantWallet: WalletFixture = {
+      id: 'merchant-wallet-1',
+      balance: '0',
+      walletType: walletType({ allowPurchaseIn: true }),
+    };
+    const { service, manager } = buildService({
+      senderWallet: creditWallet,
+      recipientWallet: merchantWallet,
+      repositoryWallet,
+    });
+
+    const pendingPurchase = {
+      id: 'purchase-tx-3',
+      type: TransactionType.PURCHASE,
+      status: 'PENDING',
+      fromWalletId: creditWallet.id,
+      toWalletId: merchantWallet.id,
+      amount: '150',
+      installmentId: null,
+      expiresAt: null,
+    };
+    manager.createQueryBuilder = jest.fn(() => {
+      const builder: any = {
+        setLock: () => builder,
+        where: () => builder,
+        andWhere: () => builder,
+        getOne: async () => pendingPurchase,
+      };
+      return builder;
+    });
+
+    await expect(
+      service.verifyPurchase('purchase-tx-3'),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 
   it('does not draw virtual balance for a non-CREDIT purchase', async () => {

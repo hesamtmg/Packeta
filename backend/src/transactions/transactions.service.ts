@@ -922,11 +922,72 @@ export class TransactionsService {
         );
       }
 
+      const purchaseAmount = BigInt(transaction.amount);
+
+      // A CREDIT wallet holds no real money of its own — before it can pay
+      // the merchant like any other wallet, it's funded with a real
+      // transfer from its linked repository for exactly this purchase
+      // amount (capped by whatever's left of the granted credit line),
+      // logged as its own ledger entry so the movement is visible in both
+      // the repository owner's and the personnel's transaction history.
+      // Only after that does the purchase below move real balance out of
+      // it, same as any other wallet.
+      if (
+        fromWalletRef.walletType.code === WalletTypeCode.CREDIT &&
+        fromWallet.repositoryWalletId
+      ) {
+        const availableVirtual = fromWallet.virtualAmount
+          ? BigInt(fromWallet.virtualAmount)
+          : 0n;
+        if (purchaseAmount > availableVirtual) {
+          transaction.status = TransactionStatus.REVERSED;
+          await manager.save(transaction);
+          throw new UnprocessableEntityException(
+            'This purchase exceeds the remaining credit line on this wallet',
+          );
+        }
+
+        // Unlike the floor check below, an insufficient-repository-funds
+        // rejection here rolls back this whole DB transaction rather than
+        // persisting REVERSED — the purchase stays PENDING and the timeout
+        // sweep will eventually reverse it. Safe either way (nothing moves
+        // on a throw), just less immediate than the floor-check case.
+        const repository = await this.walletsService.lockById(
+          manager,
+          fromWallet.repositoryWalletId,
+        );
+        const newRepositoryBalance =
+          BigInt(repository.balance) - purchaseAmount;
+        if (newRepositoryBalance < 0n) {
+          throw new UnprocessableEntityException(
+            'The backing repository does not have enough real balance to fund this purchase',
+          );
+        }
+
+        const fundedBalance = BigInt(fromWallet.balance) + purchaseAmount;
+        await manager.update(Wallet, repository.id, {
+          balance: newRepositoryBalance.toString(),
+        });
+        await manager.update(Wallet, fromWallet.id, {
+          balance: fundedBalance.toString(),
+          virtualAmount: (availableVirtual - purchaseAmount).toString(),
+        });
+        const fundingTransfer = manager.create(Transaction, {
+          type: TransactionType.TRANSFER,
+          fromWalletId: repository.id,
+          toWalletId: fromWallet.id,
+          amount: purchaseAmount.toString(),
+          idempotencyKey: `credit-fund:${transaction.id}`,
+          note: 'Repository funded the credit wallet for this purchase',
+        });
+        await manager.save(fundingTransfer);
+        fromWallet.balance = fundedBalance.toString();
+      }
+
       const floor = fromWalletRef.walletType.allowNegativeBalance
         ? -BigInt(fromWalletRef.walletType.creditLimit ?? '0')
         : 0n;
-      const newFromBalance =
-        BigInt(fromWallet.balance) - BigInt(transaction.amount);
+      const newFromBalance = BigInt(fromWallet.balance) - purchaseAmount;
       if (newFromBalance < floor) {
         transaction.status = TransactionStatus.REVERSED;
         await manager.save(transaction);
@@ -934,38 +995,7 @@ export class TransactionsService {
           'Insufficient balance to complete this purchase',
         );
       }
-      const newToBalance =
-        BigInt(toWallet.balance) + BigInt(transaction.amount);
-
-      // A credit wallet's balance is real money from the moment it's
-      // granted (see WalletsService.grantCredit), so this doesn't change
-      // what the payment below actually moves — it draws the same amount
-      // down from the wallet's own remaining virtual ceiling and logs that
-      // draw as its own ledger entry, so the credit line's outstanding
-      // balance keeps shrinking as it's spent instead of staying frozen at
-      // the original grant.
-      if (fromWalletRef.walletType.code === WalletTypeCode.CREDIT) {
-        const availableVirtual = fromWallet.virtualAmount
-          ? BigInt(fromWallet.virtualAmount)
-          : 0n;
-        const purchaseAmount = BigInt(transaction.amount);
-        const drawn =
-          purchaseAmount < availableVirtual ? purchaseAmount : availableVirtual;
-        if (drawn > 0n) {
-          await manager.update(Wallet, fromWallet.id, {
-            virtualAmount: (availableVirtual - drawn).toString(),
-          });
-          const creditDraw = manager.create(Transaction, {
-            type: TransactionType.TRANSFER,
-            fromWalletId: fromWallet.id,
-            toWalletId: fromWallet.id,
-            amount: drawn.toString(),
-            idempotencyKey: `credit-draw:${transaction.id}`,
-            note: 'Credit line drawn: virtual balance -> real balance',
-          });
-          await manager.save(creditDraw);
-        }
-      }
+      const newToBalance = BigInt(toWallet.balance) + purchaseAmount;
 
       await manager.update(Wallet, fromWallet.id, {
         balance: newFromBalance.toString(),
@@ -973,17 +1003,6 @@ export class TransactionsService {
       await manager.update(Wallet, toWallet.id, {
         balance: newToBalance.toString(),
       });
-      // Unlike the floor check above, an insufficient-repository-funds
-      // rejection here rolls back this whole DB transaction (including the
-      // two balance updates just above) rather than persisting REVERSED —
-      // the purchase stays PENDING and the timeout sweep will eventually
-      // reverse it. Safe either way (nothing moves on a throw), just less
-      // immediate than the floor-check case.
-      await this.debitLinkedRepository(
-        manager,
-        fromWalletRef,
-        BigInt(transaction.amount),
-      );
 
       transaction.status = TransactionStatus.COMPLETED;
       await manager.save(transaction);
@@ -1311,9 +1330,10 @@ export class TransactionsService {
   // REPOSITORY's real balance by the same amount, since that's the real
   // money actually funding the personnel's spend (see
   // WalletsService.grantCredit). No-op for every wallet without a
-  // repositoryWalletId. Applies to withdraw/transfer-out/purchase-out only
-  // (the organic "spend" paths) — admin adjustments and purchase refunds
-  // intentionally don't cascade here.
+  // repositoryWalletId. Applies to withdraw/transfer-out only — merchant
+  // purchases fund the credit wallet from its repository explicitly, up
+  // front, inline in verifyPurchase, rather than through this helper — and
+  // admin adjustments/purchase refunds intentionally don't cascade here.
   private async debitLinkedRepository(
     manager: EntityManager,
     fromWalletRef: Wallet,
