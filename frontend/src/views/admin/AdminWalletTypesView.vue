@@ -39,6 +39,11 @@ interface WalletType {
   penaltyPercentPerDay: string | null;
   unblockFee: string | null;
   installmentCount: number | null;
+  // How many days an installment may sit OVERDUE (accruing
+  // penaltyPercentPerDay) before the wallet is actually blocked and the
+  // admin notified — see backend InstallmentsService.applyOverduePenalties.
+  // Missing the deadline alone no longer blocks immediately.
+  overdueDaysBeforeBlock: number | null;
   // UI-only: whether the credit-line fields section is expanded for this
   // card — not sent to the backend, mirrors the supportsAutoWithdraw ->
   // autoWithdrawTimes visibility pattern. Defaults to expanded when the type
@@ -53,6 +58,7 @@ function hasCreditLineFields(type: {
   penaltyPercentPerDay: string | null;
   unblockFee: string | null;
   installmentCount: number | null;
+  overdueDaysBeforeBlock: number | null;
 }): boolean {
   return (
     type.installmentDate != null ||
@@ -60,7 +66,8 @@ function hasCreditLineFields(type: {
     type.feePercent != null ||
     type.penaltyPercentPerDay != null ||
     type.unblockFee != null ||
-    type.installmentCount != null
+    type.installmentCount != null ||
+    type.overdueDaysBeforeBlock != null
   );
 }
 
@@ -97,6 +104,7 @@ const newType = reactive({
   penaltyPercentPerDay: '',
   unblockFee: '',
   installmentCount: '',
+  overdueDaysBeforeBlock: '',
 });
 
 const newTypeCurrency = computed(
@@ -198,6 +206,9 @@ async function save(type: WalletType) {
         installmentCount: type.enableCreditLine
           ? type.installmentCount ?? undefined
           : undefined,
+        overdueDaysBeforeBlock: type.enableCreditLine
+          ? type.overdueDaysBeforeBlock ?? undefined
+          : undefined,
       },
     });
     await loadTypes();
@@ -270,6 +281,10 @@ async function createType() {
           newType.enableCreditLine && newType.installmentCount
             ? Number(newType.installmentCount)
             : undefined,
+        overdueDaysBeforeBlock:
+          newType.enableCreditLine && newType.overdueDaysBeforeBlock
+            ? Number(newType.overdueDaysBeforeBlock)
+            : undefined,
       },
     });
     newType.code = '';
@@ -293,6 +308,7 @@ async function createType() {
     newType.penaltyPercentPerDay = '';
     newType.unblockFee = '';
     newType.installmentCount = '';
+    newType.overdueDaysBeforeBlock = '';
     await loadTypes();
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : t('admin.walletTypes.createFailed');
@@ -376,6 +392,10 @@ loadTypes();
             <label>
               {{ t('admin.walletTypes.unblockFeeLabel', { code: wt.currency.code }) }}
               <input :value="moneyFieldDisplay(wt, 'unblockFee')" type="number" min="0" :step="amountStep(wt.currency)" class="admin-input" :disabled="!auth.isSuperAdmin" @input="onMoneyFieldInput(wt, 'unblockFee', $event)" />
+            </label>
+            <label>
+              {{ t('admin.walletTypes.overdueDaysBeforeBlockLabel') }}
+              <input v-model.number="wt.overdueDaysBeforeBlock" type="number" min="1" class="admin-input" :disabled="!auth.isSuperAdmin" />
             </label>
           </template>
 
@@ -473,6 +493,10 @@ loadTypes();
         <label>
           {{ t('admin.walletTypes.unblockFeeLabel', { code: newType.currencyCode || '…' }) }}
           <input v-model="newType.unblockFee" type="number" min="0" :step="newTypeCurrency ? amountStep(newTypeCurrency) : '0.01'" class="admin-input" />
+        </label>
+        <label>
+          {{ t('admin.walletTypes.overdueDaysBeforeBlockLabel') }}
+          <input v-model="newType.overdueDaysBeforeBlock" type="number" min="1" class="admin-input" />
         </label>
       </template>
 

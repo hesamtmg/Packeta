@@ -114,6 +114,7 @@ export class WalletTypesService {
           : null,
       unblockFee: dto.unblockFee !== undefined ? String(dto.unblockFee) : null,
       installmentCount: dto.installmentCount ?? null,
+      overdueDaysBeforeBlock: dto.overdueDaysBeforeBlock ?? null,
     });
     const saved = await this.walletTypesRepository.save(type);
     saved.currency = currency;
@@ -209,6 +210,9 @@ export class WalletTypesService {
     }
     if (dto.installmentCount !== undefined) {
       type.installmentCount = dto.installmentCount;
+    }
+    if (dto.overdueDaysBeforeBlock !== undefined) {
+      type.overdueDaysBeforeBlock = dto.overdueDaysBeforeBlock;
     }
     type.allowNegativeBalance = allowNegativeBalance;
     if (!allowNegativeBalance) {

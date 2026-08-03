@@ -77,11 +77,15 @@ function buildService(options: {
   const usersService = {
     findById: jest.fn(async (id: string) => options.usersById?.[id] ?? null),
   };
+  const loggingService = {
+    log: jest.fn(async () => undefined),
+  };
   const service = new InstallmentsService(
     installmentsRepository as any,
     walletsRepository as any,
     transactionsRepository as any,
     usersService as any,
+    loggingService as any,
   );
   return {
     service,
@@ -89,6 +93,7 @@ function buildService(options: {
     walletsRepository,
     transactionsRepository,
     usersService,
+    loggingService,
   };
 }
 
@@ -221,7 +226,7 @@ describe('InstallmentsService.generateDue', () => {
 });
 
 describe('InstallmentsService.applyOverduePenalties', () => {
-  it('adds 5 days worth of penalty, marks OVERDUE, and blocks a not-yet-blocked wallet', async () => {
+  it('adds 5 days worth of penalty and marks OVERDUE, but does not block when the type has no overdueDaysBeforeBlock set', async () => {
     const row = {
       id: 'installment-1',
       amount: '1000',
@@ -232,8 +237,9 @@ describe('InstallmentsService.applyOverduePenalties', () => {
       deadlineDate: '2026-01-15',
       wallet: {
         id: 'wallet-1',
+        userId: 'user-1',
         blockedAt: null,
-        walletType: { penaltyPercentPerDay: '2' },
+        walletType: { penaltyPercentPerDay: '2', overdueDaysBeforeBlock: null },
       },
     };
     const { service, installmentsRepository, walletsRepository } = buildService(
@@ -249,9 +255,74 @@ describe('InstallmentsService.applyOverduePenalties', () => {
     expect(row.status).toBe(InstallmentStatus.OVERDUE);
     expect(row.penaltyApplied).toBe(true);
     expect(installmentsRepository.save).toHaveBeenCalledWith(row);
+    expect(walletsRepository.update).not.toHaveBeenCalled();
+  });
+
+  it('does not block while daysOverdue is still within the type overdueDaysBeforeBlock grace period', async () => {
+    const row = {
+      id: 'installment-5',
+      amount: '1000',
+      principalAmount: '1000',
+      penaltyApplied: false,
+      penaltyDaysApplied: 0,
+      status: InstallmentStatus.PENDING,
+      deadlineDate: '2026-01-15',
+      wallet: {
+        id: 'wallet-5',
+        userId: 'user-5',
+        blockedAt: null,
+        walletType: { penaltyPercentPerDay: '2', overdueDaysBeforeBlock: 5 },
+      },
+    };
+    const { service, walletsRepository, loggingService } = buildService({
+      overdueRows: [row],
+    });
+
+    // Exactly 5 days overdue — at, not past, the 5-day threshold.
+    await service.applyOverduePenalties(new Date(2026, 0, 20));
+
+    expect(walletsRepository.update).not.toHaveBeenCalled();
+    expect(loggingService.log).not.toHaveBeenCalled();
+  });
+
+  it('blocks the wallet and logs an admin notification once daysOverdue exceeds overdueDaysBeforeBlock', async () => {
+    const row = {
+      id: 'installment-6',
+      amount: '1000',
+      principalAmount: '1000',
+      penaltyApplied: false,
+      penaltyDaysApplied: 0,
+      status: InstallmentStatus.PENDING,
+      deadlineDate: '2026-01-15',
+      wallet: {
+        id: 'wallet-6',
+        userId: 'user-6',
+        blockedAt: null,
+        walletType: { penaltyPercentPerDay: '2', overdueDaysBeforeBlock: 4 },
+      },
+    };
+    const { service, walletsRepository, loggingService } = buildService({
+      overdueRows: [row],
+    });
+
+    // 5 days overdue, past the 4-day threshold.
+    await service.applyOverduePenalties(new Date(2026, 0, 20));
+
     expect(walletsRepository.update).toHaveBeenCalledWith(
-      'wallet-1',
+      'wallet-6',
       expect.objectContaining({ blockedAt: expect.any(Date) }),
+    );
+    expect(loggingService.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: 'SCHEDULER',
+        action: 'installment_overdue_block',
+        userId: 'user-6',
+        metadata: expect.objectContaining({
+          walletId: 'wallet-6',
+          daysOverdue: 5,
+          overdueDaysBeforeBlock: 4,
+        }),
+      }),
     );
   });
 

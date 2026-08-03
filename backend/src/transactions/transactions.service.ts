@@ -622,6 +622,232 @@ export class TransactionsService {
     );
   }
 
+  // Loads the wallet + repository + outstanding-balance total shared by all
+  // three overdue-collection methods below, and rejects anything that isn't
+  // actually a blocked, repository-backed credit wallet with money owed.
+  private async loadOverdueCollectionContext(walletId: string): Promise<{
+    creditWallet: Wallet;
+    repository: Wallet;
+    outstanding: { amount: string }[];
+    totalOwed: bigint;
+  }> {
+    const creditWallet = await this.walletsService.getByIdUnscoped(walletId);
+    if (!creditWallet.blockedAt) {
+      throw new BadRequestException(
+        'This wallet is not currently blocked for overdue installments',
+      );
+    }
+    if (!creditWallet.repositoryWalletId) {
+      throw new BadRequestException(
+        'This wallet has no linked repository to repay',
+      );
+    }
+    const repository = await this.walletsService.getByIdUnscoped(
+      creditWallet.repositoryWalletId,
+    );
+    const outstanding =
+      await this.installmentsService.getOutstandingForWallet(walletId);
+    if (!outstanding.length) {
+      throw new BadRequestException(
+        'This wallet has no outstanding installments to collect',
+      );
+    }
+    const totalOwed =
+      outstanding.reduce((sum, i) => sum + BigInt(i.amount), 0n) +
+      BigInt(creditWallet.walletType.unblockFee ?? '0');
+    return { creditWallet, repository, outstanding, totalOwed };
+  }
+
+  // Overdue-collection method 1 of 3 (see InstallmentsService
+  // .applyOverduePenalties for how a wallet ends up blocked in the first
+  // place): an admin sends the customer a real ZarinPal payment link for
+  // the wallet's entire outstanding balance in one charge. Unlike
+  // payInstallment (customer-initiated from inside Packeta, one
+  // installment, callback to Packeta's own app), the customer very likely
+  // has no active Packeta session when they open a link an admin hands
+  // them out of band — so the callback lands on the IPG's own pay page
+  // instead, reusing the same topupTxnId query-param mechanism as
+  // initiateSupportTopUp. verifyPurchase's settlesWalletId branch marks
+  // every outstanding installment paid and clears the block once this
+  // verifies.
+  async initiateOverdueCollectionZarinPal(
+    adminUserId: string,
+    walletId: string,
+    idempotencyKey: string,
+  ): Promise<PurchaseInitiateResult> {
+    return this.run(
+      'overdue_collect_zarinpal',
+      adminUserId,
+      { walletId },
+      idempotencyKey,
+      async (manager) => {
+        const { repository, totalOwed } =
+          await this.loadOverdueCollectionContext(walletId);
+
+        const timeoutSeconds = DEFAULT_PURCHASE_TIMEOUT_SECONDS;
+        const expiresAt = new Date(Date.now() + timeoutSeconds * 1000);
+
+        const transaction = manager.create(Transaction, {
+          type: TransactionType.DEPOSIT,
+          status: TransactionStatus.PENDING,
+          fromWalletId: null,
+          toWalletId: repository.id,
+          amount: totalOwed.toString(),
+          idempotencyKey,
+          expiresAt,
+          settlesWalletId: walletId,
+        });
+        await manager.save(transaction);
+
+        // No pre-existing authority to route through (unlike
+        // initiateSupportTopUp, which reuses the purchase it's completing)
+        // — the transaction's own id works fine as the path segment, since
+        // the topupTxnId query param is what actually drives the pay page
+        // when present; the route's own :authority is only used for a
+        // best-effort, non-critical header fetch there.
+        const ipgFrontendUrl = this.configService.get<string>('ipgFrontendUrl');
+        const { authority, paymentUrl } =
+          await this.zarinpalClientService.createPayment({
+            merchantName: 'Overdue installment collection',
+            amount: transaction.amount,
+            displayAmount: formatAmount(
+              totalOwed.toString(),
+              repository.walletType.currency,
+            ),
+            callbackUrl: `${ipgFrontendUrl}/pay/${transaction.id}?topupTxnId=${transaction.id}`,
+            timeoutSeconds,
+          });
+
+        transaction.ipgAuthority = authority;
+        transaction.ipgPaymentUrl = paymentUrl;
+        await manager.save(transaction);
+
+        return {
+          transactionId: transaction.id,
+          redirectUrl: paymentUrl,
+          expiresAt,
+        };
+      },
+    );
+  }
+
+  // Overdue-collection method 2 of 3: the repository owner decides to just
+  // absorb the customer's unpaid balance out of the repository's own real
+  // funds — no money moves from the customer at all. Debits the
+  // repository's real balance for the full outstanding total (rejecting if
+  // it can't cover it), records that debit as its own ADJUSTMENT row (the
+  // same type the generic admin balance-adjust endpoint uses, since this is
+  // functionally the same kind of admin-directed correction, just always
+  // tied to a specific overdue wallet), and settles every outstanding
+  // installment immediately — no ZarinPal round-trip needed since nothing
+  // is pending verification.
+  async collectOverdueFromRepository(
+    adminUserId: string,
+    walletId: string,
+    idempotencyKey: string,
+  ): Promise<MoneyResult> {
+    return this.run(
+      'overdue_collect_repository',
+      adminUserId,
+      { walletId },
+      idempotencyKey,
+      async (manager) => {
+        const { creditWallet, totalOwed } =
+          await this.loadOverdueCollectionContext(walletId);
+
+        const repository = await this.walletsService.lockById(
+          manager,
+          creditWallet.repositoryWalletId!,
+        );
+        const newRepositoryBalance = BigInt(repository.balance) - totalOwed;
+        if (newRepositoryBalance < 0n) {
+          throw new UnprocessableEntityException(
+            "The repository's real balance is not enough to absorb this debt",
+          );
+        }
+        await manager.update(Wallet, repository.id, {
+          balance: newRepositoryBalance.toString(),
+        });
+
+        const transaction = manager.create(Transaction, {
+          type: TransactionType.ADJUSTMENT,
+          fromWalletId: repository.id,
+          toWalletId: null,
+          amount: totalOwed.toString(),
+          idempotencyKey,
+          note: `Overdue collection: repository absorbed the debt for wallet ${walletId}`,
+          performedByUserId: adminUserId,
+        });
+        await manager.save(transaction);
+
+        await this.installmentsService.markAllPaidAndUnblock(
+          manager,
+          walletId,
+          transaction.id,
+        );
+
+        return {
+          transactionId: transaction.id,
+          fromWalletId: repository.id,
+          toWalletId: null,
+          balance: newRepositoryBalance.toString(),
+        };
+      },
+    );
+  }
+
+  // Overdue-collection method 3 of 3: the admin confirms the debt was
+  // settled by some means outside the system entirely (bank transfer, cash,
+  // whatever) — no real balance moves anywhere. The uploaded document is
+  // just a filename reference for the audit trail; description +
+  // documentReference both fold into the ADJUSTMENT row's note. Every
+  // outstanding installment is marked paid on the strength of the admin's
+  // confirmation alone.
+  async collectOverdueManually(
+    adminUserId: string,
+    walletId: string,
+    description: string,
+    documentReference: string | null,
+    idempotencyKey: string,
+  ): Promise<MoneyResult> {
+    return this.run(
+      'overdue_collect_manual',
+      adminUserId,
+      { walletId, description, documentReference },
+      idempotencyKey,
+      async (manager) => {
+        const { totalOwed } = await this.loadOverdueCollectionContext(walletId);
+
+        const note = documentReference
+          ? `Overdue collection (manual): ${description} (document: ${documentReference})`
+          : `Overdue collection (manual): ${description}`;
+        const transaction = manager.create(Transaction, {
+          type: TransactionType.ADJUSTMENT,
+          fromWalletId: null,
+          toWalletId: null,
+          amount: totalOwed.toString(),
+          idempotencyKey,
+          note: note.slice(0, 500),
+          performedByUserId: adminUserId,
+        });
+        await manager.save(transaction);
+
+        await this.installmentsService.markAllPaidAndUnblock(
+          manager,
+          walletId,
+          transaction.id,
+        );
+
+        return {
+          transactionId: transaction.id,
+          fromWalletId: null,
+          toWalletId: null,
+          balance: '0',
+        };
+      },
+    );
+  }
+
   // Merchant-initiated checkout: unlike initiatePurchase (the customer picks
   // their own wallet up front), here the merchant only names an amount and
   // currency — no customer or wallet is known yet. The resulting pay link is
@@ -896,13 +1122,15 @@ export class TransactionsService {
 
       // A row with no fromWalletId is either genuinely walletless — a
       // DEPOSIT (credits the depositor's own wallet), an installment
-      // repayment (credits the repository), or a credit-shortfall top-up
-      // (credits an auto-provisioned support wallet, then completes the
-      // purchase it's linked to) — all funded purely by the IPG, with
-      // nothing to debit on Packeta's side; or it's a merchant-initiated
-      // charge still waiting for the customer to identify themselves and
-      // pick a wallet at the IPG (see attachPurchaseWallet), which genuinely
-      // can't be verified yet.
+      // repayment (credits the repository), an admin-triggered overdue
+      // collection (credits the repository, then settles every outstanding
+      // installment on the blocked wallet — see settlesWalletId below), or
+      // a credit-shortfall top-up (credits an auto-provisioned support
+      // wallet, then completes the purchase it's linked to) — all funded
+      // purely by the IPG, with nothing to debit on Packeta's side; or it's
+      // a merchant-initiated charge still waiting for the customer to
+      // identify themselves and pick a wallet at the IPG (see
+      // attachPurchaseWallet), which genuinely can't be verified yet.
       const isSupportTopUp = !!transaction.completesPurchaseId;
       const isRealMoneyIn =
         transaction.type === TransactionType.DEPOSIT ||
@@ -988,6 +1216,13 @@ export class TransactionsService {
           await this.installmentsService.markPaid(
             manager,
             transaction.installmentId,
+            transaction.id,
+          );
+        }
+        if (transaction.settlesWalletId) {
+          await this.installmentsService.markAllPaidAndUnblock(
+            manager,
+            transaction.settlesWalletId,
             transaction.id,
           );
         }
@@ -1858,7 +2093,10 @@ export class TransactionsService {
       | 'purchase_initiate'
       | 'purchase_charge'
       | 'purchase_reverse'
-      | 'installment_pay',
+      | 'installment_pay'
+      | 'overdue_collect_zarinpal'
+      | 'overdue_collect_repository'
+      | 'overdue_collect_manual',
     userId: string,
     payload: Record<string, unknown>,
     idempotencyKey: string,

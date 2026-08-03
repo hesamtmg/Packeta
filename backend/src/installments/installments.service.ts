@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 import { Installment, InstallmentStatus } from './entities/installment.entity';
 import { Wallet } from '../wallets/entities/wallet.entity';
 import {
@@ -13,6 +13,7 @@ import {
 } from '../transactions/entities/transaction.entity';
 import { UsersService } from '../users/users.service';
 import { displayIdentity } from '../common/synthetic-email';
+import { LoggingService } from '../logging/logging.service';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -57,6 +58,7 @@ export class InstallmentsService {
     @InjectRepository(Transaction)
     private readonly transactionsRepository: Repository<Transaction>,
     private readonly usersService: UsersService,
+    private readonly loggingService: LoggingService,
   ) {}
 
   // Splits a billing period's total (the sum of a credit wallet's VIRTUAL
@@ -205,10 +207,18 @@ export class InstallmentsService {
   // to OVERDUE, or already OVERDUE and still accruing): tops up `amount` by
   // penaltyPercentPerDay x principalAmount for each day elapsed since the
   // last time this ran that hasn't already been charged (penaltyDaysApplied
-  // tracks that), marks it OVERDUE, and blocks its wallet from further
-  // outgoing money movement until repaid. Safe to run more or less than once
-  // a day — it always converges to "penaltyDaysApplied days worth of
+  // tracks that), and marks it OVERDUE. Safe to run more or less than once a
+  // day — it always converges to "penaltyDaysApplied days worth of
   // penalty", never double-charging a day twice.
+  //
+  // Missing the deadline alone does NOT block the wallet anymore — only
+  // once the MOST overdue unpaid installment's daysOverdue exceeds the
+  // type's overdueDaysBeforeBlock (see WalletType) does the wallet actually
+  // get frozen, with an admin-facing log entry (surfaced in the admin
+  // panel's scheduler-log view) noting who crossed the line and by how
+  // much, so an admin can go collect via one of the three overdue-collection
+  // methods (see TransactionsService). A type with overdueDaysBeforeBlock
+  // left unset never auto-blocks — penalty still accrues, that's all.
   async applyOverduePenalties(today: Date = new Date()): Promise<number> {
     const todayDate = toDateOnly(today);
     const unpaid = await this.installmentsRepository
@@ -222,13 +232,11 @@ export class InstallmentsService {
       .getMany();
 
     let affected = 0;
+    const maxDaysOverdueByWallet = new Map<string, number>();
     for (const installment of unpaid) {
       const daysOverdue = daysBetween(installment.deadlineDate, todayDate);
       const owedDays = daysOverdue - installment.penaltyDaysApplied;
-      if (owedDays <= 0 && installment.status === InstallmentStatus.OVERDUE) {
-        continue;
-      }
-
+      const alreadyOverdue = installment.status === InstallmentStatus.OVERDUE;
       if (owedDays > 0) {
         const dailyPenalty = this.percentOf(
           BigInt(installment.principalAmount),
@@ -239,18 +247,56 @@ export class InstallmentsService {
           dailyPenalty * BigInt(owedDays)
         ).toString();
         installment.penaltyDaysApplied = daysOverdue;
+        installment.penaltyApplied = true;
+        installment.status = InstallmentStatus.OVERDUE;
+        await this.installmentsRepository.save(installment);
+        affected++;
+      } else if (!alreadyOverdue) {
+        installment.penaltyApplied = true;
+        installment.status = InstallmentStatus.OVERDUE;
+        await this.installmentsRepository.save(installment);
+        affected++;
       }
-      installment.penaltyApplied = true;
-      installment.status = InstallmentStatus.OVERDUE;
-      await this.installmentsRepository.save(installment);
-      affected++;
 
-      if (!installment.wallet.blockedAt) {
-        await this.walletsRepository.update(installment.wallet.id, {
-          blockedAt: new Date(),
-        });
-      }
+      const walletId = installment.wallet.id;
+      maxDaysOverdueByWallet.set(
+        walletId,
+        Math.max(maxDaysOverdueByWallet.get(walletId) ?? 0, daysOverdue),
+      );
     }
+
+    const walletsById = new Map(unpaid.map((i) => [i.wallet.id, i.wallet]));
+    for (const [walletId, maxDaysOverdue] of maxDaysOverdueByWallet) {
+      const wallet = walletsById.get(walletId)!;
+      const threshold = wallet.walletType.overdueDaysBeforeBlock;
+      if (
+        wallet.blockedAt ||
+        threshold == null ||
+        maxDaysOverdue <= threshold
+      ) {
+        continue;
+      }
+
+      await this.walletsRepository.update(walletId, {
+        blockedAt: new Date(),
+      });
+      const totalOwed = unpaid
+        .filter((i) => i.wallet.id === walletId)
+        .reduce((sum, i) => sum + BigInt(i.amount), 0n);
+      await this.loggingService.log({
+        category: 'SCHEDULER',
+        action: 'installment_overdue_block',
+        success: true,
+        userId: wallet.userId,
+        metadata: {
+          walletId,
+          daysOverdue: maxDaysOverdue,
+          overdueDaysBeforeBlock: threshold,
+          totalOwed: totalOwed.toString(),
+        },
+      });
+    }
+
     return affected;
   }
 
@@ -427,39 +473,134 @@ export class InstallmentsService {
     installmentId: string,
     transactionId: string,
   ): Promise<void> {
-    await manager.update(Installment, installmentId, {
+    const installment = await manager.findOne(Installment, {
+      where: { id: installmentId },
+    });
+    if (!installment) return;
+    await this.settleOneInstallment(manager, installment, transactionId);
+    await manager.update(Wallet, installment.walletId, { blockedAt: null });
+  }
+
+  // Marks every still-unpaid (PENDING or OVERDUE) installment on a credit
+  // wallet PAID in one go and clears its block — used by the three
+  // admin-triggered overdue-collection methods on TransactionsService
+  // (ZarinPal, repository-absorbed, and manual+document), each of which
+  // settles the wallet's ENTIRE outstanding balance at once rather than one
+  // installment at a time like the customer's own payInstallment/markPaid.
+  async markAllPaidAndUnblock(
+    manager: EntityManager,
+    walletId: string,
+    transactionId: string,
+  ): Promise<void> {
+    const installments = await manager
+      .createQueryBuilder(Installment, 'installment')
+      .setLock('pessimistic_write')
+      .where('installment.walletId = :walletId', { walletId })
+      .andWhere('installment.status IN (:...statuses)', {
+        statuses: [InstallmentStatus.PENDING, InstallmentStatus.OVERDUE],
+      })
+      .getMany();
+    for (const installment of installments) {
+      await this.settleOneInstallment(manager, installment, transactionId);
+    }
+    await manager.update(Wallet, walletId, { blockedAt: null });
+  }
+
+  // Shared by markPaid (one installment) and markAllPaidAndUnblock (every
+  // outstanding installment on a wallet): marks the row PAID and restores
+  // the wallet's virtualAmount ceiling by its amount, with its own VIRTUAL
+  // ledger row — the mirror image of the draw-down recorded at spend time
+  // (see TransactionsService.settleCreditFundedPurchase). Re-reads the
+  // wallet's current virtualAmount on every call rather than caching it, so
+  // looping this across several installments in the same DB transaction
+  // still accumulates correctly.
+  private async settleOneInstallment(
+    manager: EntityManager,
+    installment: Installment,
+    transactionId: string,
+  ): Promise<void> {
+    await manager.update(Installment, installment.id, {
       status: InstallmentStatus.PAID,
       paidAt: new Date(),
       paymentTransactionId: transactionId,
     });
-    const installment = await manager.findOne(Installment, {
-      where: { id: installmentId },
+    const wallet = await manager.findOne(Wallet, {
+      where: { id: installment.walletId },
     });
-    if (installment) {
-      await manager.update(Wallet, installment.walletId, { blockedAt: null });
-      const wallet = await manager.findOne(Wallet, {
-        where: { id: installment.walletId },
+    if (!wallet) return;
+    const restored =
+      BigInt(wallet.virtualAmount ?? '0') + BigInt(installment.amount);
+    await manager.update(Wallet, wallet.id, {
+      virtualAmount: restored.toString(),
+    });
+    const restoreTransaction = manager.create(Transaction, {
+      type: TransactionType.VIRTUAL,
+      fromWalletId: null,
+      toWalletId: wallet.id,
+      amount: installment.amount,
+      idempotencyKey: `installment-restore:${installment.id}`,
+      note: 'Credit wallet ceiling restored by installment repayment',
+    });
+    await manager.save(restoreTransaction);
+  }
+
+  // Every still-unpaid installment on a credit wallet, for the three
+  // admin overdue-collection methods to compute how much is owed.
+  async getOutstandingForWallet(walletId: string): Promise<Installment[]> {
+    return this.installmentsRepository.find({
+      where: {
+        walletId,
+        status: In([InstallmentStatus.PENDING, InstallmentStatus.OVERDUE]),
+      },
+    });
+  }
+
+  // Every currently-blocked credit wallet, for the admin overdue-collection
+  // panel (see TransactionsService's three collection methods) — one row
+  // per wallet with everything an admin needs to decide how to collect: who
+  // owes it, how much (every outstanding installment's amount, folding in
+  // unblockFee since any repayment while blocked owes that too — same rule
+  // payInstallment already applies), and which repository backs it.
+  async findBlockedWalletsSummary(): Promise<
+    {
+      walletId: string;
+      ownerEmail: string;
+      ownerPhoneNumber: string | null;
+      walletTypeName: string;
+      currency: { code: string; symbol: string };
+      blockedAt: Date;
+      totalOwed: string;
+      repositoryWalletId: string | null;
+    }[]
+  > {
+    const wallets = await this.walletsRepository
+      .createQueryBuilder('wallet')
+      .innerJoinAndSelect('wallet.user', 'user')
+      .innerJoinAndSelect('wallet.walletType', 'walletType')
+      .innerJoinAndSelect('walletType.currency', 'currency')
+      .where('wallet.blockedAt IS NOT NULL')
+      .getMany();
+
+    const result: Awaited<
+      ReturnType<InstallmentsService['findBlockedWalletsSummary']>
+    > = [];
+    for (const wallet of wallets) {
+      const outstanding = await this.getOutstandingForWallet(wallet.id);
+      if (!outstanding.length) continue;
+      const totalOwed =
+        outstanding.reduce((sum, i) => sum + BigInt(i.amount), 0n) +
+        BigInt(wallet.walletType.unblockFee ?? '0');
+      result.push({
+        walletId: wallet.id,
+        ownerEmail: wallet.user.email,
+        ownerPhoneNumber: wallet.user.phoneNumber,
+        walletTypeName: wallet.walletType.name,
+        currency: wallet.walletType.currency,
+        blockedAt: wallet.blockedAt!,
+        totalOwed: totalOwed.toString(),
+        repositoryWalletId: wallet.repositoryWalletId,
       });
-      if (wallet) {
-        const restored =
-          BigInt(wallet.virtualAmount ?? '0') + BigInt(installment.amount);
-        await manager.update(Wallet, wallet.id, {
-          virtualAmount: restored.toString(),
-        });
-        // Mirror image of the VIRTUAL draw-down recorded at spend time (see
-        // TransactionsService.settleCreditFundedPurchase) — its own ledger
-        // row so the ceiling's ups and downs are all individually visible,
-        // not just inferable from the wallet's current virtualAmount.
-        const restoreTransaction = manager.create(Transaction, {
-          type: TransactionType.VIRTUAL,
-          fromWalletId: null,
-          toWalletId: wallet.id,
-          amount: installment.amount,
-          idempotencyKey: `installment-restore:${installment.id}`,
-          note: 'Credit wallet ceiling restored by installment repayment',
-        });
-        await manager.save(restoreTransaction);
-      }
     }
+    return result;
   }
 }

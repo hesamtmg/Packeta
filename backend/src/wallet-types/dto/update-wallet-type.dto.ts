@@ -103,4 +103,11 @@ export class UpdateWalletTypeDto {
   @IsInt()
   @Min(1)
   installmentCount?: number;
+
+  // How many days an installment may sit OVERDUE before the wallet is
+  // blocked and the admin notified (see WalletType.overdueDaysBeforeBlock).
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  overdueDaysBeforeBlock?: number;
 }

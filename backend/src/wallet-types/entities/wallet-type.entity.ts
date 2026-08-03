@@ -138,6 +138,16 @@ export class WalletType {
   @Column({ type: 'smallint', nullable: true })
   installmentCount: number | null;
 
+  // How many days an installment may sit OVERDUE (accruing
+  // penaltyPercentPerDay) before the wallet is actually blocked and the
+  // admin notified — see InstallmentsService.applyOverduePenalties. Missing
+  // its deadline alone no longer blocks the wallet immediately; only
+  // crossing this many days unpaid past that does. Null disables
+  // day-count-based blocking for this type entirely (penalty still
+  // accrues, the wallet just never auto-blocks).
+  @Column({ type: 'smallint', nullable: true })
+  overdueDaysBeforeBlock: number | null;
+
   // Whether every new signup gets a starter wallet of this type (in the
   // default currency). Only the four original built-ins are starter types;
   // custom types (including Merchant) are opt-in via POST /wallets.

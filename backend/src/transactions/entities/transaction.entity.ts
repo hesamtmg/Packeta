@@ -150,6 +150,17 @@ export class Transaction {
   @Column({ type: 'uuid', nullable: true })
   relatedPurchaseId: string | null;
 
+  // Only set on a real-money DEPOSIT-style row created by
+  // TransactionsService.initiateOverdueCollectionZarinPal: which blocked
+  // CREDIT wallet's entire outstanding overdue balance this admin-triggered
+  // payment settles, once verified — see verifyPurchase and
+  // InstallmentsService.markAllPaidAndUnblock. Distinct from installmentId
+  // (a single self-service repayment): this covers every unpaid installment
+  // on the wallet at once.
+  @Index()
+  @Column({ type: 'uuid', nullable: true })
+  settlesWalletId: string | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

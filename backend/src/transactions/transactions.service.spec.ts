@@ -1304,6 +1304,57 @@ describe('TransactionsService.verifyPurchase', () => {
       'installment-tx-1',
     );
   });
+
+  it('verifies an admin overdue-collection payment and settles every outstanding installment on the wallet', async () => {
+    const repositoryWallet: WalletFixture = {
+      id: 'repo-1',
+      balance: '1000',
+      walletType: walletType({ name: 'Repository', allowPurchaseIn: true }),
+    };
+    const installmentsService = {
+      markAllPaidAndUnblock: jest.fn(async () => undefined),
+    };
+    const { service, manager } = buildService({
+      senderWallet: repositoryWallet,
+      installmentsService: installmentsService as any,
+    });
+
+    const pendingCollection = {
+      id: 'collection-tx-1',
+      type: TransactionType.DEPOSIT,
+      status: 'PENDING',
+      fromWalletId: null,
+      toWalletId: repositoryWallet.id,
+      amount: '750',
+      installmentId: null,
+      settlesWalletId: 'credit-1',
+      expiresAt: null,
+      ipgAuthority: 'zarinpal-auth-1',
+    };
+    manager.createQueryBuilder = jest.fn(() => {
+      const builder: any = {
+        setLock: () => builder,
+        where: () => builder,
+        andWhere: () => builder,
+        getOne: async () => pendingCollection,
+      };
+      return builder;
+    });
+
+    const result = await service.verifyPurchase('collection-tx-1');
+
+    expect(result.status).toBe('COMPLETED');
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      repositoryWallet.id,
+      { balance: '1750' },
+    );
+    expect(installmentsService.markAllPaidAndUnblock).toHaveBeenCalledWith(
+      manager,
+      'credit-1',
+      'collection-tx-1',
+    );
+  });
 });
 
 describe('TransactionsService.verifyPurchase support top-up completion', () => {
@@ -1725,6 +1776,158 @@ describe('TransactionsService.payInstallment', () => {
 
     expect(manager.save).toHaveBeenCalledWith(
       expect.objectContaining({ amount: '450' }),
+    );
+  });
+});
+
+describe('TransactionsService overdue-collection methods', () => {
+  const repositoryWallet: WalletFixture = {
+    id: 'repo-1',
+    balance: '5000',
+    walletType: walletType({ name: 'Repository', allowPurchaseIn: true }),
+  };
+
+  const blockedCreditWallet: WalletFixture = {
+    id: 'credit-1',
+    userId: 'personnel-1',
+    balance: '0',
+    blockedAt: new Date(),
+    repositoryWalletId: 'repo-1',
+    walletType: walletType({ code: 'CREDIT', unblockFee: '50' }),
+  };
+
+  function buildOverdueService(wallet: WalletFixture = blockedCreditWallet) {
+    const installmentsService = {
+      getOutstandingForWallet: jest.fn(async () => [
+        { amount: '400' },
+        { amount: '300' },
+      ]),
+      markAllPaidAndUnblock: jest.fn(async () => undefined),
+    };
+    return {
+      ...buildService({
+        senderWallet: wallet,
+        repositoryWallet,
+        installmentsService: installmentsService as any,
+      }),
+      installmentsService,
+    };
+  }
+
+  it('rejects collecting from a wallet that is not currently blocked', async () => {
+    const { service } = buildOverdueService({
+      ...blockedCreditWallet,
+      blockedAt: null,
+    });
+
+    await expect(
+      service.collectOverdueFromRepository('admin-1', 'credit-1', 'idem-1'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('collectOverdueFromRepository debits the repository for the full outstanding total (installments + unblockFee) and settles every installment', async () => {
+    const { service, manager, installmentsService } = buildOverdueService();
+
+    const result = await service.collectOverdueFromRepository(
+      'admin-1',
+      'credit-1',
+      'idem-2',
+    );
+
+    // 400 + 300 + unblockFee 50 = 750
+    expect(result.balance).toBe('4250');
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'repo-1', {
+      balance: '4250',
+    });
+    expect(manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: TransactionType.ADJUSTMENT,
+        fromWalletId: 'repo-1',
+        toWalletId: null,
+        amount: '750',
+      }),
+    );
+    expect(installmentsService.markAllPaidAndUnblock).toHaveBeenCalledWith(
+      manager,
+      'credit-1',
+      undefined,
+    );
+  });
+
+  it('collectOverdueFromRepository rejects when the repository cannot cover the debt', async () => {
+    const poorRepository: WalletFixture = {
+      ...repositoryWallet,
+      balance: '100',
+    };
+    const installmentsService = {
+      getOutstandingForWallet: jest.fn(async () => [{ amount: '400' }]),
+      markAllPaidAndUnblock: jest.fn(async () => undefined),
+    };
+    const { service } = buildService({
+      senderWallet: blockedCreditWallet,
+      repositoryWallet: poorRepository,
+      installmentsService: installmentsService as any,
+    });
+
+    await expect(
+      service.collectOverdueFromRepository('admin-1', 'credit-1', 'idem-3'),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+  });
+
+  it('collectOverdueManually records the description and document reference without moving any balance', async () => {
+    const { service, manager, installmentsService } = buildOverdueService();
+
+    const result = await service.collectOverdueManually(
+      'admin-1',
+      'credit-1',
+      'Paid via bank transfer',
+      'receipt-123.pdf',
+      'idem-4',
+    );
+
+    expect(result.balance).toBe('0');
+    expect(manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: TransactionType.ADJUSTMENT,
+        fromWalletId: null,
+        toWalletId: null,
+        amount: '750',
+        note: expect.stringContaining('Paid via bank transfer'),
+      }),
+    );
+    expect(manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        note: expect.stringContaining('receipt-123.pdf'),
+      }),
+    );
+    expect(installmentsService.markAllPaidAndUnblock).toHaveBeenCalledWith(
+      manager,
+      'credit-1',
+      undefined,
+    );
+  });
+
+  it('initiateOverdueCollectionZarinPal creates a walletless DEPOSIT for the full outstanding total, tagged with settlesWalletId', async () => {
+    const { service, manager, zarinpalClientService } = buildOverdueService();
+
+    const result = await service.initiateOverdueCollectionZarinPal(
+      'admin-1',
+      'credit-1',
+      'idem-5',
+    );
+
+    expect(result.redirectUrl).toBe(
+      'https://sandbox.zarinpal.com/pg/StartPay/zarinpal-auth-1',
+    );
+    expect(zarinpalClientService.createPayment).toHaveBeenCalled();
+    expect(manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: TransactionType.DEPOSIT,
+        fromWalletId: null,
+        toWalletId: 'repo-1',
+        amount: '750',
+        settlesWalletId: 'credit-1',
+      }),
     );
   });
 });
