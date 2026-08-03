@@ -14,6 +14,9 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { randomUUID } from 'crypto';
 import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
@@ -189,6 +192,102 @@ export class AdminController {
       walletTypeName: installment.wallet.walletType.name,
       currency: installment.wallet.walletType.currency,
     }));
+  }
+
+  // Every credit wallet currently blocked for missed payments (see
+  // InstallmentsService.applyOverduePenalties), with the full amount owed
+  // — the admin panel's queue for the three overdue-collection actions
+  // below.
+  @Get('installments/overdue')
+  async listOverdueWallets() {
+    return this.installmentsService.findBlockedWalletsSummary();
+  }
+
+  // Overdue-collection method 1 of 3: sends a real ZarinPal payment link
+  // for the wallet's entire outstanding balance — see
+  // TransactionsService.initiateOverdueCollectionZarinPal.
+  @Post('installments/:walletId/collect/zarinpal')
+  async collectOverdueZarinPal(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('walletId') walletId: string,
+    @Headers('idempotency-key') idempotencyKey: string,
+  ) {
+    return this.transactionsService.initiateOverdueCollectionZarinPal(
+      user.userId,
+      walletId,
+      idempotencyKey,
+    );
+  }
+
+  // Overdue-collection method 2 of 3: the repository absorbs the debt out
+  // of its own real balance — see
+  // TransactionsService.collectOverdueFromRepository.
+  @Post('installments/:walletId/collect/repository')
+  async collectOverdueRepository(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('walletId') walletId: string,
+    @Headers('idempotency-key') idempotencyKey: string,
+  ) {
+    return this.transactionsService.collectOverdueFromRepository(
+      user.userId,
+      walletId,
+      idempotencyKey,
+    );
+  }
+
+  // Overdue-collection method 3 of 3: the admin confirms the debt was
+  // settled outside the system (bank transfer, cash, ...), attaching a
+  // description and an optional proof document — see
+  // TransactionsService.collectOverdueManually. The document is stored on
+  // disk purely as an audit reference; nothing reads it back through the
+  // API.
+  @Post('installments/:walletId/collect/manual')
+  @UseInterceptors(
+    FileInterceptor('document', { limits: { fileSize: MAX_UPLOAD_BYTES } }),
+  )
+  async collectOverdueManual(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('walletId') walletId: string,
+    @Body('description') description: string,
+    @Headers('idempotency-key') idempotencyKey: string,
+    @UploadedFile() document?: Express.Multer.File,
+  ) {
+    if (!description?.trim()) {
+      throw new BadRequestException(
+        'A description of how this was settled is required',
+      );
+    }
+    const documentReference = document
+      ? this.saveOverdueSettlementDocument(walletId, document)
+      : null;
+    return this.transactionsService.collectOverdueManually(
+      user.userId,
+      walletId,
+      description.trim(),
+      documentReference,
+      idempotencyKey,
+    );
+  }
+
+  // Writes an uploaded settlement-proof document to a dedicated uploads
+  // directory (created on first use) under a collision-proof name, and
+  // returns that filename for the audit note — see collectOverdueManual.
+  private saveOverdueSettlementDocument(
+    walletId: string,
+    document: Express.Multer.File,
+  ): string {
+    const uploadsDir = join(
+      __dirname,
+      '..',
+      '..',
+      'uploads',
+      'overdue-settlements',
+    );
+    mkdirSync(uploadsDir, { recursive: true });
+    const safeName = document.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const filename = `${walletId}-${randomUUID()}-${safeName}`;
+    writeFileSync(join(uploadsDir, filename), document.buffer);
+    return filename;
   }
 
   // Recent scheduler runs (installment generation/penalties, auto-withdraw

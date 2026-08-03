@@ -4,6 +4,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   Max,
   Min,
@@ -103,4 +104,27 @@ export class UpdateWalletTypeDto {
   @IsInt()
   @Min(1)
   installmentCount?: number;
+
+  // How many days an installment may sit OVERDUE before the wallet is
+  // blocked and the admin notified (see WalletType.overdueDaysBeforeBlock).
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  overdueDaysBeforeBlock?: number;
+
+  // Where an installment repayment's fee/penalty/unblock-fee slices are
+  // routed instead of the credit wallet's own backing repository — each
+  // must be an existing MERCHANT_REPOSITORY-type wallet in this type's
+  // currency (see WalletTypesService.validateSubRepository).
+  @IsOptional()
+  @IsUUID()
+  feeRepositoryWalletId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  penaltyRepositoryWalletId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  unblockFeeRepositoryWalletId?: string;
 }

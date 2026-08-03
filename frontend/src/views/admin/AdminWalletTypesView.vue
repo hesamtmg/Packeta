@@ -39,6 +39,19 @@ interface WalletType {
   penaltyPercentPerDay: string | null;
   unblockFee: string | null;
   installmentCount: number | null;
+  // How many days an installment may sit OVERDUE (accruing
+  // penaltyPercentPerDay) before the wallet is actually blocked and the
+  // admin notified — see backend InstallmentsService.applyOverduePenalties.
+  // Missing the deadline alone no longer blocks immediately.
+  overdueDaysBeforeBlock: number | null;
+  // Where an installment repayment's fee/penalty/unblock-fee slices are
+  // routed instead of the credit wallet's own backing repository — each
+  // must be an existing MERCHANT_REPOSITORY-type wallet in this type's
+  // currency (see backend WalletTypesService.validateSubRepository). Null
+  // leaves that slice on the main repository, same as before this feature.
+  feeRepositoryWalletId: string | null;
+  penaltyRepositoryWalletId: string | null;
+  unblockFeeRepositoryWalletId: string | null;
   // UI-only: whether the credit-line fields section is expanded for this
   // card — not sent to the backend, mirrors the supportsAutoWithdraw ->
   // autoWithdrawTimes visibility pattern. Defaults to expanded when the type
@@ -53,6 +66,10 @@ function hasCreditLineFields(type: {
   penaltyPercentPerDay: string | null;
   unblockFee: string | null;
   installmentCount: number | null;
+  overdueDaysBeforeBlock: number | null;
+  feeRepositoryWalletId?: string | null;
+  penaltyRepositoryWalletId?: string | null;
+  unblockFeeRepositoryWalletId?: string | null;
 }): boolean {
   return (
     type.installmentDate != null ||
@@ -60,7 +77,11 @@ function hasCreditLineFields(type: {
     type.feePercent != null ||
     type.penaltyPercentPerDay != null ||
     type.unblockFee != null ||
-    type.installmentCount != null
+    type.installmentCount != null ||
+    type.overdueDaysBeforeBlock != null ||
+    type.feeRepositoryWalletId != null ||
+    type.penaltyRepositoryWalletId != null ||
+    type.unblockFeeRepositoryWalletId != null
   );
 }
 
@@ -73,7 +94,16 @@ const busy = ref(false);
 // datalist suggestions so an admin creating a type sees REPOSITORY/CREDIT/
 // etc. rather than having to know the exact string to type. Still free text
 // underneath, since a custom code (e.g. a one-off promo type) is valid too.
-const KNOWN_WALLET_TYPE_CODES = ['BUY', 'SELL', 'CREDIT', 'GIFT', 'MERCHANT', 'REPOSITORY','SUPPORT'];
+const KNOWN_WALLET_TYPE_CODES = [
+  'BUY',
+  'SELL',
+  'CREDIT',
+  'GIFT',
+  'MERCHANT',
+  'REPOSITORY',
+  'SUPPORT',
+  'MERCHANT_REPOSITORY',
+];
 
 const newType = reactive({
   code: '',
@@ -97,6 +127,10 @@ const newType = reactive({
   penaltyPercentPerDay: '',
   unblockFee: '',
   installmentCount: '',
+  overdueDaysBeforeBlock: '',
+  feeRepositoryWalletId: '',
+  penaltyRepositoryWalletId: '',
+  unblockFeeRepositoryWalletId: '',
 });
 
 const newTypeCurrency = computed(
@@ -198,6 +232,18 @@ async function save(type: WalletType) {
         installmentCount: type.enableCreditLine
           ? type.installmentCount ?? undefined
           : undefined,
+        overdueDaysBeforeBlock: type.enableCreditLine
+          ? type.overdueDaysBeforeBlock ?? undefined
+          : undefined,
+        feeRepositoryWalletId: type.enableCreditLine
+          ? type.feeRepositoryWalletId || undefined
+          : undefined,
+        penaltyRepositoryWalletId: type.enableCreditLine
+          ? type.penaltyRepositoryWalletId || undefined
+          : undefined,
+        unblockFeeRepositoryWalletId: type.enableCreditLine
+          ? type.unblockFeeRepositoryWalletId || undefined
+          : undefined,
       },
     });
     await loadTypes();
@@ -270,6 +316,22 @@ async function createType() {
           newType.enableCreditLine && newType.installmentCount
             ? Number(newType.installmentCount)
             : undefined,
+        overdueDaysBeforeBlock:
+          newType.enableCreditLine && newType.overdueDaysBeforeBlock
+            ? Number(newType.overdueDaysBeforeBlock)
+            : undefined,
+        feeRepositoryWalletId:
+          newType.enableCreditLine && newType.feeRepositoryWalletId
+            ? newType.feeRepositoryWalletId
+            : undefined,
+        penaltyRepositoryWalletId:
+          newType.enableCreditLine && newType.penaltyRepositoryWalletId
+            ? newType.penaltyRepositoryWalletId
+            : undefined,
+        unblockFeeRepositoryWalletId:
+          newType.enableCreditLine && newType.unblockFeeRepositoryWalletId
+            ? newType.unblockFeeRepositoryWalletId
+            : undefined,
       },
     });
     newType.code = '';
@@ -293,6 +355,10 @@ async function createType() {
     newType.penaltyPercentPerDay = '';
     newType.unblockFee = '';
     newType.installmentCount = '';
+    newType.overdueDaysBeforeBlock = '';
+    newType.feeRepositoryWalletId = '';
+    newType.penaltyRepositoryWalletId = '';
+    newType.unblockFeeRepositoryWalletId = '';
     await loadTypes();
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : t('admin.walletTypes.createFailed');
@@ -376,6 +442,22 @@ loadTypes();
             <label>
               {{ t('admin.walletTypes.unblockFeeLabel', { code: wt.currency.code }) }}
               <input :value="moneyFieldDisplay(wt, 'unblockFee')" type="number" min="0" :step="amountStep(wt.currency)" class="admin-input" :disabled="!auth.isSuperAdmin" @input="onMoneyFieldInput(wt, 'unblockFee', $event)" />
+            </label>
+            <label>
+              {{ t('admin.walletTypes.overdueDaysBeforeBlockLabel') }}
+              <input v-model.number="wt.overdueDaysBeforeBlock" type="number" min="1" class="admin-input" :disabled="!auth.isSuperAdmin" />
+            </label>
+            <label>
+              {{ t('admin.walletTypes.feeRepositoryWalletIdLabel') }}
+              <input v-model="wt.feeRepositoryWalletId" type="text" class="admin-input" :placeholder="t('admin.walletTypes.repositoryWalletIdPlaceholder')" :disabled="!auth.isSuperAdmin" />
+            </label>
+            <label>
+              {{ t('admin.walletTypes.penaltyRepositoryWalletIdLabel') }}
+              <input v-model="wt.penaltyRepositoryWalletId" type="text" class="admin-input" :placeholder="t('admin.walletTypes.repositoryWalletIdPlaceholder')" :disabled="!auth.isSuperAdmin" />
+            </label>
+            <label>
+              {{ t('admin.walletTypes.unblockFeeRepositoryWalletIdLabel') }}
+              <input v-model="wt.unblockFeeRepositoryWalletId" type="text" class="admin-input" :placeholder="t('admin.walletTypes.repositoryWalletIdPlaceholder')" :disabled="!auth.isSuperAdmin" />
             </label>
           </template>
 
@@ -473,6 +555,22 @@ loadTypes();
         <label>
           {{ t('admin.walletTypes.unblockFeeLabel', { code: newType.currencyCode || '…' }) }}
           <input v-model="newType.unblockFee" type="number" min="0" :step="newTypeCurrency ? amountStep(newTypeCurrency) : '0.01'" class="admin-input" />
+        </label>
+        <label>
+          {{ t('admin.walletTypes.overdueDaysBeforeBlockLabel') }}
+          <input v-model="newType.overdueDaysBeforeBlock" type="number" min="1" class="admin-input" />
+        </label>
+        <label>
+          {{ t('admin.walletTypes.feeRepositoryWalletIdLabel') }}
+          <input v-model="newType.feeRepositoryWalletId" type="text" class="admin-input" :placeholder="t('admin.walletTypes.repositoryWalletIdPlaceholder')" />
+        </label>
+        <label>
+          {{ t('admin.walletTypes.penaltyRepositoryWalletIdLabel') }}
+          <input v-model="newType.penaltyRepositoryWalletId" type="text" class="admin-input" :placeholder="t('admin.walletTypes.repositoryWalletIdPlaceholder')" />
+        </label>
+        <label>
+          {{ t('admin.walletTypes.unblockFeeRepositoryWalletIdLabel') }}
+          <input v-model="newType.unblockFeeRepositoryWalletId" type="text" class="admin-input" :placeholder="t('admin.walletTypes.repositoryWalletIdPlaceholder')" />
         </label>
       </template>
 

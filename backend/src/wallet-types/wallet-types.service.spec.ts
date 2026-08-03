@@ -191,6 +191,119 @@ describe('WalletTypesService.create — autoWithdrawTimes', () => {
 
     expect(created.hasVirtualBalance).toBe(true);
   });
+
+  it('rejects creating a MERCHANT_REPOSITORY type with supportsAutoWithdraw true', async () => {
+    const { service } = build();
+
+    await expect(
+      service.create({
+        code: 'MERCHANT_REPOSITORY',
+        name: 'Fee Repository',
+        currencyCode: 'USD',
+        allowWithdraw: true,
+        supportsAutoWithdraw: true,
+      } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('allows creating a MERCHANT_REPOSITORY type with allowWithdraw true and supportsAutoWithdraw false', async () => {
+    const { service, walletTypesRepository } = build();
+
+    const created = await service.create({
+      code: 'MERCHANT_REPOSITORY',
+      name: 'Fee Repository',
+      currencyCode: 'USD',
+      allowWithdraw: true,
+    } as any);
+
+    expect(created).toBeDefined();
+    expect(walletTypesRepository.save).toHaveBeenCalled();
+  });
+});
+
+describe('WalletTypesService.create — fee/penalty/unblockFee sub-repositories', () => {
+  function build(subRepositoryWallet: Record<string, unknown> | null) {
+    const walletTypesRepository = {
+      findOne: jest.fn(async () => null),
+      create: jest.fn((data: Record<string, unknown>) => data),
+      save: jest.fn(async (data: Record<string, unknown>) => data),
+    };
+    const walletsRepository = {
+      findOne: jest.fn(async () => subRepositoryWallet),
+    };
+    const currenciesService = {
+      findByCode: jest.fn(async () => ({ id: 'currency-1', code: 'USD' })),
+    };
+    const service = new WalletTypesService(
+      walletTypesRepository as any,
+      walletsRepository as any,
+      currenciesService as any,
+    );
+    return { service, walletTypesRepository, walletsRepository };
+  }
+
+  it('rejects a feeRepositoryWalletId that does not exist', async () => {
+    const { service } = build(null);
+
+    await expect(
+      service.create({
+        code: 'CREDIT',
+        name: 'Credit',
+        currencyCode: 'USD',
+        feeRepositoryWalletId: 'missing-wallet',
+      } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects a feeRepositoryWalletId whose wallet is not MERCHANT_REPOSITORY-type', async () => {
+    const { service } = build({
+      walletType: { code: 'MERCHANT', currencyId: 'currency-1' },
+    });
+
+    await expect(
+      service.create({
+        code: 'CREDIT',
+        name: 'Credit',
+        currencyCode: 'USD',
+        feeRepositoryWalletId: 'wallet-1',
+      } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects a penaltyRepositoryWalletId in a different currency', async () => {
+    const { service } = build({
+      walletType: { code: 'MERCHANT_REPOSITORY', currencyId: 'other-currency' },
+    });
+
+    await expect(
+      service.create({
+        code: 'CREDIT',
+        name: 'Credit',
+        currencyCode: 'USD',
+        penaltyRepositoryWalletId: 'wallet-1',
+      } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('accepts a valid same-currency MERCHANT_REPOSITORY wallet for all three fields', async () => {
+    const { service, walletTypesRepository } = build({
+      walletType: { code: 'MERCHANT_REPOSITORY', currencyId: 'currency-1' },
+    });
+
+    const created = await service.create({
+      code: 'CREDIT',
+      name: 'Credit',
+      currencyCode: 'USD',
+      feeRepositoryWalletId: 'wallet-1',
+      penaltyRepositoryWalletId: 'wallet-2',
+      unblockFeeRepositoryWalletId: 'wallet-3',
+    } as any);
+
+    expect(created.feeRepositoryWalletId).toBe('wallet-1');
+    expect(created.penaltyRepositoryWalletId).toBe('wallet-2');
+    expect(created.unblockFeeRepositoryWalletId).toBe('wallet-3');
+    expect(walletTypesRepository.save).toHaveBeenCalled();
+  });
 });
 
 describe('WalletTypesService.update — autoWithdrawTimes', () => {

@@ -17,7 +17,11 @@ export class InstallmentsController {
     const installments = await this.installmentsService.findAllForUser(
       user.userId,
     );
-    return installments.map(serializeInstallment);
+    const breakdowns =
+      await this.installmentsService.getSpendBreakdownsFor(installments);
+    return installments.map((i) =>
+      serializeInstallment(i, breakdowns.get(i.id)),
+    );
   }
 
   @Get('wallet/:walletId')
@@ -29,6 +33,10 @@ export class InstallmentsController {
       user.userId,
       walletId,
     );
-    return installments.map(serializeInstallment);
+    const breakdowns =
+      await this.installmentsService.getSpendBreakdownsFor(installments);
+    return installments.map((i) =>
+      serializeInstallment(i, breakdowns.get(i.id)),
+    );
   }
 }

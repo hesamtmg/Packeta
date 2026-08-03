@@ -2,6 +2,24 @@
 body{
   margin: 0;
 }
+
+/* Vazirmatn doesn't ship a Nastaliq-style Rial sign, so these declarations
+   override just that one codepoint (U+FDFC) for the 'Vazirmatn' family,
+   reusing the Noto Nastaliq Urdu file main.ts already loads. Since they're
+   declared before Vazirmatn's own @font-face rules and their unicode-range
+   covers nothing else, the browser only ever consults them for the Rial
+   sign — every other character keeps rendering in Vazirmatn as normal, with
+   no per-component font wiring needed anywhere formatAmount() is used.
+   noto-nastaliq-urdu/arabic-400.css (imported in main.ts) registers the same
+   file under its own family name, which is what makes the url() below valid
+   for Vite's node_modules resolution. */
+@font-face {
+  font-family: 'Vazirmatn';
+  font-style: normal;
+  font-weight: 400 700;
+  unicode-range: U+FDFC;
+  src: url('@fontsource/noto-nastaliq-urdu/files/noto-nastaliq-urdu-arabic-400-normal.woff2') format('woff2');
+}
 .admin-theme {
   --admin-bg: #0a0a0d;
   --shell-bg: #18171e;
