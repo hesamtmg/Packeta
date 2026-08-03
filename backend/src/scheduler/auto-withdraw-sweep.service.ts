@@ -20,6 +20,7 @@ export class AutoWithdrawSweepService {
 
   @Cron('* * * * *')
   async sweep(): Promise<void> {
+          console.log("AutoWithdrawSweepService")
     const now = new Date();
     const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(
       now.getMinutes(),

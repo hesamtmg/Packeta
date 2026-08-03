@@ -24,6 +24,7 @@ export class SettlementRailSweepService {
 
   @Cron('* * * * *')
   async sweep(): Promise<void> {
+      console.log("SettlementRailSweepService")
     const now = new Date();
     const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(
       now.getMinutes(),

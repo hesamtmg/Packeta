@@ -101,6 +101,7 @@ const KNOWN_WALLET_TYPE_CODES = [
   'GIFT',
   'MERCHANT',
   'REPOSITORY',
+  'SUPPORT',
   'MERCHANT_REPOSITORY',
 ];
 
@@ -622,6 +623,7 @@ loadTypes();
 .time-row {
   display: flex;
   gap: 6px;
+  flex-wrap: wrap;
 }
 .time-row .admin-input {
   flex: 1;
