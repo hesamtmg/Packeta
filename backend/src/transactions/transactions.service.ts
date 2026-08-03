@@ -782,6 +782,15 @@ export class TransactionsService {
         balance: (BigInt(repository.balance) + toRepository).toString(),
       });
     }
+
+    // The transaction row was created (and verified against the gateway)
+    // with the full charge as its amount, but only `toRepository` of that
+    // actually lands in `repository.balance` — the rest went to the split
+    // legs above. Shrink it to match what this transaction actually
+    // deposited here, now that verifyPayment has already run against the
+    // original face value; the caller persists this alongside
+    // status: COMPLETED right after.
+    transaction.amount = toRepository.toString();
   }
 
   // Overdue-collection method 1 of 3 (see InstallmentsService
