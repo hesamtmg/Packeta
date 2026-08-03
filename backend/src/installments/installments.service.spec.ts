@@ -113,6 +113,43 @@ describe('InstallmentsService.computeInstallmentPrincipal', () => {
   });
 });
 
+describe('InstallmentsService.computeRepaymentSplit', () => {
+  const { service } = buildService({});
+
+  it('sums principal/fee across installments and recovers penalty as the remainder', () => {
+    const installments = [
+      { principalAmount: '350', feeAmount: '50', amount: '400' },
+      { principalAmount: '250', feeAmount: '30', amount: '300' },
+    ] as any;
+
+    expect(service.computeRepaymentSplit(installments)).toEqual({
+      principal: 600n,
+      fee: 80n,
+      penalty: 20n,
+    });
+  });
+
+  it('returns zero penalty for an installment with no accrued penalty', () => {
+    const installments = [
+      { principalAmount: '100', feeAmount: '10', amount: '110' },
+    ] as any;
+
+    expect(service.computeRepaymentSplit(installments)).toEqual({
+      principal: 100n,
+      fee: 10n,
+      penalty: 0n,
+    });
+  });
+
+  it('returns all zeros for an empty list', () => {
+    expect(service.computeRepaymentSplit([])).toEqual({
+      principal: 0n,
+      fee: 0n,
+      penalty: 0n,
+    });
+  });
+});
+
 describe('InstallmentsService.computeDeadlineDate', () => {
   const { service } = buildService({});
 
@@ -169,6 +206,7 @@ describe('InstallmentsService.generateDue', () => {
         walletId: 'wallet-1',
         sequenceNumber: 1,
         principalAmount: '300', // 900/3
+        feeAmount: '30', // 10% of principal
         amount: '330', // principal 300 + 10% fee (30)
         periodStart: '2025-12-01',
         periodEnd: '2026-01-01',

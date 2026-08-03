@@ -28,6 +28,13 @@ export enum WalletTypeCode {
   // customer pays via ZarinPal to cover the gap when a CREDIT purchase
   // exceeds what its credit line + backing repository can fund.
   SUPPORT = 'SUPPORT',
+  // A purchase destination for a CREDIT type's fee/penalty/unblock-fee
+  // revenue (see WalletType.feeRepositoryWalletId etc. below and
+  // TransactionsService's repayment-splitting) — unlike REPOSITORY, it never
+  // funds a credit line and is free to allow manual withdrawals, just never
+  // the scheduled auto-withdraw sweep (see WalletTypesService's
+  // MERCHANT_REPOSITORY check).
+  MERCHANT_REPOSITORY = 'MERCHANT_REPOSITORY',
 }
 
 // Each row is the "law" governing a wallet type: whether it can go negative
@@ -147,6 +154,22 @@ export class WalletType {
   // accrues, the wallet just never auto-blocks).
   @Column({ type: 'smallint', nullable: true })
   overdueDaysBeforeBlock: number | null;
+
+  // Where an installment repayment's fee/penalty/unblock-fee slices land
+  // instead of the credit wallet's own backing repository — each must be a
+  // MERCHANT_REPOSITORY-type wallet in the same currency (see
+  // WalletTypesService's validation). Null leaves that slice on the main
+  // repository, same as before this feature existed — see
+  // TransactionsService's repayment-splitting (verifyPurchase's real-money-in
+  // branch and collectOverdueFromRepository).
+  @Column({ type: 'uuid', nullable: true })
+  feeRepositoryWalletId: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  penaltyRepositoryWalletId: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  unblockFeeRepositoryWalletId: string | null;
 
   // Whether every new signup gets a starter wallet of this type (in the
   // default currency). Only the four original built-ins are starter types;

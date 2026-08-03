@@ -77,6 +77,30 @@ export class InstallmentsService {
     return share + (isLast ? remainder : 0n);
   }
 
+  // Recovers the principal/fee/penalty breakdown of one or more
+  // installments' combined `amount` from their own fixed-at-generation
+  // principalAmount and feeAmount — penalty is whatever's left over
+  // (amount - principalAmount - feeAmount), since it's the only one of the
+  // three that keeps growing after generation (see applyOverduePenalties).
+  // Used by TransactionsService to route a repayment's fee/penalty slices to
+  // their own dedicated repositories instead of the credit wallet's main
+  // backing repository — see WalletType.feeRepositoryWalletId etc.
+  computeRepaymentSplit(installments: Installment[]): {
+    principal: bigint;
+    fee: bigint;
+    penalty: bigint;
+  } {
+    let principal = 0n;
+    let fee = 0n;
+    let total = 0n;
+    for (const installment of installments) {
+      principal += BigInt(installment.principalAmount);
+      fee += BigInt(installment.feeAmount);
+      total += BigInt(installment.amount);
+    }
+    return { principal, fee, penalty: total - principal - fee };
+  }
+
   // `percent` is a decimal string (up to 3 decimal places, e.g. "2.500" for
   // 2.5%) as stored on WalletType.feePercent/penaltyPercentPerDay — scaled
   // through milli-percent (x1000) so the whole computation stays in BigInt,
@@ -193,6 +217,7 @@ export class InstallmentsService {
           sequenceNumber,
           amount: amount.toString(),
           principalAmount: principal.toString(),
+          feeAmount: fee.toString(),
           dueDate: toDateOnly(dueDateForSequence),
           deadlineDate: toDateOnly(deadlineDate),
           status: InstallmentStatus.PENDING,

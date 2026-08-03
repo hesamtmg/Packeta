@@ -65,6 +65,15 @@ export class Installment {
   @Column({ type: 'bigint' })
   principalAmount: string;
 
+  // The fee share alone (feePercent of principalAmount), also fixed at
+  // generation time — kept separate from principalAmount so a repayment can
+  // recover exactly how much of `amount` is principal vs. fee vs. penalty
+  // (penalty = amount - principalAmount - feeAmount, the only one of the
+  // three that keeps growing after generation) and route each slice to its
+  // own repository — see InstallmentsService.computeRepaymentSplit.
+  @Column({ type: 'bigint' })
+  feeAmount: string;
+
   @Column({ type: 'boolean', default: false })
   penaltyApplied: boolean;
 

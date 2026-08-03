@@ -87,6 +87,29 @@ export class WalletTypesService {
         'REPOSITORY wallets cannot allow withdrawals or auto-withdraw settlement — they only hold real (IPG) and virtual (manual) balances',
       );
     }
+    if (
+      dto.code === WalletTypeCode.MERCHANT_REPOSITORY &&
+      dto.supportsAutoWithdraw
+    ) {
+      throw new BadRequestException(
+        'MERCHANT_REPOSITORY wallets withdraw manually — they cannot use the auto-withdraw scheduler',
+      );
+    }
+    await this.validateSubRepository(
+      'feeRepositoryWalletId',
+      dto.feeRepositoryWalletId,
+      currency.id,
+    );
+    await this.validateSubRepository(
+      'penaltyRepositoryWalletId',
+      dto.penaltyRepositoryWalletId,
+      currency.id,
+    );
+    await this.validateSubRepository(
+      'unblockFeeRepositoryWalletId',
+      dto.unblockFeeRepositoryWalletId,
+      currency.id,
+    );
 
     const type = this.walletTypesRepository.create({
       code: dto.code,
@@ -115,6 +138,9 @@ export class WalletTypesService {
       unblockFee: dto.unblockFee !== undefined ? String(dto.unblockFee) : null,
       installmentCount: dto.installmentCount ?? null,
       overdueDaysBeforeBlock: dto.overdueDaysBeforeBlock ?? null,
+      feeRepositoryWalletId: dto.feeRepositoryWalletId ?? null,
+      penaltyRepositoryWalletId: dto.penaltyRepositoryWalletId ?? null,
+      unblockFeeRepositoryWalletId: dto.unblockFeeRepositoryWalletId ?? null,
     });
     const saved = await this.walletTypesRepository.save(type);
     saved.currency = currency;
@@ -168,6 +194,29 @@ export class WalletTypesService {
         'REPOSITORY wallets cannot allow withdrawals or auto-withdraw settlement — they only hold real (IPG) and virtual (manual) balances',
       );
     }
+    if (
+      type.code === WalletTypeCode.MERCHANT_REPOSITORY &&
+      supportsAutoWithdraw
+    ) {
+      throw new BadRequestException(
+        'MERCHANT_REPOSITORY wallets withdraw manually — they cannot use the auto-withdraw scheduler',
+      );
+    }
+    await this.validateSubRepository(
+      'feeRepositoryWalletId',
+      dto.feeRepositoryWalletId,
+      type.currencyId,
+    );
+    await this.validateSubRepository(
+      'penaltyRepositoryWalletId',
+      dto.penaltyRepositoryWalletId,
+      type.currencyId,
+    );
+    await this.validateSubRepository(
+      'unblockFeeRepositoryWalletId',
+      dto.unblockFeeRepositoryWalletId,
+      type.currencyId,
+    );
 
     if (dto.name !== undefined) type.name = dto.name;
     if (dto.allowWithdraw !== undefined) type.allowWithdraw = dto.allowWithdraw;
@@ -214,6 +263,16 @@ export class WalletTypesService {
     if (dto.overdueDaysBeforeBlock !== undefined) {
       type.overdueDaysBeforeBlock = dto.overdueDaysBeforeBlock;
     }
+    if (dto.feeRepositoryWalletId !== undefined) {
+      type.feeRepositoryWalletId = dto.feeRepositoryWalletId || null;
+    }
+    if (dto.penaltyRepositoryWalletId !== undefined) {
+      type.penaltyRepositoryWalletId = dto.penaltyRepositoryWalletId || null;
+    }
+    if (dto.unblockFeeRepositoryWalletId !== undefined) {
+      type.unblockFeeRepositoryWalletId =
+        dto.unblockFeeRepositoryWalletId || null;
+    }
     type.allowNegativeBalance = allowNegativeBalance;
     if (!allowNegativeBalance) {
       type.creditLimit = null;
@@ -238,5 +297,34 @@ export class WalletTypesService {
       );
     }
     await this.walletTypesRepository.delete(type.id);
+  }
+
+  // A CREDIT type's fee/penalty/unblock-fee repository must actually be a
+  // MERCHANT_REPOSITORY-type wallet in the same currency — otherwise
+  // TransactionsService's repayment-splitting would be crediting an
+  // arbitrary wallet real money it was never meant to receive.
+  private async validateSubRepository(
+    fieldLabel: string,
+    walletId: string | undefined,
+    currencyId: string,
+  ): Promise<void> {
+    if (!walletId) return;
+    const wallet = await this.walletsRepository.findOne({
+      where: { id: walletId },
+      relations: { walletType: true },
+    });
+    if (!wallet) {
+      throw new BadRequestException(`${fieldLabel}: wallet not found`);
+    }
+    if (wallet.walletType.code !== WalletTypeCode.MERCHANT_REPOSITORY) {
+      throw new BadRequestException(
+        `${fieldLabel} must reference a Merchant Repository-type wallet`,
+      );
+    }
+    if (wallet.walletType.currencyId !== currencyId) {
+      throw new BadRequestException(
+        `${fieldLabel}'s wallet currency must match this wallet type's currency`,
+      );
+    }
   }
 }

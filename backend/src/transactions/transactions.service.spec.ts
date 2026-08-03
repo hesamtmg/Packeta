@@ -198,7 +198,28 @@ function buildService(options: {
     ipgClientService,
     zarinpalClientService,
     railSettlementsService,
+    walletsService,
   };
+}
+
+// Mirrors InstallmentsService.computeRepaymentSplit for test fixtures that
+// mock installmentsService directly instead of using the real service.
+function computeRepaymentSplitFixture(
+  installments: {
+    amount: string;
+    principalAmount: string;
+    feeAmount: string;
+  }[],
+) {
+  let principal = 0n;
+  let fee = 0n;
+  let total = 0n;
+  for (const i of installments) {
+    principal += BigInt(i.principalAmount);
+    fee += BigInt(i.feeAmount);
+    total += BigInt(i.amount);
+  }
+  return { principal, fee, penalty: total - principal - fee };
 }
 
 function walletType(
@@ -1257,10 +1278,19 @@ describe('TransactionsService.verifyPurchase', () => {
       balance: '1000',
       walletType: walletType({ name: 'Repository', allowPurchaseIn: true }),
     };
-    const installmentsService = { markPaid: jest.fn(async () => undefined) };
+    const creditWallet: WalletFixture = {
+      id: 'credit-1',
+      balance: '0',
+      walletType: walletType({ code: 'CREDIT', allowPurchaseOut: true }),
+    };
+    const installmentsService = {
+      markPaid: jest.fn(async () => undefined),
+      computeRepaymentSplit: jest.fn(computeRepaymentSplitFixture),
+    };
     const { service, manager, ipgClientService, zarinpalClientService } =
       buildService({
         senderWallet: repositoryWallet,
+        recipientWallet: creditWallet,
         installmentsService: installmentsService as any,
       });
 
@@ -1283,6 +1313,17 @@ describe('TransactionsService.verifyPurchase', () => {
         getOne: async () => pendingPurchase,
       };
       return builder;
+    });
+    // No fee/penalty/unblockFee sub-repositories configured on this CREDIT
+    // type, so the whole 400 (principal 350 + fee 50) still lands on the
+    // main repository — same balance this test asserted before the
+    // fee-split feature existed.
+    manager.findOne = jest.fn().mockResolvedValue({
+      id: 'installment-1',
+      walletId: 'credit-1',
+      principalAmount: '350',
+      feeAmount: '50',
+      amount: '400',
     });
 
     const result = await service.verifyPurchase('installment-tx-1');
@@ -1311,11 +1352,26 @@ describe('TransactionsService.verifyPurchase', () => {
       balance: '1000',
       walletType: walletType({ name: 'Repository', allowPurchaseIn: true }),
     };
+    const creditWallet: WalletFixture = {
+      id: 'credit-1',
+      balance: '0',
+      walletType: walletType({ code: 'CREDIT', allowPurchaseOut: true }),
+    };
+    // Sums to the same 750 the transaction charges: principal 600 + fee 100
+    // (penalty 0) leaves 750 - 600 - 100 = 50 recovered as unblockFee. No
+    // sub-repositories configured, so it all still lands on the main
+    // repository — same balance this test asserted before the fee-split
+    // feature existed.
     const installmentsService = {
       markAllPaidAndUnblock: jest.fn(async () => undefined),
+      getOutstandingForWallet: jest.fn(async () => [
+        { principalAmount: '600', feeAmount: '100', amount: '700' },
+      ]),
+      computeRepaymentSplit: jest.fn(computeRepaymentSplitFixture),
     };
     const { service, manager } = buildService({
       senderWallet: repositoryWallet,
+      recipientWallet: creditWallet,
       installmentsService: installmentsService as any,
     });
 
@@ -1797,12 +1853,16 @@ describe('TransactionsService overdue-collection methods', () => {
   };
 
   function buildOverdueService(wallet: WalletFixture = blockedCreditWallet) {
+    // principal 350+250=600, fee 50+30=80, penalty (400-350-50)+(300-250-30)=20,
+    // unblockFee (walletType.unblockFee) 50 — 600+80+20+50 = 750 total owed,
+    // matching every existing assertion below.
     const installmentsService = {
       getOutstandingForWallet: jest.fn(async () => [
-        { amount: '400' },
-        { amount: '300' },
+        { amount: '400', principalAmount: '350', feeAmount: '50' },
+        { amount: '300', principalAmount: '250', feeAmount: '30' },
       ]),
       markAllPaidAndUnblock: jest.fn(async () => undefined),
+      computeRepaymentSplit: jest.fn(computeRepaymentSplitFixture),
     };
     return {
       ...buildService({
@@ -1825,7 +1885,7 @@ describe('TransactionsService overdue-collection methods', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('collectOverdueFromRepository debits the repository for the full outstanding total (installments + unblockFee) and settles every installment', async () => {
+  it('collectOverdueFromRepository writes off the principal and leaves fee/penalty/unblockFee on the repository when no sub-repositories are configured', async () => {
     const { service, manager, installmentsService } = buildOverdueService();
 
     const result = await service.collectOverdueFromRepository(
@@ -1834,17 +1894,22 @@ describe('TransactionsService overdue-collection methods', () => {
       'idem-2',
     );
 
-    // 400 + 300 + unblockFee 50 = 750
-    expect(result.balance).toBe('4250');
-    expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'repo-1', {
-      balance: '4250',
-    });
+    // fee 80 + penalty 20 + unblockFee 50 = 150 recorded, but none of it
+    // has anywhere configured to route to, so nothing actually leaves the
+    // repository (the 600 principal was already spent at purchase time and
+    // is never touched here either way).
+    expect(result.balance).toBe('5000');
+    expect(manager.update).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'repo-1',
+      expect.anything(),
+    );
     expect(manager.save).toHaveBeenCalledWith(
       expect.objectContaining({
         type: TransactionType.ADJUSTMENT,
         fromWalletId: 'repo-1',
         toWalletId: null,
-        amount: '750',
+        amount: '150',
       }),
     );
     expect(installmentsService.markAllPaidAndUnblock).toHaveBeenCalledWith(
@@ -1854,20 +1919,116 @@ describe('TransactionsService overdue-collection methods', () => {
     );
   });
 
-  it('collectOverdueFromRepository rejects when the repository cannot cover the debt', async () => {
-    const poorRepository: WalletFixture = {
-      ...repositoryWallet,
-      balance: '100',
+  it('collectOverdueFromRepository routes fee/penalty/unblockFee to their configured sub-repositories instead of the main repository', async () => {
+    const feeRepo: WalletFixture = {
+      id: 'fee-repo-1',
+      balance: '0',
+      walletType: walletType({ code: 'MERCHANT_REPOSITORY' }),
+    };
+    const penaltyRepo: WalletFixture = {
+      id: 'penalty-repo-1',
+      balance: '0',
+      walletType: walletType({ code: 'MERCHANT_REPOSITORY' }),
+    };
+    const unblockRepo: WalletFixture = {
+      id: 'unblock-repo-1',
+      balance: '0',
+      walletType: walletType({ code: 'MERCHANT_REPOSITORY' }),
+    };
+    const wired: WalletFixture = {
+      ...blockedCreditWallet,
+      walletType: walletType({
+        code: 'CREDIT',
+        unblockFee: '50',
+        feeRepositoryWalletId: feeRepo.id,
+        penaltyRepositoryWalletId: penaltyRepo.id,
+        unblockFeeRepositoryWalletId: unblockRepo.id,
+      } as any),
     };
     const installmentsService = {
-      getOutstandingForWallet: jest.fn(async () => [{ amount: '400' }]),
+      getOutstandingForWallet: jest.fn(async () => [
+        { amount: '400', principalAmount: '350', feeAmount: '50' },
+        { amount: '300', principalAmount: '250', feeAmount: '30' },
+      ]),
       markAllPaidAndUnblock: jest.fn(async () => undefined),
+      computeRepaymentSplit: jest.fn(computeRepaymentSplitFixture),
     };
-    const { service } = buildService({
-      senderWallet: blockedCreditWallet,
+    const { service, manager, walletsService } = buildService({
+      senderWallet: wired,
+      repositoryWallet,
+      installmentsService: installmentsService as any,
+    });
+    (walletsService.lockById as jest.Mock).mockImplementation(
+      async (_manager: unknown, id: string) => {
+        if (id === feeRepo.id) return feeRepo;
+        if (id === penaltyRepo.id) return penaltyRepo;
+        if (id === unblockRepo.id) return unblockRepo;
+        return repositoryWallet;
+      },
+    );
+
+    const result = await service.collectOverdueFromRepository(
+      'admin-1',
+      'credit-1',
+      'idem-2b',
+    );
+
+    // fee 80, penalty 20, unblockFee 50 — every one of the 3 legs has a
+    // configured destination this time, so the whole 150 leaves the main
+    // repository (5000 -> 4850) and lands on the 3 sub-repositories.
+    expect(result.balance).toBe('4850');
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'repo-1', {
+      balance: '4850',
+    });
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), feeRepo.id, {
+      balance: '80',
+    });
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      penaltyRepo.id,
+      { balance: '20' },
+    );
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      unblockRepo.id,
+      { balance: '50' },
+    );
+  });
+
+  it('collectOverdueFromRepository rejects when the repository cannot cover the routed debt', async () => {
+    const feeRepo: WalletFixture = {
+      id: 'fee-repo-1',
+      balance: '0',
+      walletType: walletType({ code: 'MERCHANT_REPOSITORY' }),
+    };
+    const poorRepository: WalletFixture = {
+      ...repositoryWallet,
+      balance: '10',
+    };
+    const wired: WalletFixture = {
+      ...blockedCreditWallet,
+      walletType: walletType({
+        code: 'CREDIT',
+        unblockFee: '50',
+        feeRepositoryWalletId: feeRepo.id,
+      } as any),
+    };
+    const installmentsService = {
+      getOutstandingForWallet: jest.fn(async () => [
+        { amount: '400', principalAmount: '350', feeAmount: '50' },
+      ]),
+      markAllPaidAndUnblock: jest.fn(async () => undefined),
+      computeRepaymentSplit: jest.fn(computeRepaymentSplitFixture),
+    };
+    const { service, walletsService } = buildService({
+      senderWallet: wired,
       repositoryWallet: poorRepository,
       installmentsService: installmentsService as any,
     });
+    (walletsService.lockById as jest.Mock).mockImplementation(
+      async (_manager: unknown, id: string) =>
+        id === feeRepo.id ? feeRepo : poorRepository,
+    );
 
     await expect(
       service.collectOverdueFromRepository('admin-1', 'credit-1', 'idem-3'),
