@@ -703,6 +703,7 @@ export class WalletsService {
       .andWhere('walletType.allowPurchaseOut = true')
       .andWhere('walletType.currencyId = :currencyId', { currencyId })
       .andWhere('wallet.closedAt IS NULL')
+      .andWhere('walletType.code != :code',{code:'SUPPORT'})
       .orderBy('wallet.createdAt', 'ASC')
       .getMany();
   }

@@ -136,7 +136,7 @@ export class InstallmentsService {
         .createQueryBuilder('t')
         .select('COALESCE(SUM(t.amount), 0)', 'total')
         .where('t.type = :type', { type: TransactionType.VIRTUAL })
-        .andWhere('(t.fromWalletId = :walletId OR t.toWalletId = :walletId)', {
+        .andWhere('(t.fromWalletId = :walletId)', {
           walletId: wallet.id,
         })
         .andWhere('t.createdAt >= :periodStartAt', { periodStartAt })
