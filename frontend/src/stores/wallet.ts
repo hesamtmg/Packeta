@@ -134,9 +134,26 @@ interface Transaction {
   createdAt: string;
 }
 
+// One purchase's worth of an installment's billing period, resolved back to
+// the merchant it was spent at (see backend InstallmentsService
+// .getSpendBreakdown) — "where did the customer's money go" for that
+// installment's batch.
+export interface InstallmentSpendDetail {
+  purchaseId: string;
+  merchantName: string;
+  amount: string;
+  spentAt: string;
+}
+
 export interface Installment {
   id: string;
   walletId: string;
+  // The exact one-month window this installment's batch was summed over
+  // (see backend InstallmentsService.generateDue) — every installment
+  // generated in the same monthly tick shares the same periodStart/
+  // periodEnd, and shares the same spendBreakdown.
+  periodStart: string;
+  periodEnd: string;
   sequenceNumber: number;
   amount: string;
   principalAmount: string;
@@ -148,6 +165,7 @@ export interface Installment {
   paidAt: string | null;
   paymentTransactionId: string | null;
   createdAt: string;
+  spendBreakdown: InstallmentSpendDetail[];
 }
 
 export const useWalletStore = defineStore('wallet', {

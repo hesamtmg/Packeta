@@ -11,7 +11,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { DataSource, EntityManager, In, LessThan, Repository } from 'typeorm';
 import { Wallet } from '../wallets/entities/wallet.entity';
-import { WalletTypeCode } from '../wallet-types/entities/wallet-type.entity';
+import {
+  WalletType,
+  WalletTypeCode,
+} from '../wallet-types/entities/wallet-type.entity';
 import { User } from '../users/entities/user.entity';
 import {
   Transaction,
@@ -30,7 +33,10 @@ import { displayIdentity } from '../common/synthetic-email';
 import { SettlementService } from '../settlement/settlement.service';
 import { SettlementSplitDto } from '../settlement/dto/settlement-split.dto';
 import { InstallmentsService } from '../installments/installments.service';
-import { InstallmentStatus } from '../installments/entities/installment.entity';
+import {
+  Installment,
+  InstallmentStatus,
+} from '../installments/entities/installment.entity';
 import { RailSettlementsService } from '../rail-settlements/rail-settlements.service';
 import { SettlementRailType } from '../rail-settlements/entities/rail-settlement.entity';
 
@@ -622,6 +628,378 @@ export class TransactionsService {
     );
   }
 
+  // Loads the wallet + repository + outstanding-balance total shared by all
+  // three overdue-collection methods below, and rejects anything that isn't
+  // actually a blocked, repository-backed credit wallet with money owed.
+  private async loadOverdueCollectionContext(walletId: string): Promise<{
+    creditWallet: Wallet;
+    repository: Wallet;
+    outstanding: Installment[];
+    totalOwed: bigint;
+  }> {
+    const creditWallet = await this.walletsService.getByIdUnscoped(walletId);
+    if (!creditWallet.blockedAt) {
+      throw new BadRequestException(
+        'This wallet is not currently blocked for overdue installments',
+      );
+    }
+    if (!creditWallet.repositoryWalletId) {
+      throw new BadRequestException(
+        'This wallet has no linked repository to repay',
+      );
+    }
+    const repository = await this.walletsService.getByIdUnscoped(
+      creditWallet.repositoryWalletId,
+    );
+    const outstanding =
+      await this.installmentsService.getOutstandingForWallet(walletId);
+    if (!outstanding.length) {
+      throw new BadRequestException(
+        'This wallet has no outstanding installments to collect',
+      );
+    }
+    const totalOwed =
+      outstanding.reduce((sum, i) => sum + BigInt(i.amount), 0n) +
+      BigInt(creditWallet.walletType.unblockFee ?? '0');
+    return { creditWallet, repository, outstanding, totalOwed };
+  }
+
+  // Routes an installment repayment's fee/penalty/unblock-fee slices to
+  // their own dedicated repositories (see WalletType.feeRepositoryWalletId/
+  // penaltyRepositoryWalletId/unblockFeeRepositoryWalletId) instead of the
+  // credit wallet's main backing repository — falling back to leaving a
+  // slice on the main repository for any component whose sub-repository
+  // isn't configured (or has since been closed), so this is a no-op split
+  // on a CREDIT type that hasn't set any of the three up. Returns the sum of
+  // whatever couldn't be routed, for the caller to fold back into the main
+  // repository's own credit/debit.
+  //
+  // Used two ways: `legType: DEPOSIT` for verifyPurchase's real-money-in
+  // branch, where the slice is new money in from ZarinPal landing directly
+  // on a sub-repository (fromWalletId null, same as the parent DEPOSIT);
+  // `legType: TRANSFER` for collectOverdueFromRepository, where the slice
+  // instead comes out of the main repository's own already-debited balance
+  // (fromWalletId set to it).
+  private async creditFeeSplitLegs(
+    manager: EntityManager,
+    mainRepository: Wallet,
+    walletType: WalletType,
+    parts: { fee: bigint; penalty: bigint; unblockFee: bigint },
+    legType: TransactionType.DEPOSIT | TransactionType.TRANSFER,
+    keyPrefix: string,
+  ): Promise<bigint> {
+    const legs: [bigint, string | null, string][] = [
+      [parts.fee, walletType.feeRepositoryWalletId, 'fee'],
+      [parts.penalty, walletType.penaltyRepositoryWalletId, 'penalty'],
+      [
+        parts.unblockFee,
+        walletType.unblockFeeRepositoryWalletId,
+        'unblock fee',
+      ],
+    ];
+    let unrouted = 0n;
+    for (const [amount, subRepositoryId, label] of legs) {
+      if (amount <= 0n) continue;
+      if (!subRepositoryId) {
+        unrouted += amount;
+        continue;
+      }
+      const subRepository = await this.walletsService.lockById(
+        manager,
+        subRepositoryId,
+      );
+      if (subRepository.closedAt) {
+        unrouted += amount;
+        continue;
+      }
+      await manager.update(Wallet, subRepository.id, {
+        balance: (BigInt(subRepository.balance) + amount).toString(),
+      });
+      const leg = manager.create(Transaction, {
+        type: legType,
+        fromWalletId:
+          legType === TransactionType.TRANSFER ? mainRepository.id : null,
+        toWalletId: subRepository.id,
+        amount: amount.toString(),
+        idempotencyKey: `${keyPrefix}-${label.replace(' ', '-')}`,
+        note: `Installment ${label} routed to its dedicated repository`,
+      });
+      await manager.save(leg);
+    }
+    return unrouted;
+  }
+
+  // Called from verifyPurchase's real-money-in branch once `repository`
+  // (transaction.toWalletId, already locked) is confirmed open, for a
+  // transaction.installmentId (customer's own payInstallment) or
+  // .settlesWalletId (admin's initiateOverdueCollectionZarinPal) row:
+  // credits the principal share to `repository` — what actually funded the
+  // original purchase — and routes fee/penalty/unblockFee to their own
+  // dedicated repositories via creditFeeSplitLegs (falling back to
+  // `repository` for whichever isn't configured). unblockFee is recovered
+  // as transaction.amount minus every installment's own amount, robust
+  // regardless of the wallet's current blockedAt state (see payInstallment
+  // and initiateOverdueCollectionZarinPal, which fold it into the charge
+  // only when the wallet was blocked at charge-creation time).
+  private async creditInstallmentRepayment(
+    manager: EntityManager,
+    transaction: Transaction,
+    repository: Wallet,
+  ): Promise<void> {
+    let installments: Installment[];
+    let creditWalletId: string;
+    if (transaction.installmentId) {
+      const installment = await manager.findOne(Installment, {
+        where: { id: transaction.installmentId },
+      });
+      if (!installment) return;
+      installments = [installment];
+      creditWalletId = installment.walletId;
+    } else {
+      creditWalletId = transaction.settlesWalletId!;
+      installments =
+        await this.installmentsService.getOutstandingForWallet(creditWalletId);
+    }
+
+    const { principal, fee, penalty } =
+      this.installmentsService.computeRepaymentSplit(installments);
+    const unblockFee = BigInt(transaction.amount) - principal - fee - penalty;
+
+    const creditWallet =
+      await this.walletsService.getByIdUnscoped(creditWalletId);
+
+    const unrouted = await this.creditFeeSplitLegs(
+      manager,
+      repository,
+      creditWallet.walletType,
+      { fee, penalty, unblockFee },
+      TransactionType.DEPOSIT,
+      `repayment-split:${transaction.id}`,
+    );
+    const toRepository = principal + unrouted;
+    if (toRepository > 0n) {
+      await manager.update(Wallet, repository.id, {
+        balance: (BigInt(repository.balance) + toRepository).toString(),
+      });
+    }
+  }
+
+  // Overdue-collection method 1 of 3 (see InstallmentsService
+  // .applyOverduePenalties for how a wallet ends up blocked in the first
+  // place): an admin sends the customer a real ZarinPal payment link for
+  // the wallet's entire outstanding balance in one charge. Unlike
+  // payInstallment (customer-initiated from inside Packeta, one
+  // installment, callback to Packeta's own app), the customer very likely
+  // has no active Packeta session when they open a link an admin hands
+  // them out of band — so the callback lands on the IPG's own pay page
+  // instead, reusing the same topupTxnId query-param mechanism as
+  // initiateSupportTopUp. verifyPurchase's settlesWalletId branch marks
+  // every outstanding installment paid and clears the block once this
+  // verifies.
+  async initiateOverdueCollectionZarinPal(
+    adminUserId: string,
+    walletId: string,
+    idempotencyKey: string,
+  ): Promise<PurchaseInitiateResult> {
+    return this.run(
+      'overdue_collect_zarinpal',
+      adminUserId,
+      { walletId },
+      idempotencyKey,
+      async (manager) => {
+        const { repository, totalOwed } =
+          await this.loadOverdueCollectionContext(walletId);
+
+        const timeoutSeconds = DEFAULT_PURCHASE_TIMEOUT_SECONDS;
+        const expiresAt = new Date(Date.now() + timeoutSeconds * 1000);
+
+        const transaction = manager.create(Transaction, {
+          type: TransactionType.DEPOSIT,
+          status: TransactionStatus.PENDING,
+          fromWalletId: null,
+          toWalletId: repository.id,
+          amount: totalOwed.toString(),
+          idempotencyKey,
+          expiresAt,
+          settlesWalletId: walletId,
+        });
+        await manager.save(transaction);
+
+        // No pre-existing authority to route through (unlike
+        // initiateSupportTopUp, which reuses the purchase it's completing)
+        // — the transaction's own id works fine as the path segment, since
+        // the topupTxnId query param is what actually drives the pay page
+        // when present; the route's own :authority is only used for a
+        // best-effort, non-critical header fetch there.
+        const ipgFrontendUrl = this.configService.get<string>('ipgFrontendUrl');
+        const { authority, paymentUrl } =
+          await this.zarinpalClientService.createPayment({
+            merchantName: 'Overdue installment collection',
+            amount: transaction.amount,
+            displayAmount: formatAmount(
+              totalOwed.toString(),
+              repository.walletType.currency,
+            ),
+            callbackUrl: `${ipgFrontendUrl}/pay/${transaction.id}?topupTxnId=${transaction.id}`,
+            timeoutSeconds,
+          });
+
+        transaction.ipgAuthority = authority;
+        transaction.ipgPaymentUrl = paymentUrl;
+        await manager.save(transaction);
+
+        return {
+          transactionId: transaction.id,
+          redirectUrl: paymentUrl,
+          expiresAt,
+        };
+      },
+    );
+  }
+
+  // Overdue-collection method 2 of 3: the repository owner decides to just
+  // absorb the customer's unpaid balance out of the repository's own real
+  // funds — no money moves from the customer at all. Debits the
+  // repository's real balance for the full outstanding total (rejecting if
+  // it can't cover it), records that debit as its own ADJUSTMENT row (the
+  // same type the generic admin balance-adjust endpoint uses, since this is
+  // functionally the same kind of admin-directed correction, just always
+  // tied to a specific overdue wallet), and settles every outstanding
+  // installment immediately — no ZarinPal round-trip needed since nothing
+  // is pending verification.
+  async collectOverdueFromRepository(
+    adminUserId: string,
+    walletId: string,
+    idempotencyKey: string,
+  ): Promise<MoneyResult> {
+    return this.run(
+      'overdue_collect_repository',
+      adminUserId,
+      { walletId },
+      idempotencyKey,
+      async (manager) => {
+        const { creditWallet, outstanding } =
+          await this.loadOverdueCollectionContext(walletId);
+
+        // The principal share was already handed to the customer at
+        // purchase time (see settleCreditFundedPurchase) — absorbing the
+        // debt means giving up on ever getting that back, not paying it a
+        // second time, so only fee/penalty/unblockFee actually move here.
+        const { fee, penalty } =
+          this.installmentsService.computeRepaymentSplit(outstanding);
+        const unblockFee = BigInt(creditWallet.walletType.unblockFee ?? '0');
+
+        const repository = await this.walletsService.lockById(
+          manager,
+          creditWallet.repositoryWalletId!,
+        );
+
+        // Credits whichever of fee/penalty/unblockFee have a dedicated
+        // sub-repository configured — whatever's left uncredited
+        // (`unrouted`, no destination configured for it) never needs to
+        // leave the main repository at all, so only the routed portion gets
+        // debited from it below.
+        const unrouted = await this.creditFeeSplitLegs(
+          manager,
+          repository,
+          creditWallet.walletType,
+          { fee, penalty, unblockFee },
+          TransactionType.TRANSFER,
+          `overdue-absorb:${idempotencyKey}`,
+        );
+        const routedTotal = fee + penalty + unblockFee - unrouted;
+
+        const newRepositoryBalance = BigInt(repository.balance) - routedTotal;
+        if (newRepositoryBalance < 0n) {
+          throw new UnprocessableEntityException(
+            "The repository's real balance is not enough to absorb this debt",
+          );
+        }
+        if (routedTotal > 0n) {
+          await manager.update(Wallet, repository.id, {
+            balance: newRepositoryBalance.toString(),
+          });
+        }
+
+        const transaction = manager.create(Transaction, {
+          type: TransactionType.ADJUSTMENT,
+          fromWalletId: repository.id,
+          toWalletId: null,
+          amount: (fee + penalty + unblockFee).toString(),
+          idempotencyKey,
+          note: `Overdue collection: repository absorbed the debt for wallet ${walletId} (principal written off; fee/penalty/unblock fee routed to their repositories)`,
+          performedByUserId: adminUserId,
+        });
+        await manager.save(transaction);
+
+        await this.installmentsService.markAllPaidAndUnblock(
+          manager,
+          walletId,
+          transaction.id,
+        );
+
+        return {
+          transactionId: transaction.id,
+          fromWalletId: repository.id,
+          toWalletId: null,
+          balance: newRepositoryBalance.toString(),
+        };
+      },
+    );
+  }
+
+  // Overdue-collection method 3 of 3: the admin confirms the debt was
+  // settled by some means outside the system entirely (bank transfer, cash,
+  // whatever) — no real balance moves anywhere. The uploaded document is
+  // just a filename reference for the audit trail; description +
+  // documentReference both fold into the ADJUSTMENT row's note. Every
+  // outstanding installment is marked paid on the strength of the admin's
+  // confirmation alone.
+  async collectOverdueManually(
+    adminUserId: string,
+    walletId: string,
+    description: string,
+    documentReference: string | null,
+    idempotencyKey: string,
+  ): Promise<MoneyResult> {
+    return this.run(
+      'overdue_collect_manual',
+      adminUserId,
+      { walletId, description, documentReference },
+      idempotencyKey,
+      async (manager) => {
+        const { totalOwed } = await this.loadOverdueCollectionContext(walletId);
+
+        const note = documentReference
+          ? `Overdue collection (manual): ${description} (document: ${documentReference})`
+          : `Overdue collection (manual): ${description}`;
+        const transaction = manager.create(Transaction, {
+          type: TransactionType.ADJUSTMENT,
+          fromWalletId: null,
+          toWalletId: null,
+          amount: totalOwed.toString(),
+          idempotencyKey,
+          note: note.slice(0, 500),
+          performedByUserId: adminUserId,
+        });
+        await manager.save(transaction);
+
+        await this.installmentsService.markAllPaidAndUnblock(
+          manager,
+          walletId,
+          transaction.id,
+        );
+
+        return {
+          transactionId: transaction.id,
+          fromWalletId: null,
+          toWalletId: null,
+          balance: '0',
+        };
+      },
+    );
+  }
+
   // Merchant-initiated checkout: unlike initiatePurchase (the customer picks
   // their own wallet up front), here the merchant only names an amount and
   // currency — no customer or wallet is known yet. The resulting pay link is
@@ -896,13 +1274,15 @@ export class TransactionsService {
 
       // A row with no fromWalletId is either genuinely walletless — a
       // DEPOSIT (credits the depositor's own wallet), an installment
-      // repayment (credits the repository), or a credit-shortfall top-up
-      // (credits an auto-provisioned support wallet, then completes the
-      // purchase it's linked to) — all funded purely by the IPG, with
-      // nothing to debit on Packeta's side; or it's a merchant-initiated
-      // charge still waiting for the customer to identify themselves and
-      // pick a wallet at the IPG (see attachPurchaseWallet), which genuinely
-      // can't be verified yet.
+      // repayment (credits the repository), an admin-triggered overdue
+      // collection (credits the repository, then settles every outstanding
+      // installment on the blocked wallet — see settlesWalletId below), or
+      // a credit-shortfall top-up (credits an auto-provisioned support
+      // wallet, then completes the purchase it's linked to) — all funded
+      // purely by the IPG, with nothing to debit on Packeta's side; or it's
+      // a merchant-initiated charge still waiting for the customer to
+      // identify themselves and pick a wallet at the IPG (see
+      // attachPurchaseWallet), which genuinely can't be verified yet.
       const isSupportTopUp = !!transaction.completesPurchaseId;
       const isRealMoneyIn =
         transaction.type === TransactionType.DEPOSIT ||
@@ -975,11 +1355,15 @@ export class TransactionsService {
             'The receiving wallet was closed before this could be verified',
           );
         }
-        const newToBalance =
-          BigInt(toWallet.balance) + BigInt(transaction.amount);
-        await manager.update(Wallet, toWallet.id, {
-          balance: newToBalance.toString(),
-        });
+        if (transaction.installmentId || transaction.settlesWalletId) {
+          await this.creditInstallmentRepayment(manager, transaction, toWallet);
+        } else {
+          const newToBalance =
+            BigInt(toWallet.balance) + BigInt(transaction.amount);
+          await manager.update(Wallet, toWallet.id, {
+            balance: newToBalance.toString(),
+          });
+        }
 
         transaction.status = TransactionStatus.COMPLETED;
         await manager.save(transaction);
@@ -988,6 +1372,13 @@ export class TransactionsService {
           await this.installmentsService.markPaid(
             manager,
             transaction.installmentId,
+            transaction.id,
+          );
+        }
+        if (transaction.settlesWalletId) {
+          await this.installmentsService.markAllPaidAndUnblock(
+            manager,
+            transaction.settlesWalletId,
             transaction.id,
           );
         }
@@ -1156,6 +1547,9 @@ export class TransactionsService {
         amount: remainder.toString(),
         idempotencyKey: `credit-draw:${transaction.id}`,
         note: 'Credit wallet ceiling drawn down for this purchase',
+        // So InstallmentsService.getSpendBreakdown can trace this period's
+        // total back to the merchant the customer actually paid.
+        relatedPurchaseId: transaction.id,
       });
       await manager.save(ceilingDrawDown);
     }
@@ -1855,7 +2249,10 @@ export class TransactionsService {
       | 'purchase_initiate'
       | 'purchase_charge'
       | 'purchase_reverse'
-      | 'installment_pay',
+      | 'installment_pay'
+      | 'overdue_collect_zarinpal'
+      | 'overdue_collect_repository'
+      | 'overdue_collect_manual',
     userId: string,
     payload: Record<string, unknown>,
     idempotencyKey: string,

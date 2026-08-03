@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
@@ -237,6 +238,16 @@ export class PurchaseGatewayService {
     ) {
       throw new BadRequestException(
         'That wallet cannot be used for this purchase',
+      );
+    }
+    // A wallet frozen by InstallmentsService's overdue sweep can't fund a
+    // new purchase this way either — the same rule TransactionsService
+    // .assertNotBlocked enforces on the self-service initiatePurchase path,
+    // just checked here since a merchant-initiated charge never goes
+    // through that method.
+    if (wallet.blockedAt) {
+      throw new ForbiddenException(
+        'This wallet is blocked pending an overdue installment payment',
       );
     }
 
