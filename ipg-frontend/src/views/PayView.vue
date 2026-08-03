@@ -28,6 +28,7 @@ interface ChargeStatus {
 interface EligibleWallet {
   id: string;
   balance: string;
+  virtualAmount :string;
   walletType: {
     name: string;
     code: string;
@@ -543,7 +544,7 @@ onUnmounted(() => {
                 @click="selectWallet(w.id)"
               >
                 <span class="wallet-card-type">{{ w.walletType.name }}</span>
-                <span class="wallet-card-balance">{{ formatAmount(w.balance, w.walletType.currency) }}</span>
+                <span class="wallet-card-balance">{{ formatAmount(w.balance+w.virtualAmount, w.walletType.currency) }}</span>
                 <span class="wallet-card-currency">{{ w.walletType.currency.code }}</span>
               </button>
             </div>

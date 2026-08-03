@@ -576,7 +576,7 @@ export class TransactionsService {
         if (repository.closedAt) {
           throw new BadRequestException('This repository wallet is closed');
         }
-        if (!repository.walletType.allowPurchaseIn) {
+        if (!repository.walletType.depositable) {
           throw new BadRequestException(
             'This repository does not accept installment repayments',
           );
