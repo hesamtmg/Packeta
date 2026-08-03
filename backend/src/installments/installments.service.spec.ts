@@ -11,6 +11,15 @@ function buildService(options: {
   // walletId -> the SUM(t.amount) generateDue's raw query would return for
   // that wallet's VIRTUAL transactions within the collection window.
   virtualSumByWallet?: Record<string, string>;
+  // walletId -> the draw-down VIRTUAL rows getSpendBreakdown's query would
+  // return (fromWalletId = that wallet) within the collection window.
+  drawDownsByWallet?: Record<string, any[]>;
+  // transaction id -> row, for getSpendBreakdown's purchase lookup.
+  transactionsById?: Record<string, any>;
+  // wallet id -> row, for getSpendBreakdown's merchant wallet lookup.
+  walletsById?: Record<string, any>;
+  // user id -> row, for getSpendBreakdown's merchant user lookup.
+  usersById?: Record<string, any>;
 }) {
   const installmentsRepository = {
     find: jest.fn(
@@ -28,6 +37,9 @@ function buildService(options: {
   };
   const walletsRepository = {
     update: jest.fn(async () => undefined),
+    findOne: jest.fn(
+      async ({ where: { id } }: any) => options.walletsById?.[id] ?? null,
+    ),
     createQueryBuilder: jest.fn(() => ({
       innerJoinAndSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
@@ -37,31 +49,46 @@ function buildService(options: {
   };
   let lastWalletIdQueried: string | undefined;
   const transactionsRepository = {
+    findOne: jest.fn(
+      async ({ where: { id } }: any) => options.transactionsById?.[id] ?? null,
+    ),
     createQueryBuilder: jest.fn(() => {
       const builder: any = {
         select: jest.fn(() => builder),
-        where: jest.fn(() => builder),
+        where: jest.fn((_cond: string, params: any) => {
+          if (params?.walletId) lastWalletIdQueried = params.walletId;
+          return builder;
+        }),
         andWhere: jest.fn((_cond: string, params: any) => {
           if (params?.walletId) lastWalletIdQueried = params.walletId;
           return builder;
         }),
+        orderBy: jest.fn(() => builder),
         getRawOne: jest.fn(async () => ({
           total: options.virtualSumByWallet?.[lastWalletIdQueried!] ?? '0',
         })),
+        getMany: jest.fn(
+          async () => options.drawDownsByWallet?.[lastWalletIdQueried!] ?? [],
+        ),
       };
       return builder;
     }),
+  };
+  const usersService = {
+    findById: jest.fn(async (id: string) => options.usersById?.[id] ?? null),
   };
   const service = new InstallmentsService(
     installmentsRepository as any,
     walletsRepository as any,
     transactionsRepository as any,
+    usersService as any,
   );
   return {
     service,
     installmentsRepository,
     walletsRepository,
     transactionsRepository,
+    usersService,
   };
 }
 
@@ -362,5 +389,133 @@ describe('InstallmentsService.markPaid', () => {
     expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'wallet-2', {
       virtualAmount: '250',
     });
+  });
+});
+
+describe('InstallmentsService.getSpendBreakdownsFor', () => {
+  it("resolves each draw-down's merchant name from the wallet's storeName, falling back to the owner's identity", async () => {
+    const drawDown = {
+      id: 'drawdown-1',
+      relatedPurchaseId: 'purchase-1',
+      amount: '150',
+      createdAt: new Date('2026-08-15T00:00:00Z'),
+    };
+    const { service } = buildService({
+      drawDownsByWallet: { 'wallet-1': [drawDown] },
+      transactionsById: {
+        'purchase-1': { id: 'purchase-1', toWalletId: 'merchant-wallet-1' },
+      },
+      walletsById: {
+        'merchant-wallet-1': {
+          id: 'merchant-wallet-1',
+          userId: 'merchant-user-1',
+          storeName: 'Acme Store',
+        },
+      },
+    });
+
+    const installments = [
+      {
+        id: 'installment-1',
+        walletId: 'wallet-1',
+        periodStart: '2026-08-01',
+        periodEnd: '2026-09-01',
+      },
+    ] as any;
+    const breakdowns = await service.getSpendBreakdownsFor(installments);
+
+    expect(breakdowns.get('installment-1')).toEqual([
+      {
+        purchaseId: 'purchase-1',
+        merchantName: 'Acme Store',
+        amount: '150',
+        spentAt: drawDown.createdAt,
+      },
+    ]);
+  });
+
+  it("falls back to the merchant owner's identity when the wallet has no storeName", async () => {
+    const drawDown = {
+      id: 'drawdown-2',
+      relatedPurchaseId: 'purchase-2',
+      amount: '75',
+      createdAt: new Date('2026-08-16T00:00:00Z'),
+    };
+    const { service } = buildService({
+      drawDownsByWallet: { 'wallet-1': [drawDown] },
+      transactionsById: {
+        'purchase-2': { id: 'purchase-2', toWalletId: 'merchant-wallet-2' },
+      },
+      walletsById: {
+        'merchant-wallet-2': {
+          id: 'merchant-wallet-2',
+          userId: 'merchant-user-2',
+          storeName: null,
+        },
+      },
+      usersById: {
+        'merchant-user-2': {
+          email: 'merchant@example.com',
+          phoneNumber: null,
+        },
+      },
+    });
+
+    const installments = [
+      {
+        id: 'installment-1',
+        walletId: 'wallet-1',
+        periodStart: '2026-08-01',
+        periodEnd: '2026-09-01',
+      },
+    ] as any;
+    const breakdowns = await service.getSpendBreakdownsFor(installments);
+
+    expect(breakdowns.get('installment-1')?.[0].merchantName).toBe(
+      'merchant@example.com',
+    );
+  });
+
+  it('computes each unique batch period once and shares it across every installment in that batch', async () => {
+    const drawDown = {
+      id: 'drawdown-3',
+      relatedPurchaseId: 'purchase-3',
+      amount: '300',
+      createdAt: new Date('2026-08-10T00:00:00Z'),
+    };
+    const { service, transactionsRepository } = buildService({
+      drawDownsByWallet: { 'wallet-1': [drawDown] },
+      transactionsById: {
+        'purchase-3': { id: 'purchase-3', toWalletId: 'merchant-wallet-1' },
+      },
+      walletsById: {
+        'merchant-wallet-1': {
+          id: 'merchant-wallet-1',
+          userId: 'merchant-user-1',
+          storeName: 'Acme Store',
+        },
+      },
+    });
+
+    const installments = [
+      {
+        id: 'installment-1',
+        walletId: 'wallet-1',
+        periodStart: '2026-08-01',
+        periodEnd: '2026-09-01',
+      },
+      {
+        id: 'installment-2',
+        walletId: 'wallet-1',
+        periodStart: '2026-08-01',
+        periodEnd: '2026-09-01',
+      },
+    ] as any;
+    const breakdowns = await service.getSpendBreakdownsFor(installments);
+
+    expect(breakdowns.get('installment-1')).toBe(
+      breakdowns.get('installment-2'),
+    );
+    expect(transactionsRepository.createQueryBuilder).toHaveBeenCalledTimes(1);
   });
 });

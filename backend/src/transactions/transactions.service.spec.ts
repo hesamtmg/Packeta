@@ -1083,6 +1083,7 @@ describe('TransactionsService.verifyPurchase', () => {
         toWalletId: null,
         amount: '150',
         idempotencyKey: 'credit-draw:purchase-tx-1',
+        relatedPurchaseId: 'purchase-tx-1',
       }),
     );
     // 3. only now does the purchase itself debit the (now-funded) credit

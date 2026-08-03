@@ -11,8 +11,22 @@ import {
   Transaction,
   TransactionType,
 } from '../transactions/entities/transaction.entity';
+import { UsersService } from '../users/users.service';
+import { displayIdentity } from '../common/synthetic-email';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+// One purchase's worth of a billing period's spend, resolved back from a
+// VIRTUAL credit-ceiling draw-down (see TransactionsService
+// .settleCreditFundedPurchase's relatedPurchaseId) to the merchant it paid
+// — what InstallmentsService.getSpendBreakdown returns, so the customer can
+// see where the money in a given installment actually went.
+export interface SpendDetail {
+  purchaseId: string;
+  merchantName: string;
+  amount: string;
+  spentAt: Date;
+}
 
 function toDateOnly(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -42,6 +56,7 @@ export class InstallmentsService {
     private readonly walletsRepository: Repository<Wallet>,
     @InjectRepository(Transaction)
     private readonly transactionsRepository: Repository<Transaction>,
+    private readonly usersService: UsersService,
   ) {}
 
   // Splits a billing period's total (the sum of a credit wallet's VIRTUAL
@@ -293,6 +308,107 @@ export class InstallmentsService {
       throw new ForbiddenException('This installment does not belong to you');
     }
     return installment;
+  }
+
+  // Every purchase the customer's own draw-downs paid for within a billing
+  // period (see generateDue) — the merchant-spend detail behind a period's
+  // summed total. Mirrors generateDue's own window exactly: draw-downs are
+  // always fromWalletId = this wallet (money leaving its ceiling), so only
+  // that side is queried here, unlike generateDue's sum which also counts
+  // the grant and restores landing on the wallet.
+  private async getSpendBreakdown(
+    walletId: string,
+    periodStart: string,
+    periodEnd: string,
+  ): Promise<SpendDetail[]> {
+    const drawDowns = await this.transactionsRepository
+      .createQueryBuilder('t')
+      .where('t.type = :type', { type: TransactionType.VIRTUAL })
+      .andWhere('t.fromWalletId = :walletId', { walletId })
+      .andWhere('t.createdAt >= :periodStart', {
+        periodStart: new Date(periodStart),
+      })
+      .andWhere('t.createdAt < :periodEnd', {
+        periodEnd: new Date(periodEnd),
+      })
+      .orderBy('t.createdAt', 'ASC')
+      .getMany();
+
+    const details: SpendDetail[] = [];
+    for (const drawDown of drawDowns) {
+      if (!drawDown.relatedPurchaseId) continue;
+      const purchase = await this.transactionsRepository.findOne({
+        where: { id: drawDown.relatedPurchaseId },
+      });
+      if (!purchase?.toWalletId) continue;
+      const merchantWallet = await this.walletsRepository.findOne({
+        where: { id: purchase.toWalletId },
+      });
+      if (!merchantWallet) continue;
+      const merchantUser = await this.usersService.findById(
+        merchantWallet.userId,
+      );
+      details.push({
+        purchaseId: purchase.id,
+        merchantName:
+          merchantWallet.storeName ||
+          (merchantUser ? displayIdentity(merchantUser) : 'Merchant'),
+        amount: drawDown.amount,
+        spentAt: drawDown.createdAt,
+      });
+    }
+    return details;
+  }
+
+  // Batched version of getSpendBreakdown for a whole list of installments
+  // (see InstallmentsController): every installment sharing the same
+  // (walletId, periodStart, periodEnd) batch was split from the same
+  // period total, so its spend breakdown is computed once and shared
+  // across all of that batch's rows rather than re-queried per row.
+  async getSpendBreakdownsFor(
+    installments: Installment[],
+  ): Promise<Map<string, SpendDetail[]>> {
+    const periods = new Map<
+      string,
+      {
+        walletId: string;
+        periodStart: string;
+        periodEnd: string;
+        installmentIds: string[];
+      }
+    >();
+    for (const installment of installments) {
+      const key = `${installment.walletId}:${installment.periodStart}:${installment.periodEnd}`;
+      const entry = periods.get(key);
+      if (entry) {
+        entry.installmentIds.push(installment.id);
+      } else {
+        periods.set(key, {
+          walletId: installment.walletId,
+          periodStart: installment.periodStart,
+          periodEnd: installment.periodEnd,
+          installmentIds: [installment.id],
+        });
+      }
+    }
+
+    const result = new Map<string, SpendDetail[]>();
+    for (const {
+      walletId,
+      periodStart,
+      periodEnd,
+      installmentIds,
+    } of periods.values()) {
+      const details = await this.getSpendBreakdown(
+        walletId,
+        periodStart,
+        periodEnd,
+      );
+      for (const id of installmentIds) {
+        result.set(id, details);
+      }
+    }
+    return result;
   }
 
   // Called from inside TransactionsService.verifyPurchase's transaction once

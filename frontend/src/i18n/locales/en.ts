@@ -107,6 +107,7 @@ export default {
     installments: {
       title: 'Installments',
       hint: 'Scheduled repayments for your credit wallets — pay any due or overdue installment with real money via the payment gateway.',
+      month: 'Month',
       dueDate: 'Due',
       deadlineDate: 'Deadline',
       amount: 'Amount',
@@ -117,6 +118,11 @@ export default {
       pay: 'Pay',
       viewLink: 'View installments',
       none: 'No installments yet.',
+      installmentCount: '{count} installments this month',
+      details: 'Details',
+      hideDetails: 'Hide details',
+      spentAt: 'Where the money went',
+      noSpend: 'No purchases recorded for this billing period.',
     },
     settlement: {
       walletHint:

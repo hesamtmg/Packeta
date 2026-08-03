@@ -1156,6 +1156,9 @@ export class TransactionsService {
         amount: remainder.toString(),
         idempotencyKey: `credit-draw:${transaction.id}`,
         note: 'Credit wallet ceiling drawn down for this purchase',
+        // So InstallmentsService.getSpendBreakdown can trace this period's
+        // total back to the merchant the customer actually paid.
+        relatedPurchaseId: transaction.id,
       });
       await manager.save(ceilingDrawDown);
     }

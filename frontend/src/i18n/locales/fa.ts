@@ -107,6 +107,7 @@ export default {
     installments: {
       title: 'اقساط',
       hint: 'بازپرداخت‌های زمان‌بندی‌شده برای کیف‌پول‌های اعتباری شما — هر قسط سررسیدشده یا معوق را با پول واقعی از طریق درگاه پرداخت پرداخت کنید.',
+      month: 'ماه',
       dueDate: 'تاریخ سررسید',
       deadlineDate: 'مهلت پرداخت',
       amount: 'مبلغ',
@@ -117,6 +118,11 @@ export default {
       pay: 'پرداخت',
       viewLink: 'مشاهده اقساط',
       none: 'هنوز قسطی وجود ندارد.',
+      installmentCount: '{count} قسط در این ماه',
+      details: 'جزئیات',
+      hideDetails: 'پنهان کردن جزئیات',
+      spentAt: 'محل خرج شدن مبلغ',
+      noSpend: 'برای این دوره صورتحساب خریدی ثبت نشده است.',
     },
     settlement: {
       walletHint:
