@@ -453,12 +453,16 @@ describe('InstallmentsService.markPaid', () => {
     };
   }
 
-  it('marks the installment paid, clears the block, restores virtualAmount, and records a VIRTUAL restore transaction', async () => {
+  it('marks the installment paid, clears the block, restores virtualAmount by the PRINCIPAL only, and records a VIRTUAL restore transaction', async () => {
     const { service } = buildService({});
+    // principal 280 + fee 50 = amount 330 — only the 280 that was ever
+    // drawn from virtualAmount at purchase time should come back; the fee
+    // was never part of that draw-down.
     const installment = {
       id: 'installment-1',
       walletId: 'wallet-1',
       amount: '330',
+      principalAmount: '280',
     };
     const wallet = { id: 'wallet-1', virtualAmount: '600' };
     const manager = buildManager(installment, wallet);
@@ -469,7 +473,7 @@ describe('InstallmentsService.markPaid', () => {
       blockedAt: null,
     });
     expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'wallet-1', {
-      virtualAmount: '930',
+      virtualAmount: '880',
     });
     expect(manager.create).toHaveBeenCalledWith(
       expect.anything(),
@@ -477,7 +481,7 @@ describe('InstallmentsService.markPaid', () => {
         type: 'VIRTUAL',
         fromWalletId: null,
         toWalletId: 'wallet-1',
-        amount: '330',
+        amount: '280',
         idempotencyKey: 'installment-restore:installment-1',
       }),
     );
@@ -489,6 +493,7 @@ describe('InstallmentsService.markPaid', () => {
       id: 'installment-2',
       walletId: 'wallet-2',
       amount: '250',
+      principalAmount: '220',
     };
     const wallet = { id: 'wallet-2', virtualAmount: null };
     const manager = buildManager(installment, wallet);
@@ -496,7 +501,7 @@ describe('InstallmentsService.markPaid', () => {
     await service.markPaid(manager as any, installment.id, 'tx-2');
 
     expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'wallet-2', {
-      virtualAmount: '250',
+      virtualAmount: '220',
     });
   });
 });

@@ -533,12 +533,16 @@ export class InstallmentsService {
 
   // Shared by markPaid (one installment) and markAllPaidAndUnblock (every
   // outstanding installment on a wallet): marks the row PAID and restores
-  // the wallet's virtualAmount ceiling by its amount, with its own VIRTUAL
-  // ledger row — the mirror image of the draw-down recorded at spend time
-  // (see TransactionsService.settleCreditFundedPurchase). Re-reads the
-  // wallet's current virtualAmount on every call rather than caching it, so
-  // looping this across several installments in the same DB transaction
-  // still accumulates correctly.
+  // the wallet's virtualAmount ceiling by its PRINCIPAL share only — the
+  // mirror image of the draw-down recorded at spend time (see
+  // TransactionsService.settleCreditFundedPurchase, which only ever draws
+  // the ceiling down by the actual purchase amount). Fee/penalty/unblockFee
+  // were never part of that draw-down — they're charges added on top at
+  // installment-generation/overdue time — so restoring the full
+  // installment.amount here would inflate the ceiling past what it
+  // originally was. Re-reads the wallet's current virtualAmount on every
+  // call rather than caching it, so looping this across several
+  // installments in the same DB transaction still accumulates correctly.
   private async settleOneInstallment(
     manager: EntityManager,
     installment: Installment,
@@ -554,7 +558,7 @@ export class InstallmentsService {
     });
     if (!wallet) return;
     const restored =
-      BigInt(wallet.virtualAmount ?? '0') + BigInt(installment.amount);
+      BigInt(wallet.virtualAmount ?? '0') + BigInt(installment.principalAmount);
     await manager.update(Wallet, wallet.id, {
       virtualAmount: restored.toString(),
     });
@@ -562,7 +566,7 @@ export class InstallmentsService {
       type: TransactionType.VIRTUAL,
       fromWalletId: null,
       toWalletId: wallet.id,
-      amount: installment.amount,
+      amount: installment.principalAmount,
       idempotencyKey: `installment-restore:${installment.id}`,
       note: 'Credit wallet ceiling restored by installment repayment',
     });
