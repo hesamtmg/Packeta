@@ -29,6 +29,19 @@ export interface SpendDetail {
   spentAt: Date;
 }
 
+// One row of the admin overdue-collection queue — see
+// findBlockedWalletsSummary/findBlockedWalletsSummaryForWallets.
+export interface BlockedWalletSummary {
+  walletId: string;
+  ownerEmail: string;
+  ownerPhoneNumber: string | null;
+  walletTypeName: string;
+  currency: { code: string; symbol: string };
+  blockedAt: Date;
+  totalOwed: string;
+  repositoryWalletId: string | null;
+}
+
 function toDateOnly(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
@@ -366,6 +379,25 @@ export class InstallmentsService {
       .getMany();
   }
 
+  // Admin-only, scoped: same shape as findAll but restricted to installments
+  // on the given wallet ids — the regular-ADMIN counterpart, used to
+  // restrict the panel's Installments view to an admin's own wallet graph
+  // (see WalletsService.listScopedWalletIdsForAdmin).
+  async findAllForWallets(walletIds: string[]): Promise<Installment[]> {
+    if (!walletIds.length) {
+      return [];
+    }
+    return this.installmentsRepository
+      .createQueryBuilder('installment')
+      .innerJoinAndSelect('installment.wallet', 'wallet')
+      .innerJoinAndSelect('wallet.user', 'user')
+      .innerJoinAndSelect('wallet.walletType', 'walletType')
+      .innerJoinAndSelect('walletType.currency', 'currency')
+      .where('installment.walletId IN (:...walletIds)', { walletIds })
+      .orderBy('installment.deadlineDate', 'DESC')
+      .getMany();
+  }
+
   async getByIdForUser(
     userId: string,
     installmentId: string,
@@ -590,29 +622,37 @@ export class InstallmentsService {
   // owes it, how much (every outstanding installment's amount, folding in
   // unblockFee since any repayment while blocked owes that too — same rule
   // payInstallment already applies), and which repository backs it.
-  async findBlockedWalletsSummary(): Promise<
-    {
-      walletId: string;
-      ownerEmail: string;
-      ownerPhoneNumber: string | null;
-      walletTypeName: string;
-      currency: { code: string; symbol: string };
-      blockedAt: Date;
-      totalOwed: string;
-      repositoryWalletId: string | null;
-    }[]
-  > {
-    const wallets = await this.walletsRepository
+  async findBlockedWalletsSummary(): Promise<BlockedWalletSummary[]> {
+    return this.blockedWalletsSummary();
+  }
+
+  // Admin-only, scoped: same as findBlockedWalletsSummary but restricted to
+  // the given wallet ids — the regular-ADMIN counterpart, used to restrict
+  // the panel's overdue-collection queue to an admin's own wallet graph.
+  async findBlockedWalletsSummaryForWallets(
+    walletIds: string[],
+  ): Promise<BlockedWalletSummary[]> {
+    if (!walletIds.length) {
+      return [];
+    }
+    return this.blockedWalletsSummary(walletIds);
+  }
+
+  private async blockedWalletsSummary(
+    walletIds?: string[],
+  ): Promise<BlockedWalletSummary[]> {
+    const query = this.walletsRepository
       .createQueryBuilder('wallet')
       .innerJoinAndSelect('wallet.user', 'user')
       .innerJoinAndSelect('wallet.walletType', 'walletType')
       .innerJoinAndSelect('walletType.currency', 'currency')
-      .where('wallet.blockedAt IS NOT NULL')
-      .getMany();
+      .where('wallet.blockedAt IS NOT NULL');
+    if (walletIds) {
+      query.andWhere('wallet.id IN (:...walletIds)', { walletIds });
+    }
+    const wallets = await query.getMany();
 
-    const result: Awaited<
-      ReturnType<InstallmentsService['findBlockedWalletsSummary']>
-    > = [];
+    const result: BlockedWalletSummary[] = [];
     for (const wallet of wallets) {
       const outstanding = await this.getOutstandingForWallet(wallet.id);
       if (!outstanding.length) continue;

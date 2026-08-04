@@ -6,7 +6,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, IsNull, Repository } from 'typeorm';
+import { EntityManager, In, IsNull, Repository } from 'typeorm';
 import { Wallet } from './entities/wallet.entity';
 import {
   WalletType,
@@ -661,6 +661,67 @@ export class WalletsService {
       throw new NotFoundException('Wallet not found');
     }
     return wallet;
+  }
+
+  // A regular ADMIN's data scope, for panel visibility: their own wallets,
+  // plus every CREDIT wallet linked (via repositoryWalletId) to a REPOSITORY
+  // wallet they personally own — i.e. the customers who received credit
+  // through that admin's own repository. SUPER_ADMIN never calls this; it
+  // always sees everything via listAll/listForUser instead.
+  async listScopedWalletIdsForAdmin(adminUserId: string): Promise<string[]> {
+    const ownWallets = await this.walletsRepository.find({
+      where: { userId: adminUserId },
+      relations: { walletType: true },
+    });
+    const ownIds = ownWallets.map((wallet) => wallet.id);
+    const repositoryIds = ownWallets
+      .filter((wallet) => wallet.walletType.code === WalletTypeCode.REPOSITORY)
+      .map((wallet) => wallet.id);
+    if (!repositoryIds.length) {
+      return ownIds;
+    }
+    const linkedCredit = await this.walletsRepository.find({
+      where: { repositoryWalletId: In(repositoryIds) },
+    });
+    return [...ownIds, ...linkedCredit.map((wallet) => wallet.id)];
+  }
+
+  // Same scope as listScopedWalletIdsForAdmin, but the full wallets with
+  // owner attached — the admin panel's Wallets page for a regular ADMIN.
+  async listScopedForAdmin(adminUserId: string): Promise<Wallet[]> {
+    const walletIds = await this.listScopedWalletIdsForAdmin(adminUserId);
+    if (!walletIds.length) {
+      return [];
+    }
+    return this.walletsRepository.find({
+      where: { id: In(walletIds) },
+      relations: WALLET_RELATIONS_WITH_OWNER,
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  // The user accounts that count as a given admin's "customers": everyone
+  // who owns a CREDIT wallet linked to a REPOSITORY wallet that admin owns.
+  // Used to scope the admin panel's Customers page and to gate customer-
+  // targeted admin actions (adjust/reopen/close/create-wallet) for regular
+  // ADMIN accounts.
+  async listCustomerUserIdsForAdmin(adminUserId: string): Promise<string[]> {
+    const ownRepositoryWallets = await this.walletsRepository.find({
+      where: {
+        userId: adminUserId,
+        walletType: { code: WalletTypeCode.REPOSITORY },
+      },
+      relations: { walletType: true },
+    });
+    if (!ownRepositoryWallets.length) {
+      return [];
+    }
+    const linkedCredit = await this.walletsRepository.find({
+      where: {
+        repositoryWalletId: In(ownRepositoryWallets.map((wallet) => wallet.id)),
+      },
+    });
+    return [...new Set(linkedCredit.map((wallet) => wallet.userId))];
   }
 
   // Any wallet of the given currency that is eligible to receive a

@@ -2109,6 +2109,25 @@ export class TransactionsService {
     });
   }
 
+  // Admin use only, scoped: every transaction touching any of the given
+  // wallet ids, most recent first — the regular-ADMIN counterpart to
+  // listAll, used to restrict the panel's Transactions/Reports/Dashboard
+  // views to an admin's own wallet graph (see
+  // WalletsService.listScopedWalletIdsForAdmin).
+  async listAllForWallets(
+    walletIds: string[],
+    limit = 200,
+  ): Promise<Transaction[]> {
+    if (!walletIds.length) {
+      return [];
+    }
+    return this.transactionsRepository.find({
+      where: [{ fromWalletId: In(walletIds) }, { toWalletId: In(walletIds) }],
+      order: { createdAt: 'DESC' },
+      take: limit,
+    });
+  }
+
   // Full detail for a single transaction, including the type/currency of
   // whichever wallet(s) it touched — enough for a standalone detail view
   // without extra round trips. Scoped to transactions that touch at least

@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Headers,
   NotFoundException,
@@ -27,6 +28,7 @@ import {
   CurrentUser,
 } from '../common/decorators/current-user.decorator';
 import { UsersService } from '../users/users.service';
+import { User, UserRole } from '../users/entities/user.entity';
 import { WalletsService } from '../wallets/wallets.service';
 import { WalletTypesService } from '../wallet-types/wallet-types.service';
 import { WalletTypeCode } from '../wallet-types/entities/wallet-type.entity';
@@ -79,9 +81,13 @@ export class AdminController {
   // Left ungated (no @RequireSection) — every admin/super-admin has always
   // been able to see who's on the platform; the customers/admins sections
   // gate the deeper per-user detail and management actions below instead.
+  // SUPER_ADMIN sees everyone. A regular ADMIN always sees every fellow
+  // panel user (ADMIN/SUPER_ADMIN — needed by the Admins/Roles page) but
+  // only the USER accounts within their own wallet scope (needed by the
+  // Customers page and the dashboard) — see scopedCustomerIds.
   @Get('users')
-  async listUsers() {
-    const users = await this.usersService.findAll();
+  async listUsers(@CurrentUser() caller: AuthenticatedUser) {
+    const users = await this.scopedUserList(caller.userId);
     return users.map((user) => ({
       id: user.id,
       email: user.email,
@@ -94,10 +100,16 @@ export class AdminController {
 
   @Get('users/:id')
   @RequireSection('customers', 'admins')
-  async getUser(@Param('id') id: string) {
+  async getUser(
+    @CurrentUser() caller: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
     const user = await this.usersService.findById(id);
     if (!user) {
       throw new NotFoundException('User not found');
+    }
+    if (user.role === UserRole.USER) {
+      await this.assertCustomerInScope(caller.userId, user.id);
     }
     const wallets = await this.walletsService.listForUser(id);
     return {
@@ -238,15 +250,30 @@ export class AdminController {
 
   @Get('users/:id/transactions')
   @RequireSection('customers', 'admins')
-  async getUserTransactions(@Param('id') id: string) {
+  async getUserTransactions(
+    @CurrentUser() caller: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    const user = await this.usersService.findById(id);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    if (user.role === UserRole.USER) {
+      await this.assertCustomerInScope(caller.userId, user.id);
+    }
     return this.transactionsService.getHistory(id);
   }
 
   // Left ungated, same reasoning as listUsers — the dashboard and reports
-  // pages both need this raw list, and neither is section-gated.
+  // pages both need this raw list, and neither is section-gated. SUPER_ADMIN
+  // sees every wallet; a regular ADMIN sees only their own wallet graph (see
+  // WalletsService.listScopedWalletIdsForAdmin).
   @Get('wallets')
-  async listWallets() {
-    const wallets = await this.walletsService.listAll();
+  async listWallets(@CurrentUser() caller: AuthenticatedUser) {
+    const isSuperAdmin = await this.isSuperAdmin(caller.userId);
+    const wallets = isSuperAdmin
+      ? await this.walletsService.listAll()
+      : await this.walletsService.listScopedForAdmin(caller.userId);
     return wallets.map((wallet) => ({
       ...serializeWallet(wallet),
       ownerId: wallet.user.id,
@@ -255,25 +282,55 @@ export class AdminController {
     }));
   }
 
-  // Left ungated, same reasoning as listWallets.
+  // Left ungated, same reasoning as listWallets — scoped the same way.
   @Get('transactions')
-  async listTransactions(@Query('limit') limit?: string) {
+  async listTransactions(
+    @CurrentUser() caller: AuthenticatedUser,
+    @Query('limit') limit?: string,
+  ) {
     const parsedLimit = limit ? parseInt(limit, 10) : undefined;
-    return this.transactionsService.listAll(parsedLimit);
+    if (await this.isSuperAdmin(caller.userId)) {
+      return this.transactionsService.listAll(parsedLimit);
+    }
+    const walletIds = await this.walletsService.listScopedWalletIdsForAdmin(
+      caller.userId,
+    );
+    return this.transactionsService.listAllForWallets(walletIds, parsedLimit);
   }
 
   @Get('transactions/:id')
   @RequireSection('transactions')
-  async getTransaction(@Param('id') id: string) {
-    return this.transactionsService.getByIdUnscoped(id);
+  async getTransaction(
+    @CurrentUser() caller: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    const transaction = await this.transactionsService.getByIdUnscoped(id);
+    if (!(await this.isSuperAdmin(caller.userId))) {
+      const walletIds = await this.walletsService.listScopedWalletIdsForAdmin(
+        caller.userId,
+      );
+      const touchesScope =
+        (transaction.fromWallet &&
+          walletIds.includes(transaction.fromWallet.id)) ||
+        (transaction.toWallet && walletIds.includes(transaction.toWallet.id));
+      if (!touchesScope) {
+        throw new ForbiddenException('This transaction is outside your scope');
+      }
+    }
+    return transaction;
   }
 
   // Every installment across every credit wallet, any customer — the panel
-  // counterpart to a customer's own per-wallet installments view.
+  // counterpart to a customer's own per-wallet installments view. Scoped the
+  // same way as listWallets for a regular ADMIN.
   @Get('installments')
   @RequireSection('installments')
-  async listInstallments() {
-    const installments = await this.installmentsService.findAll();
+  async listInstallments(@CurrentUser() caller: AuthenticatedUser) {
+    const installments = (await this.isSuperAdmin(caller.userId))
+      ? await this.installmentsService.findAll()
+      : await this.installmentsService.findAllForWallets(
+          await this.walletsService.listScopedWalletIdsForAdmin(caller.userId),
+        );
     return installments.map((installment) => ({
       ...serializeInstallment(installment),
       ownerEmail: installment.wallet.user.email,
@@ -286,11 +343,19 @@ export class AdminController {
   // Every credit wallet currently blocked for missed payments (see
   // InstallmentsService.applyOverduePenalties), with the full amount owed
   // — the admin panel's queue for the three overdue-collection actions
-  // below.
+  // below. Scoped the same way as listWallets for a regular ADMIN.
   @Get('installments/overdue')
   @RequireSection('installments')
-  async listOverdueWallets() {
-    return this.installmentsService.findBlockedWalletsSummary();
+  async listOverdueWallets(@CurrentUser() caller: AuthenticatedUser) {
+    if (await this.isSuperAdmin(caller.userId)) {
+      return this.installmentsService.findBlockedWalletsSummary();
+    }
+    const walletIds = await this.walletsService.listScopedWalletIdsForAdmin(
+      caller.userId,
+    );
+    return this.installmentsService.findBlockedWalletsSummaryForWallets(
+      walletIds,
+    );
   }
 
   // Overdue-collection method 1 of 2: sends a real ZarinPal payment link
@@ -303,6 +368,7 @@ export class AdminController {
     @Param('walletId') walletId: string,
     @Headers('idempotency-key') idempotencyKey: string,
   ) {
+    await this.assertWalletInScope(user.userId, walletId);
     return this.transactionsService.initiateOverdueCollectionZarinPal(
       user.userId,
       walletId,
@@ -334,6 +400,7 @@ export class AdminController {
         'A description justifying this write-off is required',
       );
     }
+    await this.assertWalletInScope(user.userId, walletId);
     const documentReference = document
       ? this.saveOverdueSettlementDocument(walletId, document)
       : null;
@@ -367,6 +434,67 @@ export class AdminController {
     return filename;
   }
 
+  // AuthenticatedUser (the JWT payload) doesn't carry role, so every
+  // scoping check re-fetches fresh from the DB — same pattern as
+  // AdminGuard/SuperAdminGuard/SectionGuard, so a role change takes effect
+  // immediately rather than on next login.
+  private async isSuperAdmin(userId: string): Promise<boolean> {
+    const caller = await this.usersService.findById(userId);
+    return caller?.role === UserRole.SUPER_ADMIN;
+  }
+
+  // users/:id and users/:id/transactions serve two different UI purposes:
+  // a customer's own detail (should be repository-scoped for a regular
+  // ADMIN) and a fellow panel user's detail on the Admins/Roles page
+  // (should not be — that's governed by the customers/admins section
+  // requirement instead, not by wallet ownership). Callers only invoke this
+  // when the target user's role is USER.
+  private async assertCustomerInScope(
+    adminUserId: string,
+    customerUserId: string,
+  ): Promise<void> {
+    if (await this.isSuperAdmin(adminUserId)) return;
+    const customerIds =
+      await this.walletsService.listCustomerUserIdsForAdmin(adminUserId);
+    if (!customerIds.includes(customerUserId)) {
+      throw new ForbiddenException('This customer is outside your scope');
+    }
+  }
+
+  // Same two-purpose split as assertCustomerInScope, but for a wallet
+  // action: a regular ADMIN may always act on their own wallets, may act on
+  // a USER-owned wallet only if that user is one of their scoped customers,
+  // and may act on a fellow ADMIN/SUPER_ADMIN's wallet unrestricted (the
+  // role-management panel's embedded wallet cards) — already appropriately
+  // gated by the "wallets" section requirement on each endpoint.
+  private async assertWalletInScope(
+    adminUserId: string,
+    walletId: string,
+  ): Promise<void> {
+    if (await this.isSuperAdmin(adminUserId)) return;
+    const wallet = await this.walletsService.getByIdWithOwner(walletId);
+    if (wallet.userId === adminUserId) return;
+    if (wallet.user.role !== UserRole.USER) return;
+    await this.assertCustomerInScope(adminUserId, wallet.userId);
+  }
+
+  // Backs GET /admin/users: SUPER_ADMIN sees everyone. A regular ADMIN sees
+  // every fellow panel user (ADMIN/SUPER_ADMIN — the Admins/Roles page
+  // needs the full list) plus only the USER accounts within their own
+  // wallet scope (the Customers page and dashboard).
+  private async scopedUserList(callerId: string): Promise<User[]> {
+    const all = await this.usersService.findAll();
+    if (await this.isSuperAdmin(callerId)) {
+      return all;
+    }
+    const customerIds = new Set(
+      await this.walletsService.listCustomerUserIdsForAdmin(callerId),
+    );
+    return all.filter(
+      (user) => user.role !== UserRole.USER || customerIds.has(user.id),
+    );
+  }
+
   // Recent scheduler runs (installment generation/penalties, auto-withdraw
   // and rail-settlement sweeps, purchase-timeout reversals) — the panel's
   // window into background jobs that otherwise only show up in server logs.
@@ -379,12 +507,13 @@ export class AdminController {
 
   @Post('wallets/:id/adjust')
   @RequireSection('wallets', 'customers')
-  adjustWallet(
+  async adjustWallet(
     @CurrentUser() admin: AuthenticatedUser,
     @Param('id') walletId: string,
     @Body() dto: AdjustWalletDto,
     @Headers('idempotency-key') idempotencyKey: string,
   ) {
+    await this.assertWalletInScope(admin.userId, walletId);
     return this.transactionsService.adjust(
       admin.userId,
       walletId,
@@ -400,9 +529,11 @@ export class AdminController {
   @Post('customers/:userId/wallets')
   @RequireSection('customers')
   async createWalletForCustomer(
+    @CurrentUser() admin: AuthenticatedUser,
     @Param('userId') userId: string,
     @Body() dto: AdminCreateWalletDto,
   ) {
+    await this.assertCustomerInScope(admin.userId, userId);
     const walletType = await this.walletTypesService.findById(dto.walletTypeId);
     if (walletType.code === WalletTypeCode.CREDIT) {
       throw new BadRequestException(
@@ -432,7 +563,11 @@ export class AdminController {
   // counterpart to the customer's own DELETE /wallets/:id soft-close.
   @Post('wallets/:id/reopen')
   @RequireSection('wallets')
-  async reopenWallet(@Param('id') walletId: string) {
+  async reopenWallet(
+    @CurrentUser() admin: AuthenticatedUser,
+    @Param('id') walletId: string,
+  ) {
+    await this.assertWalletInScope(admin.userId, walletId);
     const wallet = await this.walletsService.reopenAsAdmin(walletId);
     return serializeWallet(wallet);
   }
@@ -441,7 +576,11 @@ export class AdminController {
   // wallet cards for another panel user — see WalletsService.closeAsAdmin.
   @Delete('wallets/:id')
   @RequireSection('wallets')
-  async closeWallet(@Param('id') walletId: string) {
+  async closeWallet(
+    @CurrentUser() admin: AuthenticatedUser,
+    @Param('id') walletId: string,
+  ) {
+    await this.assertWalletInScope(admin.userId, walletId);
     const wallet = await this.walletsService.closeAsAdmin(walletId);
     return serializeWallet(wallet);
   }

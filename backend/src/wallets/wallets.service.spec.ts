@@ -5,6 +5,142 @@ import {
 } from '@nestjs/common';
 import { WalletsService } from './wallets.service';
 import { SettlementRailType } from '../rail-settlements/entities/rail-settlement.entity';
+import { WalletTypeCode } from '../wallet-types/entities/wallet-type.entity';
+
+interface ScopedTestWallet {
+  id: string;
+  userId: string;
+  repositoryWalletId: string | null;
+  walletType: { code: WalletTypeCode };
+}
+
+// A minimal in-memory stand-in for the wallets repository, just smart
+// enough to resolve the where-clause shapes listScopedWalletIdsForAdmin /
+// listScopedForAdmin / listCustomerUserIdsForAdmin actually issue: an exact
+// userId match, an optional nested walletType.code match, and an In(...)
+// match on id or repositoryWalletId.
+function buildScopedWalletsService(wallets: ScopedTestWallet[]) {
+  const walletsRepository = {
+    find: jest.fn(async (options: any) => {
+      const where = options.where ?? {};
+      return wallets.filter((wallet) => {
+        if (where.userId !== undefined && wallet.userId !== where.userId) {
+          return false;
+        }
+        if (
+          where.walletType?.code !== undefined &&
+          wallet.walletType.code !== where.walletType.code
+        ) {
+          return false;
+        }
+        if (where.id !== undefined && !where.id.value.includes(wallet.id)) {
+          return false;
+        }
+        if (
+          where.repositoryWalletId !== undefined &&
+          !where.repositoryWalletId.value.includes(wallet.repositoryWalletId)
+        ) {
+          return false;
+        }
+        return true;
+      });
+    }),
+  };
+  const service = new WalletsService(
+    walletsRepository as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+  );
+  return { service, walletsRepository };
+}
+
+describe('WalletsService admin data scoping', () => {
+  // admin-1 owns a personal SAVINGS wallet plus a REPOSITORY wallet; that
+  // repository backs two CREDIT wallets owned by different customers.
+  // admin-2 owns nothing but a personal wallet, and is unrelated to admin-1.
+  const wallets: ScopedTestWallet[] = [
+    {
+      id: 'admin1-savings',
+      userId: 'admin-1',
+      repositoryWalletId: null,
+      walletType: { code: WalletTypeCode.BUY },
+    },
+    {
+      id: 'admin1-repository',
+      userId: 'admin-1',
+      repositoryWalletId: null,
+      walletType: { code: WalletTypeCode.REPOSITORY },
+    },
+    {
+      id: 'customer1-credit',
+      userId: 'customer-1',
+      repositoryWalletId: 'admin1-repository',
+      walletType: { code: WalletTypeCode.CREDIT },
+    },
+    {
+      id: 'customer2-credit',
+      userId: 'customer-2',
+      repositoryWalletId: 'admin1-repository',
+      walletType: { code: WalletTypeCode.CREDIT },
+    },
+    {
+      id: 'admin2-savings',
+      userId: 'admin-2',
+      repositoryWalletId: null,
+      walletType: { code: WalletTypeCode.BUY },
+    },
+    {
+      id: 'unrelated-repository',
+      userId: 'stranger-1',
+      repositoryWalletId: null,
+      walletType: { code: WalletTypeCode.REPOSITORY },
+    },
+    {
+      id: 'unrelated-credit',
+      userId: 'stranger-2',
+      repositoryWalletId: 'unrelated-repository',
+      walletType: { code: WalletTypeCode.CREDIT },
+    },
+  ];
+
+  it("scopes wallet ids to the admin's own wallets plus credit wallets linked to their repository", async () => {
+    const { service } = buildScopedWalletsService(wallets);
+    const ids = await service.listScopedWalletIdsForAdmin('admin-1');
+    expect(new Set(ids)).toEqual(
+      new Set([
+        'admin1-savings',
+        'admin1-repository',
+        'customer1-credit',
+        'customer2-credit',
+      ]),
+    );
+  });
+
+  it('scopes to just the own wallets when the admin owns no repository', async () => {
+    const { service } = buildScopedWalletsService(wallets);
+    const ids = await service.listScopedWalletIdsForAdmin('admin-2');
+    expect(ids).toEqual(['admin2-savings']);
+  });
+
+  it("never leaks a different repository owner's linked credit wallets", async () => {
+    const { service } = buildScopedWalletsService(wallets);
+    const ids = await service.listScopedWalletIdsForAdmin('admin-1');
+    expect(ids).not.toContain('unrelated-credit');
+  });
+
+  it('lists the customer user ids behind an admin repository', async () => {
+    const { service } = buildScopedWalletsService(wallets);
+    const customerIds = await service.listCustomerUserIdsForAdmin('admin-1');
+    expect(new Set(customerIds)).toEqual(new Set(['customer-1', 'customer-2']));
+  });
+
+  it('returns no customers for an admin with no repository wallet', async () => {
+    const { service } = buildScopedWalletsService(wallets);
+    expect(await service.listCustomerUserIdsForAdmin('admin-2')).toEqual([]);
+  });
+});
 
 function buildService(wallet: {
   id: string;
