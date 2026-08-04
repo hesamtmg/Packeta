@@ -27,12 +27,12 @@ describe('SectionGuard', () => {
     expect(usersService.findById).not.toHaveBeenCalled();
   });
 
-  it('always allows a SUPER_ADMIN, regardless of their permissions list', async () => {
+  it('always allows a SUPER_ADMIN, regardless of their assigned role', async () => {
     const { reflector, context } = buildContext('u1', ['wallets']);
     const usersService = {
       findById: jest.fn(async () => ({
         role: UserRole.SUPER_ADMIN,
-        permissions: null,
+        panelRole: null,
       })),
     };
     const guard = new SectionGuard(reflector, usersService as any);
@@ -40,12 +40,12 @@ describe('SectionGuard', () => {
     await expect(guard.canActivate(context)).resolves.toBe(true);
   });
 
-  it('allows a regular ADMIN who has at least one of the required sections', async () => {
+  it('allows a regular ADMIN whose panel role grants at least one of the required sections', async () => {
     const { reflector, context } = buildContext('u1', ['wallets', 'reports']);
     const usersService = {
       findById: jest.fn(async () => ({
         role: UserRole.ADMIN,
-        permissions: ['reports'],
+        panelRole: { permissions: ['reports'] },
       })),
     };
     const guard = new SectionGuard(reflector, usersService as any);
@@ -53,12 +53,12 @@ describe('SectionGuard', () => {
     await expect(guard.canActivate(context)).resolves.toBe(true);
   });
 
-  it('rejects a regular ADMIN who has none of the required sections', async () => {
+  it('rejects a regular ADMIN whose panel role grants none of the required sections', async () => {
     const { reflector, context } = buildContext('u1', ['wallets']);
     const usersService = {
       findById: jest.fn(async () => ({
         role: UserRole.ADMIN,
-        permissions: ['customers'],
+        panelRole: { permissions: ['customers'] },
       })),
     };
     const guard = new SectionGuard(reflector, usersService as any);
@@ -68,12 +68,12 @@ describe('SectionGuard', () => {
     );
   });
 
-  it('rejects a regular ADMIN with no permissions at all', async () => {
+  it('rejects a regular ADMIN with no panel role assigned at all', async () => {
     const { reflector, context } = buildContext('u1', ['wallets']);
     const usersService = {
       findById: jest.fn(async () => ({
         role: UserRole.ADMIN,
-        permissions: null,
+        panelRole: null,
       })),
     };
     const guard = new SectionGuard(reflector, usersService as any);

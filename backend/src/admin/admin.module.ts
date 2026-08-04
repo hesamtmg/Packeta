@@ -6,6 +6,7 @@ import { TransactionsModule } from '../transactions/transactions.module';
 import { InstallmentsModule } from '../installments/installments.module';
 import { LoggingModule } from '../logging/logging.module';
 import { AdminGuardModule } from '../auth/admin-guard.module';
+import { PanelRolesModule } from '../panel-roles/panel-roles.module';
 import { AdminController } from './admin.controller';
 import { BatchImportService } from './batch-import.service';
 import { SectionGuard } from './guards/section.guard';
@@ -19,6 +20,7 @@ import { SectionGuard } from './guards/section.guard';
     InstallmentsModule,
     LoggingModule,
     AdminGuardModule,
+    PanelRolesModule,
   ],
   controllers: [AdminController],
   providers: [BatchImportService, SectionGuard],

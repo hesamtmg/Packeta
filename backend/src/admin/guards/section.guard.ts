@@ -41,7 +41,7 @@ export class SectionGuard implements CanActivate {
     if (user.role === UserRole.SUPER_ADMIN) {
       return true;
     }
-    const granted = user.permissions ?? [];
+    const granted = user.panelRole?.permissions ?? [];
     if (required.some((section) => granted.includes(section))) {
       return true;
     }

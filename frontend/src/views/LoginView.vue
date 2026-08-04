@@ -23,11 +23,11 @@ async function completeAuth(accessToken: string) {
   const me = await apiRequest<{
     role: string;
     email: string;
-    permissions: string[] | null;
+    panelRole: { permissions: string[] } | null;
   }>('/users/me');
   auth.setRole(me.role);
   auth.setEmail(me.email);
-  auth.setPermissions(me.permissions);
+  auth.setPermissions(me.panelRole?.permissions ?? null);
   router.push({ name: 'dashboard' });
 }
 

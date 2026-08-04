@@ -38,12 +38,22 @@ import { serializeWallet } from '../wallets/wallet.serializer';
 import { serializeInstallment } from '../installments/installment.serializer';
 import { AdjustWalletDto } from './dto/adjust-wallet.dto';
 import { UpdateUserRoleDto } from './dto/update-user-role.dto';
-import { UpdateUserPermissionsDto } from './dto/update-user-permissions.dto';
+import { AssignPanelRoleDto } from './dto/assign-panel-role.dto';
 import { AdminCreateChargeDto } from './dto/admin-create-charge.dto';
 import { AdminCreateWalletDto } from './dto/admin-create-wallet.dto';
 import { normalizePhoneNumber } from '../common/phone-number';
 import { SectionGuard } from './guards/section.guard';
 import { RequireSection } from './decorators/require-section.decorator';
+import { PanelRolesService } from '../panel-roles/panel-roles.service';
+import { CreatePanelRoleDto } from '../panel-roles/dto/create-panel-role.dto';
+import { UpdatePanelRoleDto } from '../panel-roles/dto/update-panel-role.dto';
+
+function serializePanelRole(
+  role: { id: string; name: string; permissions: string[] } | null,
+) {
+  if (!role) return null;
+  return { id: role.id, name: role.name, permissions: role.permissions };
+}
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
@@ -62,6 +72,7 @@ export class AdminController {
     private readonly installmentsService: InstallmentsService,
     private readonly loggingService: LoggingService,
     private readonly batchImportService: BatchImportService,
+    private readonly panelRolesService: PanelRolesService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -76,7 +87,7 @@ export class AdminController {
       email: user.email,
       phoneNumber: user.phoneNumber,
       role: user.role,
-      permissions: user.permissions,
+      panelRole: serializePanelRole(user.panelRole),
       createdAt: user.createdAt,
     }));
   }
@@ -94,7 +105,7 @@ export class AdminController {
       email: user.email,
       phoneNumber: user.phoneNumber,
       role: user.role,
-      permissions: user.permissions,
+      panelRole: serializePanelRole(user.panelRole),
       createdAt: user.createdAt,
       wallets: wallets.map((wallet) => serializeWallet(wallet)),
     };
@@ -170,22 +181,59 @@ export class AdminController {
       id: user.id,
       email: user.email,
       role: user.role,
-      permissions: user.permissions,
+      panelRole: serializePanelRole(user.panelRole),
     };
   }
 
-  // Also super-admin-only, same bar as role changes — narrows or widens
-  // which of ADMIN_SECTIONS a regular admin can reach. No-op/rejected for
-  // SUPER_ADMIN accounts (see UsersService.setPermissions), since they
-  // already bypass this system entirely.
-  @Patch('users/:id/permissions')
-  @UseGuards(SuperAdminGuard)
-  async updateUserPermissions(
+  // Assigns (or clears, via panelRoleId: null) a named panel Role to a
+  // regular ADMIN account. Gated by the "roles" section rather than
+  // SuperAdminGuard — this is the capability a super-admin can hand out to
+  // let someone else run the role-management page without making them a
+  // super-admin (who'd bypass sections entirely). It still can't touch
+  // account role (USER/ADMIN/SUPER_ADMIN) — that stays above, super-admin
+  // only.
+  @Patch('users/:id/panel-role')
+  @RequireSection('roles')
+  async assignPanelRole(
     @Param('id') id: string,
-    @Body() dto: UpdateUserPermissionsDto,
+    @Body() dto: AssignPanelRoleDto,
   ) {
-    const user = await this.usersService.setPermissions(id, dto.permissions);
-    return { id: user.id, email: user.email, permissions: user.permissions };
+    const user = await this.usersService.setPanelRole(
+      id,
+      dto.panelRoleId ?? null,
+    );
+    return {
+      id: user.id,
+      email: user.email,
+      panelRole: serializePanelRole(user.panelRole),
+    };
+  }
+
+  // Left ungated, same reasoning as listUsers — anyone who can see the
+  // panel users list should be able to see role names/labels too. Creating,
+  // editing, deleting, and assigning roles is gated below by "roles".
+  @Get('roles')
+  listPanelRoles() {
+    return this.panelRolesService.findAll();
+  }
+
+  @Post('roles')
+  @RequireSection('roles')
+  createPanelRole(@Body() dto: CreatePanelRoleDto) {
+    return this.panelRolesService.create(dto);
+  }
+
+  @Patch('roles/:id')
+  @RequireSection('roles')
+  updatePanelRole(@Param('id') id: string, @Body() dto: UpdatePanelRoleDto) {
+    return this.panelRolesService.update(id, dto);
+  }
+
+  @Delete('roles/:id')
+  @RequireSection('roles')
+  async deletePanelRole(@Param('id') id: string) {
+    await this.panelRolesService.delete(id);
+    return { deleted: true };
   }
 
   @Get('users/:id/transactions')

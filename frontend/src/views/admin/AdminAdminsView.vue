@@ -5,7 +5,7 @@ import { apiRequest, ApiError } from '../../api/client';
 import { amountStep, formatAmount, toMinorUnits, type CurrencyInfo } from '../../utils/currency';
 import { formatDate } from '../../utils/date';
 import { displayIdentity } from '../../utils/identity';
-import { ADMIN_SECTIONS, type AdminUser } from '../../types/admin';
+import { ADMIN_SECTIONS, FULL_ACCESS_ROLE_ID, type AdminUser, type PanelRole } from '../../types/admin';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
 import { useAuthStore } from '../../stores/auth';
 
@@ -53,12 +53,99 @@ const admins = computed(() =>
 );
 const customers = computed(() => users.value.filter((u) => u.role === 'USER'));
 
+// --- Roles: named, reusable bundles of ADMIN_SECTIONS ---
+const roles = ref<PanelRole[]>([]);
+const roleFormError = ref('');
+const roleFormBusy = ref(false);
+const newRoleName = ref('');
+const newRolePermissions = ref<string[]>([]);
+const editingRoleId = ref<string | null>(null);
+const editRoleName = ref('');
+const editRolePermissions = ref<string[]>([]);
+
+async function loadRoles() {
+  try {
+    roles.value = await apiRequest<PanelRole[]>('/admin/roles');
+  } catch (err) {
+    roleFormError.value = err instanceof ApiError ? err.message : t('admin.admins.rolesLoadFailed');
+  }
+}
+
+function toggleInList(list: string[], value: string): string[] {
+  return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
+}
+
+async function createRole() {
+  if (!newRoleName.value.trim()) return;
+  roleFormError.value = '';
+  roleFormBusy.value = true;
+  try {
+    await apiRequest('/admin/roles', {
+      method: 'POST',
+      body: { name: newRoleName.value.trim(), permissions: newRolePermissions.value },
+    });
+    newRoleName.value = '';
+    newRolePermissions.value = [];
+    await loadRoles();
+  } catch (err) {
+    roleFormError.value = err instanceof ApiError ? err.message : t('admin.admins.roleCreateFailed');
+  } finally {
+    roleFormBusy.value = false;
+  }
+}
+
+function startEditRole(role: PanelRole) {
+  editingRoleId.value = role.id;
+  editRoleName.value = role.name;
+  editRolePermissions.value = [...role.permissions];
+}
+
+function cancelEditRole() {
+  editingRoleId.value = null;
+}
+
+async function saveRole(role: PanelRole) {
+  roleFormError.value = '';
+  roleFormBusy.value = true;
+  try {
+    await apiRequest(`/admin/roles/${role.id}`, {
+      method: 'PATCH',
+      body: { name: editRoleName.value.trim(), permissions: editRolePermissions.value },
+    });
+    editingRoleId.value = null;
+    await Promise.all([loadRoles(), load()]);
+  } catch (err) {
+    roleFormError.value = err instanceof ApiError ? err.message : t('admin.admins.roleSaveFailed');
+  } finally {
+    roleFormBusy.value = false;
+  }
+}
+
+async function deleteRole(role: PanelRole) {
+  roleFormError.value = '';
+  roleFormBusy.value = true;
+  try {
+    await apiRequest(`/admin/roles/${role.id}`, { method: 'DELETE' });
+    await Promise.all([loadRoles(), load()]);
+  } catch (err) {
+    roleFormError.value = err instanceof ApiError ? err.message : t('admin.admins.roleDeleteFailed');
+  } finally {
+    roleFormBusy.value = false;
+  }
+}
+
+function roleLabel(user: AdminUser): string {
+  if (user.role === 'SUPER_ADMIN') return t('admin.admins.fullAccess');
+  return user.panelRole?.name ?? t('admin.admins.noRole');
+}
+
+// --- Panel users: expand a row to assign a role + see their wallets ---
 const expandedId = ref<string | null>(null);
 const detail = ref<UserDetail | null>(null);
 const detailError = ref('');
-const permissionsDraft = ref<string[]>([]);
-const permissionsBusy = ref(false);
-const permissionsSuccess = ref('');
+const assignRoleDraft = ref('');
+const assignBusy = ref(false);
+const assignSuccess = ref('');
 
 const openAdjustId = ref<string | null>(null);
 const adjustAmount = ref<Record<string, string>>({});
@@ -113,11 +200,11 @@ async function setRole(user: AdminUser, role: 'USER' | 'ADMIN') {
 async function loadDetail(user: AdminUser) {
   detailError.value = '';
   walletError.value = '';
-  permissionsSuccess.value = '';
+  assignSuccess.value = '';
   try {
     const found = await apiRequest<UserDetail>(`/admin/users/${user.id}`);
     detail.value = found;
-    permissionsDraft.value = [...(found.permissions ?? [])];
+    assignRoleDraft.value = found.panelRole?.id ?? '';
   } catch (err) {
     detailError.value = err instanceof ApiError ? err.message : t('admin.admins.detailFailed');
   }
@@ -134,27 +221,21 @@ async function toggleExpand(user: AdminUser) {
   await loadDetail(user);
 }
 
-function togglePermission(section: string) {
-  const i = permissionsDraft.value.indexOf(section);
-  if (i === -1) permissionsDraft.value.push(section);
-  else permissionsDraft.value.splice(i, 1);
-}
-
-async function savePermissions(user: AdminUser) {
+async function saveAssignment(user: AdminUser) {
   detailError.value = '';
-  permissionsSuccess.value = '';
-  permissionsBusy.value = true;
+  assignSuccess.value = '';
+  assignBusy.value = true;
   try {
-    await apiRequest(`/admin/users/${user.id}/permissions`, {
+    await apiRequest(`/admin/users/${user.id}/panel-role`, {
       method: 'PATCH',
-      body: { permissions: permissionsDraft.value },
+      body: { panelRoleId: assignRoleDraft.value || null },
     });
-    permissionsSuccess.value = t('admin.admins.permissionsSaved');
+    assignSuccess.value = t('admin.admins.assignSaved');
     await Promise.all([load(), loadDetail(user)]);
   } catch (err) {
-    detailError.value = err instanceof ApiError ? err.message : t('admin.admins.permissionsFailed');
+    detailError.value = err instanceof ApiError ? err.message : t('admin.admins.assignFailed');
   } finally {
-    permissionsBusy.value = false;
+    assignBusy.value = false;
   }
 }
 
@@ -246,12 +327,13 @@ function badges(w: Wallet): string[] {
 }
 
 load();
+loadRoles();
 </script>
 
 <template>
   <AdminLayout :title="t('admin.admins.title')">
     <p v-if="error" class="admin-error">{{ error }}</p>
-    <p v-if="!auth.isSuperAdmin" class="hint">{{ t('admin.admins.readOnlyHint') }}</p>
+    <p v-if="!auth.isSuperAdmin && !auth.hasSection('roles')" class="hint">{{ t('admin.admins.readOnlyHint') }}</p>
 
     <div v-if="auth.isSuperAdmin" class="admin-card">
       <h2>{{ t('admin.admins.promoteHeading') }}</h2>
@@ -268,6 +350,78 @@ load();
           {{ t('admin.admins.promoteButton') }}
         </button>
       </div>
+    </div>
+
+    <div v-if="auth.hasSection('roles')" class="admin-card">
+      <h2>{{ t('admin.admins.rolesHeading', { count: roles.length }) }}</h2>
+      <p class="hint">{{ t('admin.admins.rolesHint') }}</p>
+      <p v-if="roleFormError" class="admin-error">{{ roleFormError }}</p>
+
+      <div class="roles-list">
+        <article v-for="role in roles" :key="role.id" class="role-card">
+          <template v-if="editingRoleId === role.id">
+            <input v-model="editRoleName" type="text" class="admin-input" />
+            <div class="permissions-grid">
+              <label v-for="section in ADMIN_SECTIONS" :key="section" class="permission-checkbox">
+                <input
+                  type="checkbox"
+                  :checked="editRolePermissions.includes(section)"
+                  @change="editRolePermissions = toggleInList(editRolePermissions, section)"
+                />
+                {{ t(`adminNav.${section}`) }}
+              </label>
+            </div>
+            <div class="role-card-actions">
+              <button class="admin-btn admin-btn-primary" :disabled="roleFormBusy" @click="saveRole(role)">
+                {{ t('admin.admins.roleSave') }}
+              </button>
+              <button class="admin-btn admin-btn-ghost" @click="cancelEditRole">{{ t('admin.admins.roleCancel') }}</button>
+            </div>
+          </template>
+          <template v-else>
+            <span class="role-name">{{ role.name }}</span>
+            <div class="badges">
+              <span v-for="section in role.permissions" :key="section" class="admin-badge">{{ t(`adminNav.${section}`) }}</span>
+              <span v-if="!role.permissions.length" class="hint">{{ t('admin.admins.roleNoSections') }}</span>
+            </div>
+            <div class="role-card-actions">
+              <button class="admin-btn admin-btn-ghost" @click="startEditRole(role)">{{ t('admin.admins.roleEdit') }}</button>
+              <button
+                v-if="role.id !== FULL_ACCESS_ROLE_ID"
+                class="admin-btn admin-btn-danger"
+                :disabled="roleFormBusy"
+                @click="deleteRole(role)"
+              >
+                {{ t('admin.admins.roleDelete') }}
+              </button>
+            </div>
+          </template>
+        </article>
+      </div>
+
+      <h3>{{ t('admin.admins.roleCreateHeading') }}</h3>
+      <form class="role-create-form" @submit.prevent="createRole">
+        <input
+          v-model="newRoleName"
+          type="text"
+          class="admin-input"
+          :placeholder="t('admin.admins.roleNamePlaceholder')"
+          required
+        />
+        <div class="permissions-grid">
+          <label v-for="section in ADMIN_SECTIONS" :key="section" class="permission-checkbox">
+            <input
+              type="checkbox"
+              :checked="newRolePermissions.includes(section)"
+              @change="newRolePermissions = toggleInList(newRolePermissions, section)"
+            />
+            {{ t(`adminNav.${section}`) }}
+          </label>
+        </div>
+        <button type="submit" class="admin-btn admin-btn-primary" :disabled="roleFormBusy || !newRoleName.trim()">
+          {{ t('admin.admins.roleCreate') }}
+        </button>
+      </form>
     </div>
 
     <div class="admin-card">
@@ -287,12 +441,7 @@ load();
             <tr class="admin-row" @click="toggleExpand(a)">
               <td>{{ displayIdentity(a) }}</td>
               <td>{{ a.role === 'SUPER_ADMIN' ? t('admin.admins.roleSuperAdmin') : t('admin.admins.roleAdmin') }}</td>
-              <td>
-                <span v-if="a.role === 'SUPER_ADMIN'" class="admin-badge">{{ t('admin.admins.fullAccess') }}</span>
-                <span v-else class="admin-badge">
-                  {{ t('admin.admins.sectionsCount', { granted: a.permissions?.length ?? 0, total: ADMIN_SECTIONS.length }) }}
-                </span>
-              </td>
+              <td><span class="admin-badge">{{ roleLabel(a) }}</span></td>
               <td>{{ formatDate(a.createdAt) }}</td>
               <td @click.stop>
                 <span v-if="a.email === auth.email" class="you-badge">{{ t('admin.admins.you') }}</span>
@@ -321,28 +470,23 @@ load();
                 <div class="detail-panel">
                   <p v-if="detailError" class="admin-error">{{ detailError }}</p>
 
-                  <div v-if="a.role === 'ADMIN'" class="permissions-block">
-                    <h3>{{ t('admin.admins.permissionsHeading') }}</h3>
-                    <div class="permissions-grid">
-                      <label v-for="section in ADMIN_SECTIONS" :key="section" class="permission-checkbox">
-                        <input
-                          type="checkbox"
-                          :checked="permissionsDraft.includes(section)"
-                          :disabled="!auth.isSuperAdmin"
-                          @change="togglePermission(section)"
-                        />
-                        {{ t(`adminNav.${section}`) }}
-                      </label>
+                  <div v-if="a.role === 'ADMIN'" class="assign-block">
+                    <h3>{{ t('admin.admins.assignHeading') }}</h3>
+                    <div class="assign-row">
+                      <select v-model="assignRoleDraft" class="admin-input" :disabled="!auth.hasSection('roles')">
+                        <option value="">{{ t('admin.admins.noRole') }}</option>
+                        <option v-for="role in roles" :key="role.id" :value="role.id">{{ role.name }}</option>
+                      </select>
+                      <button
+                        v-if="auth.hasSection('roles')"
+                        class="admin-btn admin-btn-primary"
+                        :disabled="assignBusy"
+                        @click="saveAssignment(a)"
+                      >
+                        {{ t('admin.admins.assignSave') }}
+                      </button>
                     </div>
-                    <button
-                      v-if="auth.isSuperAdmin"
-                      class="admin-btn admin-btn-primary"
-                      :disabled="permissionsBusy"
-                      @click="savePermissions(a)"
-                    >
-                      {{ t('admin.admins.permissionsSave') }}
-                    </button>
-                    <p v-if="permissionsSuccess" class="admins-success">{{ permissionsSuccess }}</p>
+                    <p v-if="assignSuccess" class="admins-success">{{ assignSuccess }}</p>
                   </div>
 
                   <h3>{{ t('admin.admins.walletsHeading') }}</h3>
@@ -433,8 +577,17 @@ load();
 .detail-panel {
   padding: 14px 4px;
 }
-.permissions-block {
+.assign-block {
   margin-bottom: 18px;
+}
+.assign-row {
+  display: flex;
+  gap: 10px;
+  margin: 10px 0;
+}
+.assign-row select {
+  flex: 1;
+  max-width: 320px;
 }
 .permissions-grid {
   display: grid;
@@ -458,6 +611,35 @@ h3 {
   text-transform: uppercase;
   letter-spacing: 0.03em;
   margin: 0 0 10px;
+}
+.roles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 10px 0 20px;
+}
+.role-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+}
+.role-name {
+  font-weight: 700;
+}
+.role-card-actions {
+  display: flex;
+  gap: 8px;
+}
+.role-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.role-create-form .admin-input {
+  max-width: 320px;
 }
 .wallets {
   display: grid;

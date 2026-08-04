@@ -45,7 +45,13 @@ export class UsersController {
       id: found.id,
       email: found.email,
       role: found.role,
-      permissions: found.permissions,
+      panelRole: found.panelRole
+        ? {
+            id: found.panelRole.id,
+            name: found.panelRole.name,
+            permissions: found.panelRole.permissions,
+          }
+        : null,
       phoneNumber: found.phoneNumber,
       name: found.name,
       nationalCode: found.nationalCode,

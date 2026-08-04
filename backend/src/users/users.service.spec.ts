@@ -5,19 +5,41 @@ import {
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { User, UserRole } from './entities/user.entity';
-import { ADMIN_SECTIONS } from '../admin/admin-sections';
+import { PanelRole } from '../panel-roles/entities/panel-role.entity';
+import { ADMIN_SECTIONS, FULL_ACCESS_ROLE_ID } from '../admin/admin-sections';
 
-function buildService(user: Partial<User>) {
+// Simulates the User entity's eager-loaded `panelRole` relation: findOne()
+// always resolves it fresh from the current panelRoleId + the roles table,
+// same as TypeORM would after a raw `.update()` on the FK column.
+function buildService(user: Partial<User>, roles: PanelRole[] = []) {
   const record = { ...user } as User;
+  const rolesById = new Map(roles.map((r) => [r.id, r]));
   const usersRepository = {
-    findOne: jest.fn(async () => record),
+    findOne: jest.fn(async () => ({
+      ...record,
+      panelRole: record.panelRoleId
+        ? (rolesById.get(record.panelRoleId) ?? null)
+        : null,
+    })),
+    update: jest.fn(async (_id: string, patch: Partial<User>) => {
+      Object.assign(record, patch);
+    }),
     save: jest.fn(async (u: User) => {
       Object.assign(record, u);
       return record;
     }),
   };
-  const service = new UsersService(usersRepository as any);
-  return { service, usersRepository, record };
+  const panelRolesRepository = {
+    findOne: jest.fn(
+      async ({ where: { id } }: { where: { id: string } }) =>
+        rolesById.get(id) ?? null,
+    ),
+  };
+  const service = new UsersService(
+    usersRepository as any,
+    panelRolesRepository as any,
+  );
+  return { service, usersRepository, panelRolesRepository, record };
 }
 
 describe('UsersService.updateProfile', () => {
@@ -74,7 +96,11 @@ describe('UsersService.updateProfile', () => {
       findOne: jest.fn(async () => null),
       save: jest.fn(),
     };
-    const service = new UsersService(usersRepository as any);
+    const panelRolesRepository = { findOne: jest.fn() };
+    const service = new UsersService(
+      usersRepository as any,
+      panelRolesRepository as any,
+    );
 
     await expect(
       service.updateProfile('missing', { name: 'X' }),
@@ -82,13 +108,10 @@ describe('UsersService.updateProfile', () => {
   });
 
   it('throws ConflictException when the national code is already taken', async () => {
-    const usersRepository = {
-      findOne: jest.fn(async () => ({ id: 'u1' }) as User),
-      save: jest.fn(async () => {
-        throw { code: '23505' };
-      }),
-    };
-    const service = new UsersService(usersRepository as any);
+    const { service, usersRepository } = buildService({ id: 'u1' });
+    usersRepository.save.mockImplementationOnce(async () => {
+      throw { code: '23505' };
+    });
 
     await expect(
       service.updateProfile('u1', { nationalCode: '1234567890' }),
@@ -123,7 +146,11 @@ describe('UsersService.setAvatar', () => {
       findOne: jest.fn(async () => null),
       save: jest.fn(),
     };
-    const service = new UsersService(usersRepository as any);
+    const panelRolesRepository = { findOne: jest.fn() };
+    const service = new UsersService(
+      usersRepository as any,
+      panelRolesRepository as any,
+    );
 
     await expect(
       service.setAvatar('missing', 'new.png'),
@@ -132,68 +159,124 @@ describe('UsersService.setAvatar', () => {
 });
 
 describe('UsersService.setRole', () => {
-  it('grants every panel section when freshly promoting a USER to ADMIN', async () => {
-    const { service, record } = buildService({
-      id: 'u1',
-      role: UserRole.USER,
-      permissions: null,
-    });
+  const fullAccessRole = {
+    id: FULL_ACCESS_ROLE_ID,
+    name: 'Full Access',
+    permissions: [...ADMIN_SECTIONS],
+  } as PanelRole;
+
+  it('auto-assigns the Full Access role when freshly promoting a USER to ADMIN', async () => {
+    const { service, record } = buildService(
+      { id: 'u1', role: UserRole.USER, panelRoleId: null },
+      [fullAccessRole],
+    );
 
     await service.setRole('u1', UserRole.ADMIN);
 
     expect(record.role).toBe(UserRole.ADMIN);
-    expect(record.permissions).toEqual([...ADMIN_SECTIONS]);
+    expect(record.panelRoleId).toBe(FULL_ACCESS_ROLE_ID);
   });
 
-  it('does not overwrite an existing ADMIN permissions list on a no-op role set', async () => {
-    const { service, record } = buildService({
-      id: 'u1',
-      role: UserRole.ADMIN,
-      permissions: ['wallets'],
-    });
+  it('leaves panelRoleId null when promoting and the Full Access role no longer exists', async () => {
+    const { service, record } = buildService(
+      { id: 'u1', role: UserRole.USER, panelRoleId: null },
+      [],
+    );
 
     await service.setRole('u1', UserRole.ADMIN);
 
-    expect(record.permissions).toEqual(['wallets']);
+    expect(record.role).toBe(UserRole.ADMIN);
+    expect(record.panelRoleId).toBeNull();
   });
 
-  it('leaves permissions untouched when demoting to USER', async () => {
-    const { service, record } = buildService({
-      id: 'u1',
-      role: UserRole.ADMIN,
+  it('does not overwrite an already-assigned role on a no-op role set', async () => {
+    const customRole = {
+      id: 'r2',
+      name: 'Support',
       permissions: ['wallets'],
-    });
+    } as PanelRole;
+    const { service, record } = buildService(
+      { id: 'u1', role: UserRole.ADMIN, panelRoleId: 'r2' },
+      [fullAccessRole, customRole],
+    );
+
+    await service.setRole('u1', UserRole.ADMIN);
+
+    expect(record.panelRoleId).toBe('r2');
+  });
+
+  it('leaves the assigned role untouched when demoting to USER', async () => {
+    const customRole = {
+      id: 'r2',
+      name: 'Support',
+      permissions: ['wallets'],
+    } as PanelRole;
+    const { service, record } = buildService(
+      { id: 'u1', role: UserRole.ADMIN, panelRoleId: 'r2' },
+      [customRole],
+    );
 
     await service.setRole('u1', UserRole.USER);
 
     expect(record.role).toBe(UserRole.USER);
-    expect(record.permissions).toEqual(['wallets']);
+    expect(record.panelRoleId).toBe('r2');
   });
 });
 
-describe('UsersService.setPermissions', () => {
-  it('replaces the permissions list for a regular ADMIN', async () => {
-    const { service, record } = buildService({
-      id: 'u1',
-      role: UserRole.ADMIN,
-      permissions: ['wallets'],
-    });
+describe('UsersService.setPanelRole', () => {
+  it('assigns an existing role to a regular ADMIN', async () => {
+    const role = {
+      id: 'r1',
+      name: 'Support',
+      permissions: ['wallets', 'customers'],
+    } as PanelRole;
+    const { service, record } = buildService(
+      { id: 'u1', role: UserRole.ADMIN, panelRoleId: null },
+      [role],
+    );
 
-    await service.setPermissions('u1', ['customers', 'reports']);
+    await service.setPanelRole('u1', 'r1');
 
-    expect(record.permissions).toEqual(['customers', 'reports']);
+    expect(record.panelRoleId).toBe('r1');
   });
 
-  it('rejects narrowing permissions on a SUPER_ADMIN account', async () => {
+  it('clears the role when passed null', async () => {
+    const role = {
+      id: 'r1',
+      name: 'Support',
+      permissions: ['wallets'],
+    } as PanelRole;
+    const { service, record } = buildService(
+      { id: 'u1', role: UserRole.ADMIN, panelRoleId: 'r1' },
+      [role],
+    );
+
+    await service.setPanelRole('u1', null);
+
+    expect(record.panelRoleId).toBeNull();
+  });
+
+  it('rejects assigning a role to a SUPER_ADMIN account', async () => {
     const { service } = buildService({
       id: 'u1',
       role: UserRole.SUPER_ADMIN,
-      permissions: null,
+      panelRoleId: null,
     });
 
+    await expect(service.setPanelRole('u1', null)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
+  it('throws NotFoundException when the role does not exist', async () => {
+    const { service } = buildService(
+      { id: 'u1', role: UserRole.ADMIN, panelRoleId: null },
+      [],
+    );
+
     await expect(
-      service.setPermissions('u1', ['wallets']),
-    ).rejects.toBeInstanceOf(BadRequestException);
+      service.setPanelRole('u1', 'missing-role'),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('throws NotFoundException when the user does not exist', async () => {
@@ -201,10 +284,14 @@ describe('UsersService.setPermissions', () => {
       findOne: jest.fn(async () => null),
       save: jest.fn(),
     };
-    const service = new UsersService(usersRepository as any);
+    const panelRolesRepository = { findOne: jest.fn() };
+    const service = new UsersService(
+      usersRepository as any,
+      panelRolesRepository as any,
+    );
 
-    await expect(
-      service.setPermissions('missing', ['wallets']),
-    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.setPanelRole('missing', null)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });

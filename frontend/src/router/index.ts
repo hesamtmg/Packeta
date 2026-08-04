@@ -91,7 +91,13 @@ const router = createRouter({
       path: '/admin/admins',
       name: 'admin-admins',
       component: AdminAdminsView,
-      meta: { requiresAuth: true, requiresAdmin: true, requiresSection: 'admins' },
+      meta: {
+        requiresAuth: true,
+        requiresAdmin: true,
+        // Any-of: "admins" to view panel users, "roles" to manage Roles —
+        // see AdminLayout.vue's nav filter for the same pairing.
+        requiresSection: ['admins', 'roles'],
+      },
     },
     {
       path: '/admin/wallet-types',
@@ -134,9 +140,12 @@ router.beforeEach((to) => {
   if (to.meta.requiresAdmin && !auth.isAdmin) {
     return { name: 'dashboard' };
   }
-  const requiredSection = to.meta.requiresSection as string | undefined;
-  if (requiredSection && !auth.hasSection(requiredSection)) {
-    return { name: 'admin-dashboard' };
+  const requiredSection = to.meta.requiresSection as string | string[] | undefined;
+  if (requiredSection) {
+    const required = Array.isArray(requiredSection) ? requiredSection : [requiredSection];
+    if (!required.some((section) => auth.hasSection(section))) {
+      return { name: 'admin-dashboard' };
+    }
   }
   return true;
 });

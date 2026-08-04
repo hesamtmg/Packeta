@@ -7,13 +7,16 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User, UserRole } from './entities/user.entity';
-import { ADMIN_SECTIONS } from '../admin/admin-sections';
+import { PanelRole } from '../panel-roles/entities/panel-role.entity';
+import { FULL_ACCESS_ROLE_ID } from '../admin/admin-sections';
 
 @Injectable()
 export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
+    @InjectRepository(PanelRole)
+    private readonly panelRolesRepository: Repository<PanelRole>,
   ) {}
 
   findByEmail(email: string): Promise<User | null> {
@@ -109,31 +112,51 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException('User not found');
     }
-    // A freshly-promoted ADMIN starts with every section granted — matches
-    // what "being an admin" meant before this permission system existed.
-    // A super-admin can narrow it down afterwards via setPermissions.
+    await this.usersRepository.update(id, { role });
+
+    // A freshly-promoted ADMIN starts on the Full Access role — matches
+    // what "being an admin" meant before this permission system existed. A
+    // super-admin (or anyone holding the "roles" section) can reassign it
+    // afterwards via setPanelRole. Best-effort: if that seeded role was
+    // deleted, promotion still succeeds, just with no role assigned yet.
+    // Uses a raw column update rather than save() on the loaded entity —
+    // user.panelRole is an eager-loaded relation object, and mixing that
+    // with a direct panelRoleId change on the same entity is ambiguous for
+    // TypeORM's persister.
     if (
       role === UserRole.ADMIN &&
       user.role !== UserRole.ADMIN &&
-      !user.permissions?.length
+      !user.panelRoleId
     ) {
-      user.permissions = [...ADMIN_SECTIONS];
+      const fullAccess = await this.panelRolesRepository.findOne({
+        where: { id: FULL_ACCESS_ROLE_ID },
+      });
+      if (fullAccess) {
+        await this.usersRepository.update(id, { panelRoleId: fullAccess.id });
+      }
     }
-    user.role = role;
-    return this.usersRepository.save(user);
+    return (await this.findById(id))!;
   }
 
-  async setPermissions(id: string, permissions: string[]): Promise<User> {
+  async setPanelRole(id: string, panelRoleId: string | null): Promise<User> {
     const user = await this.findById(id);
     if (!user) {
       throw new NotFoundException('User not found');
     }
     if (user.role !== UserRole.ADMIN) {
       throw new BadRequestException(
-        'Only regular ADMIN accounts have grantable panel sections — SUPER_ADMIN already has full access',
+        'Only regular ADMIN accounts can be assigned a panel role — SUPER_ADMIN already has full access',
       );
     }
-    user.permissions = permissions;
-    return this.usersRepository.save(user);
+    if (panelRoleId) {
+      const role = await this.panelRolesRepository.findOne({
+        where: { id: panelRoleId },
+      });
+      if (!role) {
+        throw new NotFoundException('Role not found');
+      }
+    }
+    await this.usersRepository.update(id, { panelRoleId });
+    return (await this.findById(id))!;
   }
 }

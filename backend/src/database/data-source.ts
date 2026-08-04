@@ -6,6 +6,7 @@ import { WalletType } from '../wallet-types/entities/wallet-type.entity';
 import { Currency } from '../currencies/entities/currency.entity';
 import { Transaction } from '../transactions/entities/transaction.entity';
 import { IdempotencyKey } from '../idempotency/entities/idempotency-key.entity';
+import { PanelRole } from '../panel-roles/entities/panel-role.entity';
 
 export const AppDataSource = new DataSource({
   type: 'postgres',
@@ -14,7 +15,15 @@ export const AppDataSource = new DataSource({
   username: process.env.DB_USERNAME ?? 'packeta',
   password: process.env.DB_PASSWORD ?? 'packeta',
   database: process.env.DB_DATABASE ?? 'packeta',
-  entities: [User, Wallet, WalletType, Currency, Transaction, IdempotencyKey],
+  entities: [
+    User,
+    Wallet,
+    WalletType,
+    Currency,
+    Transaction,
+    IdempotencyKey,
+    PanelRole,
+  ],
   migrations: [__dirname + '/migrations/*.{ts,js}'],
   synchronize: false,
 });

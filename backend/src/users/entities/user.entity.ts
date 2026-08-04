@@ -3,17 +3,20 @@ import {
   CreateDateColumn,
   Entity,
   Index,
+  JoinColumn,
+  ManyToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { PanelRole } from '../../panel-roles/entities/panel-role.entity';
 
 // SUPER_ADMIN sits above ADMIN: it can do everything a regular admin can,
 // plus the two things a regular admin can't — promote/demote other admins,
 // and manage wallet types (create/edit/delete the "laws" every wallet is
-// bound by). SUPER_ADMIN also bypasses the `permissions` section system
-// below entirely (see SectionGuard) — a regular ADMIN's access to the rest
-// of the panel (customers, wallets, transactions, reports, etc.) is scoped
-// by whichever of ADMIN_SECTIONS they've been granted.
+// bound by). SUPER_ADMIN also bypasses the panel-role section system below
+// entirely (see SectionGuard) — a regular ADMIN's access to the rest of the
+// panel (customers, wallets, transactions, reports, etc.) is scoped by
+// whichever ADMIN_SECTIONS their assigned PanelRole grants.
 export enum UserRole {
   USER = 'USER',
   ADMIN = 'ADMIN',
@@ -35,12 +38,18 @@ export class User {
   @Column({ type: 'enum', enum: UserRole, default: UserRole.USER })
   role: UserRole;
 
-  // Which ADMIN_SECTIONS this account can reach, meaningful only when
-  // role === ADMIN (SUPER_ADMIN bypasses it, USER never checks it). Null/
-  // empty means no panel sections beyond the always-visible dashboard —
-  // see UsersService.setPermissions and SectionGuard.
-  @Column({ type: 'simple-array', nullable: true })
-  permissions: string[] | null;
+  // Which named PanelRole (a reusable bundle of ADMIN_SECTIONS) this
+  // account has, meaningful only when role === ADMIN (SUPER_ADMIN bypasses
+  // it, USER never checks it). Null means no panel sections beyond the
+  // always-visible dashboard — see UsersService.setPanelRole and
+  // SectionGuard. Eager-loaded so every findById() carries it without
+  // separate plumbing at each call site (e.g. SectionGuard).
+  @Column({ type: 'uuid', nullable: true })
+  panelRoleId: string | null;
+
+  @ManyToOne(() => PanelRole, { eager: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'panelRoleId' })
+  panelRole: PanelRole | null;
 
   // Used by the IPG's phone+OTP customer identification step (see
   // PurchaseGatewayController) to look up which account — and therefore

@@ -1,9 +1,11 @@
 import type { CurrencyInfo } from '../utils/currency';
 
 // Mirrors backend/src/admin/admin-sections.ts — the panel sections a
-// regular ADMIN's access can be scoped to. SUPER_ADMIN always has every
-// section; "dashboard" isn't in this list because it's always visible to
-// any admin/super-admin and isn't individually grantable.
+// regular ADMIN's access can be scoped to (via an assigned PanelRole).
+// SUPER_ADMIN always has every section; "dashboard" isn't in this list
+// because it's always visible to any admin/super-admin and isn't
+// individually grantable. "roles" is what lets a role's holder create/edit
+// panel Roles and assign them to other admins — see AdminAdminsView.vue.
 export const ADMIN_SECTIONS = [
   'transactions',
   'wallets',
@@ -14,16 +16,27 @@ export const ADMIN_SECTIONS = [
   'installments',
   'schedulerLogs',
   'reports',
+  'roles',
 ] as const;
 
 export type AdminSection = (typeof ADMIN_SECTIONS)[number];
+
+// The seeded, non-deletable role every fresh ADMIN promotion starts on —
+// mirrors backend/src/admin/admin-sections.ts's FULL_ACCESS_ROLE_ID.
+export const FULL_ACCESS_ROLE_ID = '00000000-0000-0000-0000-000000000001';
+
+export interface PanelRole {
+  id: string;
+  name: string;
+  permissions: string[];
+}
 
 export interface AdminUser {
   id: string;
   email: string;
   phoneNumber: string | null;
   role: 'USER' | 'ADMIN' | 'SUPER_ADMIN';
-  permissions: string[] | null;
+  panelRole: PanelRole | null;
   createdAt: string;
 }
 

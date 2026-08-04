@@ -15,13 +15,23 @@ const auth = useAuthStore();
 const { t } = useI18n();
 
 // section: undefined means always visible (the dashboard landing page);
-// everything else is filtered by auth.hasSection() so a regular admin's
-// nav only shows the panel sections a super-admin has granted them — see
-// backend/src/admin/admin-sections.ts.
-const allNavItems = computed(() => [
+// an array means any-of (the "Admins" page is reachable with either the
+// "admins" section, for viewing panel users, or "roles", for managing
+// Roles without necessarily being able to view individual admin detail);
+// everything else is a single section, filtered by auth.hasSection() so a
+// regular admin's nav only shows the panel sections their assigned Role
+// grants — see backend/src/admin/admin-sections.ts.
+interface NavItem {
+  name: string;
+  section: string | string[] | undefined;
+  label: string;
+  icon: string;
+}
+
+const allNavItems = computed<NavItem[]>(() => [
   {
     name: 'admin-dashboard',
-    section: undefined as string | undefined,
+    section: undefined,
     label: t('adminNav.dashboard'),
     icon: 'M3 3h7v9H3V3zm11 0h7v5h-7V3zM3 15h7v6H3v-6zm11 3h7v3h-7v-3z',
   },
@@ -45,7 +55,7 @@ const allNavItems = computed(() => [
   },
   {
     name: 'admin-admins',
-    section: 'admins',
+    section: ['admins', 'roles'],
     label: t('adminNav.admins'),
     icon: 'M12 3l7 3v6c0 4.5-3 7.7-7 9-4-1.3-7-4.5-7-9V6l7-3z',
   },
@@ -82,7 +92,11 @@ const allNavItems = computed(() => [
 ]);
 
 const navItems = computed(() =>
-  allNavItems.value.filter((item) => !item.section || auth.hasSection(item.section)),
+  allNavItems.value.filter((item) => {
+    if (!item.section) return true;
+    const required = Array.isArray(item.section) ? item.section : [item.section];
+    return required.some((section) => auth.hasSection(section));
+  }),
 );
 
 const initials = computed(() => (auth.email ?? '?').slice(0, 1).toUpperCase());
@@ -98,9 +112,12 @@ function logout() {
 // panel navigation instead of being stuck until they log out.
 onMounted(async () => {
   try {
-    const me = await apiRequest<{ role: string; permissions: string[] | null }>('/users/me');
+    const me = await apiRequest<{
+      role: string;
+      panelRole: { permissions: string[] } | null;
+    }>('/users/me');
     auth.setRole(me.role);
-    auth.setPermissions(me.permissions);
+    auth.setPermissions(me.panelRole?.permissions ?? null);
   } catch {
     // Non-critical — the nav just keeps whatever it had cached.
   }
