@@ -1962,7 +1962,13 @@ describe('TransactionsService overdue-collection methods', () => {
     });
 
     await expect(
-      service.collectOverdueFromRepository('admin-1', 'credit-1', 'idem-1'),
+      service.collectOverdueFromRepository(
+        'admin-1',
+        'credit-1',
+        'Wrote off as uncollectable',
+        null,
+        'idem-1',
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -1972,6 +1978,8 @@ describe('TransactionsService overdue-collection methods', () => {
     const result = await service.collectOverdueFromRepository(
       'admin-1',
       'credit-1',
+      'Wrote off as uncollectable',
+      null,
       'idem-2',
     );
 
@@ -2051,6 +2059,8 @@ describe('TransactionsService overdue-collection methods', () => {
     const result = await service.collectOverdueFromRepository(
       'admin-1',
       'credit-1',
+      'Wrote off as uncollectable',
+      null,
       'idem-2b',
     );
 
@@ -2112,34 +2122,45 @@ describe('TransactionsService overdue-collection methods', () => {
     );
 
     await expect(
-      service.collectOverdueFromRepository('admin-1', 'credit-1', 'idem-3'),
+      service.collectOverdueFromRepository(
+        'admin-1',
+        'credit-1',
+        'Wrote off as uncollectable',
+        null,
+        'idem-3',
+      ),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 
-  it('collectOverdueManually records the description and document reference without moving any balance', async () => {
+  it('collectOverdueFromRepository records the description and document reference as evidence for the write-off', async () => {
     const { service, manager, installmentsService } = buildOverdueService();
 
-    const result = await service.collectOverdueManually(
+    const result = await service.collectOverdueFromRepository(
       'admin-1',
       'credit-1',
-      'Paid via bank transfer',
-      'receipt-123.pdf',
+      'Customer unreachable, approved by finance',
+      'approval-123.pdf',
       'idem-4',
     );
 
-    expect(result.balance).toBe('0');
+    // No sub-repositories configured, so nothing actually leaves the
+    // repository — same balance as the plain write-off test — but the note
+    // now carries the justification and document reference.
+    expect(result.balance).toBe('5000');
     expect(manager.save).toHaveBeenCalledWith(
       expect.objectContaining({
         type: TransactionType.ADJUSTMENT,
-        fromWalletId: null,
+        fromWalletId: 'repo-1',
         toWalletId: null,
-        amount: '750',
-        note: expect.stringContaining('Paid via bank transfer'),
+        amount: '150',
+        note: expect.stringContaining(
+          'Customer unreachable, approved by finance',
+        ),
       }),
     );
     expect(manager.save).toHaveBeenCalledWith(
       expect.objectContaining({
-        note: expect.stringContaining('receipt-123.pdf'),
+        note: expect.stringContaining('approval-123.pdf'),
       }),
     );
     expect(installmentsService.markAllPaidAndUnblock).toHaveBeenCalledWith(

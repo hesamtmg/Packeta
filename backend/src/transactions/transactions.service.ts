@@ -793,7 +793,7 @@ export class TransactionsService {
     transaction.amount = toRepository.toString();
   }
 
-  // Overdue-collection method 1 of 3 (see InstallmentsService
+  // Overdue-collection method 1 of 2 (see InstallmentsService
   // .applyOverduePenalties for how a wallet ends up blocked in the first
   // place): an admin sends the customer a real ZarinPal payment link for
   // the wallet's entire outstanding balance in one charge. Unlike
@@ -866,7 +866,7 @@ export class TransactionsService {
     );
   }
 
-  // Overdue-collection method 2 of 3: the repository owner decides to just
+  // Overdue-collection method 2 of 2: the repository owner decides to just
   // absorb the customer's unpaid balance out of the repository's own real
   // funds — no money moves from the customer at all. Debits the
   // repository's real balance for the full outstanding total (rejecting if
@@ -875,16 +875,22 @@ export class TransactionsService {
   // functionally the same kind of admin-directed correction, just always
   // tied to a specific overdue wallet), and settles every outstanding
   // installment immediately — no ZarinPal round-trip needed since nothing
-  // is pending verification.
+  // is pending verification. Since real money leaves the repository here
+  // (unlike the old off-system "manual settlement" method this absorbed),
+  // the admin must justify it with a description, optionally backed by an
+  // uploaded document reference — both fold into the ADJUSTMENT row's note
+  // as the audit trail for the write-off.
   async collectOverdueFromRepository(
     adminUserId: string,
     walletId: string,
+    description: string,
+    documentReference: string | null,
     idempotencyKey: string,
   ): Promise<MoneyResult> {
     return this.run(
       'overdue_collect_repository',
       adminUserId,
-      { walletId },
+      { walletId, description, documentReference },
       idempotencyKey,
       async (manager) => {
         const { creditWallet, outstanding } =
@@ -936,7 +942,10 @@ export class TransactionsService {
           toWalletId: null,
           amount: (fee + penalty + unblockFee).toString(),
           idempotencyKey,
-          note: `Overdue collection: repository absorbed the debt for wallet ${walletId} (principal written off; fee/penalty/unblock fee routed to their repositories)`,
+          note: (documentReference
+            ? `Overdue collection: repository absorbed the debt for wallet ${walletId} (principal written off; fee/penalty/unblock fee routed to their repositories). ${description} (document: ${documentReference})`
+            : `Overdue collection: repository absorbed the debt for wallet ${walletId} (principal written off; fee/penalty/unblock fee routed to their repositories). ${description}`
+          ).slice(0, 500),
           performedByUserId: adminUserId,
         });
         await manager.save(transaction);
@@ -952,58 +961,6 @@ export class TransactionsService {
           fromWalletId: repository.id,
           toWalletId: null,
           balance: newRepositoryBalance.toString(),
-        };
-      },
-    );
-  }
-
-  // Overdue-collection method 3 of 3: the admin confirms the debt was
-  // settled by some means outside the system entirely (bank transfer, cash,
-  // whatever) — no real balance moves anywhere. The uploaded document is
-  // just a filename reference for the audit trail; description +
-  // documentReference both fold into the ADJUSTMENT row's note. Every
-  // outstanding installment is marked paid on the strength of the admin's
-  // confirmation alone.
-  async collectOverdueManually(
-    adminUserId: string,
-    walletId: string,
-    description: string,
-    documentReference: string | null,
-    idempotencyKey: string,
-  ): Promise<MoneyResult> {
-    return this.run(
-      'overdue_collect_manual',
-      adminUserId,
-      { walletId, description, documentReference },
-      idempotencyKey,
-      async (manager) => {
-        const { totalOwed } = await this.loadOverdueCollectionContext(walletId);
-
-        const note = documentReference
-          ? `Overdue collection (manual): ${description} (document: ${documentReference})`
-          : `Overdue collection (manual): ${description}`;
-        const transaction = manager.create(Transaction, {
-          type: TransactionType.ADJUSTMENT,
-          fromWalletId: null,
-          toWalletId: null,
-          amount: totalOwed.toString(),
-          idempotencyKey,
-          note: note.slice(0, 500),
-          performedByUserId: adminUserId,
-        });
-        await manager.save(transaction);
-
-        await this.installmentsService.markAllPaidAndUnblock(
-          manager,
-          walletId,
-          transaction.id,
-        );
-
-        return {
-          transactionId: transaction.id,
-          fromWalletId: null,
-          toWalletId: null,
-          balance: '0',
         };
       },
     );
@@ -2260,8 +2217,7 @@ export class TransactionsService {
       | 'purchase_reverse'
       | 'installment_pay'
       | 'overdue_collect_zarinpal'
-      | 'overdue_collect_repository'
-      | 'overdue_collect_manual',
+      | 'overdue_collect_repository',
     userId: string,
     payload: Record<string, unknown>,
     idempotencyKey: string,
