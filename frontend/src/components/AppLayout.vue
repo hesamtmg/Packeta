@@ -68,7 +68,8 @@ function logout() {
               {{ t('nav.adminPanel') }}
             </router-link>
             <LanguageSwitcher />
-            <div class="admin-avatar">{{ initials }}</div>
+            {{ auth.email }}
+            <div class="admin-avatar">{{ initials }}</div> 
           </div>
         </header>
 
