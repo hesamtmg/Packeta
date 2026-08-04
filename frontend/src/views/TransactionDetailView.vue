@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import { apiRequest, ApiError } from '../api/client';
 import { formatAmount, type CurrencyInfo } from '../utils/currency';
+import { formatDateTime } from '../utils/date';
 import AppLayout from '../components/AppLayout.vue';
 
 const { t } = useI18n();
@@ -120,7 +121,7 @@ onMounted(load);
         </template>
         <template v-if="transaction.status === 'PENDING' && transaction.expiresAt">
           <dt>{{ t('transaction.verifyBy') }}</dt>
-          <dd>{{ new Date(transaction.expiresAt).toLocaleString() }}</dd>
+          <dd>{{ formatDateTime(transaction.expiresAt) }}</dd>
         </template>
         <template v-if="transaction.relatedTransactionId">
           <dt>{{ t('transaction.relatedTransaction') }}</dt>
@@ -135,7 +136,7 @@ onMounted(load);
         <dt>{{ t('transaction.transactionId') }}</dt>
         <dd class="mono">{{ transaction.id }}</dd>
         <dt>{{ t('transaction.date') }}</dt>
-        <dd>{{ new Date(transaction.createdAt).toLocaleString() }}</dd>
+        <dd>{{ formatDateTime(transaction.createdAt) }}</dd>
       </dl>
 
       <button v-if="canRefund" class="admin-btn admin-btn-danger" :disabled="busy" @click="onRefund">

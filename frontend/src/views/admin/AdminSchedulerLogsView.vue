@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../../api/client';
+import { formatDateTime } from '../../utils/date';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
 
 interface SchedulerLogEntry {
@@ -53,7 +54,7 @@ onMounted(load);
           <tr v-for="log in logs" :key="log._id">
             <td><span class="admin-badge">{{ actionLabel(log.action) }}</span></td>
             <td class="mono">{{ log.metadata ? JSON.stringify(log.metadata) : '' }}</td>
-            <td>{{ new Date(log.createdAt).toLocaleString() }}</td>
+            <td>{{ formatDateTime(log.createdAt) }}</td>
           </tr>
           <tr v-if="!logs.length"><td colspan="3">{{ t('admin.schedulerLogs.none') }}</td></tr>
         </tbody>

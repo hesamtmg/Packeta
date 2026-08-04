@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router';
 import { useWalletStore, type Installment } from '../stores/wallet';
 import { ApiError } from '../api/client';
 import { formatAmount } from '../utils/currency';
+import { formatCalendarDate, formatMonth } from '../utils/date';
 import AppLayout from '../components/AppLayout.vue';
 
 const wallet = useWalletStore();
@@ -110,7 +111,7 @@ onMounted(load);
         <tbody>
           <template v-for="group in monthGroups" :key="group.monthKey">
             <tr>
-              <td>{{ group.monthKey }}</td>
+              <td>{{ formatMonth(group.monthKey) }}</td>
               <td>{{ thisWallet ? formatAmount(group.totalAmount, thisWallet.walletType.currency) : group.totalAmount }}</td>
               <td>
                 <span class="admin-badge" :class="`installment-status-${group.worstStatus.toLowerCase()}`">{{ installmentStatusLabel(group.worstStatus) }}</span>
@@ -138,8 +139,8 @@ onMounted(load);
                 <div v-for="i in group.installments" :key="i.id" class="installment-detail-card">
                   <div class="installment-detail-header">
                     <span>#{{ i.sequenceNumber }}</span>
-                    <span>{{ t('dashboard.installments.dueDate') }}: {{ i.dueDate }}</span>
-                    <span>{{ t('dashboard.installments.deadlineDate') }}: {{ i.deadlineDate }}</span>
+                    <span>{{ t('dashboard.installments.dueDate') }}: {{ formatCalendarDate(i.dueDate) }}</span>
+                    <span>{{ t('dashboard.installments.deadlineDate') }}: {{ formatCalendarDate(i.deadlineDate) }}</span>
                     <span>{{ thisWallet ? formatAmount(i.amount, thisWallet.walletType.currency) : i.amount }}</span>
                     <span class="admin-badge" :class="`installment-status-${i.status.toLowerCase()}`">{{ installmentStatusLabel(i.status) }}</span>
                     <button

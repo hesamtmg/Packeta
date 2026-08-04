@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../../api/client';
 import { amountStep, formatAmount, toMinorUnits } from '../../utils/currency';
+import { formatDate } from '../../utils/date';
 import { displayIdentity } from '../../utils/identity';
 import type { AdminWallet } from '../../types/admin';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
@@ -107,7 +108,7 @@ onMounted(load);
               <td>{{ w.walletType.name }}</td>
               <td>{{ w.walletType.currency.code }}</td>
               <td>{{ formatAmount(w.balance, w.walletType.currency) }}</td>
-              <td>{{ new Date(w.createdAt).toLocaleDateString() }}</td>
+              <td>{{ formatDate(w.createdAt) }}</td>
               <td>
                 <span class="admin-badge" :class="{ 'status-closed': w.closedAt }">
                   {{ w.closedAt ? t('admin.wallets.statusClosed') : t('admin.wallets.statusActive') }}

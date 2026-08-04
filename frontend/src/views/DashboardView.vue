@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { useWalletStore, type Wallet, type WalletOptionsInput, type SettlementRailType } from '../stores/wallet';
 import { apiRequest, ApiError } from '../api/client';
 import { amountStep, formatAmount, toMinorUnits, type CurrencyInfo } from '../utils/currency';
+import { formatDateTime } from '../utils/date';
 import AppLayout from '../components/AppLayout.vue';
 import MiniLineChart from '../components/admin/MiniLineChart.vue';
 
@@ -662,7 +663,7 @@ async function onGrantCredit() {
           <h2>{{ t('dashboard.latestTransactionHeading') }}</h2>
           <div class="latest-amount">{{ formatTransactionAmount(latestTransaction) }}</div>
           <div class="latest-meta">{{ describeTransaction(latestTransaction) }}</div>
-          <div class="latest-meta">{{ new Date(latestTransaction.createdAt).toLocaleString() }}</div>
+          <div class="latest-meta">{{ formatDateTime(latestTransaction.createdAt) }}</div>
         </div>
       </div>
     </div>
@@ -1134,7 +1135,7 @@ async function onGrantCredit() {
           <tr v-for="tx in wallet.transactions" :key="tx.id" class="tx-row-clickable" @click="$router.push({ name: 'transaction-detail', params: { id: tx.id } })">
             <td>{{ describeTransaction(tx) }}</td>
             <td>{{ formatTransactionAmount(tx) }}</td>
-            <td>{{ new Date(tx.createdAt).toLocaleString() }}</td>
+            <td>{{ formatDateTime(tx.createdAt) }}</td>
           </tr>
           <tr v-if="!wallet.transactions.length"><td colspan="3">{{ t('dashboard.history.empty') }}</td></tr>
         </tbody>

@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../../api/client';
 import { useAuthStore } from '../../stores/auth';
+import { formatDate } from '../../utils/date';
 import { displayIdentity } from '../../utils/identity';
 import type { AdminUser } from '../../types/admin';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
@@ -103,7 +104,7 @@ onMounted(load);
           <tr v-for="a in admins" :key="a.id">
             <td>{{ displayIdentity(a) }}</td>
             <td>{{ a.role === 'SUPER_ADMIN' ? t('admin.admins.roleSuperAdmin') : t('admin.admins.roleAdmin') }}</td>
-            <td>{{ new Date(a.createdAt).toLocaleDateString() }}</td>
+            <td>{{ formatDate(a.createdAt) }}</td>
             <td>
               <span v-if="a.email === auth.email" class="you-badge">{{ t('admin.admins.you') }}</span>
               <template v-else-if="auth.isSuperAdmin">

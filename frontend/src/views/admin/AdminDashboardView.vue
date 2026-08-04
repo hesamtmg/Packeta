@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../../api/client';
 import { formatAmount } from '../../utils/currency';
+import { formatDate, formatDateTime } from '../../utils/date';
 import { displayIdentity } from '../../utils/identity';
 import {
   walletLookup,
@@ -126,7 +127,7 @@ onMounted(load);
           <div class="latest-meta">
             {{ latestTransaction.type }} · {{ walletLabel(latestTransaction.toWalletId ?? latestTransaction.fromWalletId) }}
           </div>
-          <div class="latest-meta">{{ new Date(latestTransaction.createdAt).toLocaleString() }}</div>
+          <div class="latest-meta">{{ formatDateTime(latestTransaction.createdAt) }}</div>
         </div>
       </div>
     </div>
@@ -154,7 +155,7 @@ onMounted(load);
             <td>{{ formatTxAmount(tx) }}</td>
             <td>{{ walletLabel(tx.toWalletId ?? tx.fromWalletId) }}</td>
             <td>{{ ownerEmail(tx) }}</td>
-            <td>{{ new Date(tx.createdAt).toLocaleDateString() }}</td>
+            <td>{{ formatDate(tx.createdAt) }}</td>
           </tr>
           <tr v-if="!transactions.length"><td colspan="5">{{ t('admin.dashboard.noTransactions') }}</td></tr>
         </tbody>

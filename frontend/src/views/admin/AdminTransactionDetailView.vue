@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import { apiRequest, ApiError } from '../../api/client';
 import { formatAmount, type CurrencyInfo } from '../../utils/currency';
+import { formatDateTime } from '../../utils/date';
 import { displayIdentity } from '../../utils/identity';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
 
@@ -95,11 +96,11 @@ onMounted(load);
         </template>
         <template v-if="transaction.status === 'PENDING' && transaction.expiresAt">
           <dt>{{ t('transaction.verifyBy') }}</dt>
-          <dd>{{ new Date(transaction.expiresAt).toLocaleString() }}</dd>
+          <dd>{{ formatDateTime(transaction.expiresAt) }}</dd>
         </template>
         <template v-if="transaction.settledAt">
           <dt>{{ t('admin.transactionDetail.settledAt') }}</dt>
-          <dd>{{ new Date(transaction.settledAt).toLocaleString() }}</dd>
+          <dd>{{ formatDateTime(transaction.settledAt) }}</dd>
         </template>
         <template v-if="transaction.destinationIban">
           <dt>{{ t('admin.transactionDetail.destinationIban') }}</dt>
@@ -122,7 +123,7 @@ onMounted(load);
         <dt>{{ t('transaction.transactionId') }}</dt>
         <dd class="mono">{{ transaction.id }}</dd>
         <dt>{{ t('transaction.date') }}</dt>
-        <dd>{{ new Date(transaction.createdAt).toLocaleString() }}</dd>
+        <dd>{{ formatDateTime(transaction.createdAt) }}</dd>
       </dl>
     </section>
   </AdminLayout>

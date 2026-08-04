@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../../api/client';
 import { formatAmount } from '../../utils/currency';
+import { formatDateTime } from '../../utils/date';
 import { displayIdentity } from '../../utils/identity';
 import {
   walletLookup,
@@ -100,7 +101,7 @@ onMounted(load);
               <span v-else>{{ t('common.none') }}</span>
             </td>
             <td>{{ tx.note ?? t('common.none') }}</td>
-            <td>{{ new Date(tx.createdAt).toLocaleString() }}</td>
+            <td>{{ formatDateTime(tx.createdAt) }}</td>
           </tr>
           <tr v-if="!filtered.length"><td colspan="6">{{ t('admin.transactions.noTransactions') }}</td></tr>
         </tbody>

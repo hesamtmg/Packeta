@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError, postMultipart } from '../../api/client';
 import { displayIdentity } from '../../utils/identity';
 import { formatAmount, type CurrencyInfo } from '../../utils/currency';
+import { formatDate, formatCalendarDate } from '../../utils/date';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
 
 interface AdminInstallment {
@@ -160,7 +161,7 @@ onMounted(() => {
             <tr>
               <td>{{ displayIdentity({ email: w.ownerEmail, phoneNumber: w.ownerPhoneNumber }) }}</td>
               <td>{{ w.walletTypeName }}</td>
-              <td>{{ new Date(w.blockedAt).toLocaleDateString() }}</td>
+              <td>{{ formatDate(w.blockedAt) }}</td>
               <td>{{ formatAmount(w.totalOwed, w.currency) }}</td>
               <td class="overdue-actions">
                 <button
@@ -232,7 +233,7 @@ onMounted(() => {
             <td>{{ i.walletTypeName }}</td>
             <td>{{ i.sequenceNumber }}</td>
             <td>{{ formatAmount(i.amount, i.currency) }}</td>
-            <td>{{ i.deadlineDate }}</td>
+            <td>{{ formatCalendarDate(i.deadlineDate) }}</td>
             <td><span class="admin-badge" :class="`installment-status-${i.status.toLowerCase()}`">{{ i.status }}</span></td>
           </tr>
           <tr v-if="!filtered.length"><td colspan="6">{{ t('admin.installments.none') }}</td></tr>

@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../../api/client';
 import { amountStep, formatAmount, toMinorUnits, type CurrencyInfo } from '../../utils/currency';
+import { formatDate, formatDateTime } from '../../utils/date';
 import { displayIdentity } from '../../utils/identity';
 import type { AdminUser } from '../../types/admin';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
@@ -185,7 +186,7 @@ loadWalletTypes();
         <tbody>
           <tr v-for="u in filtered" :key="u.id">
             <td>{{ displayIdentity(u) }}</td>
-            <td>{{ new Date(u.createdAt).toLocaleDateString() }}</td>
+            <td>{{ formatDate(u.createdAt) }}</td>
             <td><button class="admin-btn admin-btn-ghost" @click="selectUser(u.id)">{{ t('admin.customers.view') }}</button></td>
           </tr>
           <tr v-if="!filtered.length"><td colspan="3">{{ t('admin.customers.noCustomers') }}</td></tr>
@@ -274,7 +275,7 @@ loadWalletTypes();
             <td><span class="admin-badge">{{ tx.type }}</span></td>
             <td>{{ transactionCurrency(tx) ? formatAmount(tx.amount, transactionCurrency(tx)!) : tx.amount }}</td>
             <td>{{ tx.note ?? t('common.none') }}</td>
-            <td>{{ new Date(tx.createdAt).toLocaleString() }}</td>
+            <td>{{ formatDateTime(tx.createdAt) }}</td>
           </tr>
           <tr v-if="!transactions.length"><td colspan="4">{{ t('admin.customers.noTransactions') }}</td></tr>
         </tbody>
