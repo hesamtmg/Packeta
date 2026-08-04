@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useWalletStore, type Wallet, type WalletOptionsInput, type SettlementRailType } from '../stores/wallet';
-import { apiRequest, ApiError } from '../api/client';
+import { ApiError } from '../api/client';
 import { amountStep, formatAmount, toMinorUnits, type CurrencyInfo } from '../utils/currency';
 import { formatDateTime } from '../utils/date';
 import AppLayout from '../components/AppLayout.vue';
@@ -10,12 +10,6 @@ import MiniLineChart from '../components/admin/MiniLineChart.vue';
 
 const wallet = useWalletStore();
 const { t } = useI18n();
-
-const phoneNumber = ref('');
-const phoneNumberSaved = ref<string | null>(null);
-const phoneBusy = ref(false);
-const phoneError = ref('');
-const phoneSuccess = ref('');
 
 const chargeAmount = ref('');
 const chargeCurrencyCode = ref('');
@@ -262,32 +256,7 @@ onMounted(async () => {
     wallet.fetchWalletTypes(),
     wallet.fetchTransactions(),
   ]);
-  try {
-    const me = await apiRequest<{ phoneNumber: string | null }>('/users/me');
-    phoneNumberSaved.value = me.phoneNumber;
-    phoneNumber.value = me.phoneNumber ?? '';
-  } catch {
-    // Non-critical — the phone number card just stays blank.
-  }
 });
-
-async function onSavePhoneNumber() {
-  phoneError.value = '';
-  phoneSuccess.value = '';
-  phoneBusy.value = true;
-  try {
-    const result = await apiRequest<{ phoneNumber: string }>('/users/me/phone-number', {
-      method: 'PATCH',
-      body: { phoneNumber: phoneNumber.value },
-    });
-    phoneNumberSaved.value = result.phoneNumber;
-    phoneSuccess.value = t('dashboard.phone.saved');
-  } catch (err) {
-    phoneError.value = err instanceof ApiError ? err.message : t('dashboard.phone.error');
-  } finally {
-    phoneBusy.value = false;
-  }
-}
 
 function addChargeSplitRow() {
   chargeSettlementSplits.value.push({ iban: '', label: '', type: 'PERCENT', value: '' });
@@ -669,24 +638,6 @@ async function onGrantCredit() {
     </div>
 
     <div class="admin-grid admin-grid-2">
-      <div class="admin-card">
-        <h2>{{ t('dashboard.phone.title') }}</h2>
-        <p class="hint">{{ t('dashboard.phone.hint') }}</p>
-        <form class="phone-form" @submit.prevent="onSavePhoneNumber">
-          <input
-            v-model="phoneNumber"
-            type="tel"
-            :placeholder="t('dashboard.phone.placeholder')"
-            class="admin-input"
-            required
-          />
-          <button type="submit" class="admin-btn admin-btn-primary" :disabled="phoneBusy">{{ t('dashboard.phone.save') }}</button>
-        </form>
-        <p v-if="phoneNumberSaved" class="hint">{{ t('dashboard.phone.current', { phone: phoneNumberSaved }) }}</p>
-        <p v-if="phoneError" class="admin-error">{{ phoneError }}</p>
-        <p v-if="phoneSuccess" class="phone-success">{{ phoneSuccess }}</p>
-      </div>
-
       <div v-if="purchaseInCurrencies.length" class="admin-card">
         <h2>{{ t('dashboard.charge.title') }}</h2>
         <p class="hint">{{ t('dashboard.charge.hint') }}</p>
@@ -1338,14 +1289,6 @@ async function onGrantCredit() {
 }
 .tx-row-clickable {
   cursor: pointer;
-}
-.phone-form {
-  display: flex;
-  gap: 8px;
-  margin: 10px 0;
-}
-.phone-form input {
-  flex: 1;
 }
 .charge-form {
   display: flex;

@@ -41,6 +41,25 @@ export class User {
   @Column({ type: 'varchar', length: 20, nullable: true })
   phoneNumber: string | null;
 
+  // Self-service profile fields — see UsersService.updateProfile/setAvatar
+  // and UsersController's PATCH /users/me/profile, POST /users/me/avatar.
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  name: string | null;
+
+  // A personal (not wallet-specific) national ID, distinct from
+  // Wallet.nationalCode — that one is captured per credit wallet at grant
+  // time for KYC on that specific credit line; this is the account holder's
+  // own identity on their profile. Unique when set (see the migration's
+  // partial index), same convention as phoneNumber above.
+  @Column({ type: 'varchar', length: 10, nullable: true })
+  nationalCode: string | null;
+
+  // Filename under uploads/avatars/ (see UsersController.saveAvatar) —
+  // served back at GET /uploads/avatars/<filename> via the static file
+  // mount in app.module.ts. Null means "show initials" on the frontend.
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  avatarFilename: string | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

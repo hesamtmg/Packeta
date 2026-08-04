@@ -7,6 +7,7 @@ export default {
   },
   nav: {
     wallet: 'Wallet',
+    profile: 'Profile',
     adminPanel: 'Admin panel',
     logout: 'Log out',
     backToWallet: 'Back to my wallet',
@@ -69,15 +70,6 @@ export default {
     typesLabel: 'Types',
     activityHeading: 'Activity (14d)',
     latestTransactionHeading: 'Latest transaction',
-    phone: {
-      title: 'Phone number',
-      hint: 'Used so customers can identify themselves by phone + code at the payment page when you charge them.',
-      placeholder: '+15551234567',
-      save: 'Save',
-      current: 'Current: {phone}',
-      saved: 'Saved.',
-      error: 'Failed to save phone number',
-    },
     charge: {
       title: 'Create a charge',
       hint: 'Generates a payment link for a customer — they identify themselves by phone + code at the link, no Packeta account needed.',
@@ -216,6 +208,33 @@ export default {
       amount: 'Amount',
       date: 'Date',
       empty: 'No transactions yet.',
+    },
+  },
+  profile: {
+    title: 'Profile',
+    loadError: 'Failed to load profile',
+    saved: 'Saved.',
+    saveError: 'Failed to save profile',
+    avatar: {
+      title: 'Profile picture',
+      upload: 'Upload',
+      error: 'Failed to upload picture',
+    },
+    details: {
+      title: 'Personal details',
+      hint: 'Your name and national code, shown across your account.',
+      namePlaceholder: 'Full name',
+      nationalCodePlaceholder: 'National code (10 digits)',
+      save: 'Save',
+    },
+    phone: {
+      title: 'Phone number',
+      hint: 'Used so customers can identify themselves by phone + code at the payment page when you charge them.',
+      placeholder: '+15551234567',
+      save: 'Save',
+      current: 'Current: {phone}',
+      saved: 'Saved.',
+      error: 'Failed to save phone number',
     },
   },
   transaction: {

@@ -3,6 +3,7 @@ import { useAuthStore } from '../stores/auth';
 import LoginView from '../views/LoginView.vue';
 import SignupView from '../views/SignupView.vue';
 import DashboardView from '../views/DashboardView.vue';
+import ProfileView from '../views/ProfileView.vue';
 import TransactionDetailView from '../views/TransactionDetailView.vue';
 import WalletInstallmentsView from '../views/WalletInstallmentsView.vue';
 import PurchaseCallbackView from '../views/PurchaseCallbackView.vue';
@@ -27,6 +28,12 @@ const router = createRouter({
       path: '/',
       name: 'dashboard',
       component: DashboardView,
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/profile',
+      name: 'profile',
+      component: ProfileView,
       meta: { requiresAuth: true },
     },
     {

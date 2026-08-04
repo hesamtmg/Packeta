@@ -92,6 +92,17 @@ function logout() {
           </svg>
         </router-link>
         <div class="admin-nav-spacer" />
+        <router-link
+          :to="{ name: 'profile' }"
+          class="admin-nav-icon"
+          :class="{ active: route.name === 'profile' }"
+          :title="t('nav.profile')"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+            <circle cx="12" cy="7" r="4" />
+          </svg>
+        </router-link>
         <router-link :to="{ name: 'dashboard' }" class="admin-nav-icon" :title="t('nav.backToWallet')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M10 19l-7-7 7-7M3 12h18" />
@@ -112,7 +123,7 @@ function logout() {
               {{ t('nav.backToWallet') }}
             </router-link>
             <LanguageSwitcher />
-            <div class="admin-avatar">{{ initials }}</div>
+            <router-link :to="{ name: 'profile' }" class="admin-avatar">{{ initials }}</router-link>
           </div>
         </header>
 

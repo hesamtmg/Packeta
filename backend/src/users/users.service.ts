@@ -50,6 +50,54 @@ export class UsersService {
     }
   }
 
+  async updateProfile(
+    id: string,
+    updates: { name?: string; nationalCode?: string },
+  ): Promise<User> {
+    const user = await this.findById(id);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    if (updates.name !== undefined) {
+      user.name = updates.name.trim() || null;
+    }
+    if (updates.nationalCode !== undefined) {
+      user.nationalCode = updates.nationalCode.length
+        ? updates.nationalCode
+        : null;
+    }
+    try {
+      return await this.usersRepository.save(user);
+    } catch (error) {
+      if ((error as { code?: string }).code === '23505') {
+        throw new ConflictException(
+          'This national code is already registered to another account',
+        );
+      }
+      throw error;
+    }
+  }
+
+  // Returns the previous filename (if any) so the controller can delete the
+  // now-orphaned file off disk after the DB row is updated — never before,
+  // so a failed save doesn't leave the user's row pointing at a deleted file.
+  async setAvatar(
+    id: string,
+    filename: string,
+  ): Promise<{
+    user: User;
+    previousFilename: string | null;
+  }> {
+    const user = await this.findById(id);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    const previousFilename = user.avatarFilename;
+    user.avatarFilename = filename;
+    const saved = await this.usersRepository.save(user);
+    return { user: saved, previousFilename };
+  }
+
   findAll(): Promise<User[]> {
     return this.usersRepository.find({ order: { createdAt: 'ASC' } });
   }
