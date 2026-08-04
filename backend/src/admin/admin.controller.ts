@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   NotFoundException,
@@ -37,14 +38,21 @@ import { serializeWallet } from '../wallets/wallet.serializer';
 import { serializeInstallment } from '../installments/installment.serializer';
 import { AdjustWalletDto } from './dto/adjust-wallet.dto';
 import { UpdateUserRoleDto } from './dto/update-user-role.dto';
+import { UpdateUserPermissionsDto } from './dto/update-user-permissions.dto';
 import { AdminCreateChargeDto } from './dto/admin-create-charge.dto';
 import { AdminCreateWalletDto } from './dto/admin-create-wallet.dto';
 import { normalizePhoneNumber } from '../common/phone-number';
+import { SectionGuard } from './guards/section.guard';
+import { RequireSection } from './decorators/require-section.decorator';
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
+// SectionGuard runs alongside AdminGuard on every route below — it only
+// does something on routes carrying @RequireSection(...); everything else
+// (including every route here without that decorator) stays reachable by
+// any admin/super-admin exactly as before this permission system existed.
 @Controller('admin')
-@UseGuards(JwtAuthGuard, AdminGuard)
+@UseGuards(JwtAuthGuard, AdminGuard, SectionGuard)
 export class AdminController {
   constructor(
     private readonly usersService: UsersService,
@@ -57,6 +65,9 @@ export class AdminController {
     private readonly dataSource: DataSource,
   ) {}
 
+  // Left ungated (no @RequireSection) — every admin/super-admin has always
+  // been able to see who's on the platform; the customers/admins sections
+  // gate the deeper per-user detail and management actions below instead.
   @Get('users')
   async listUsers() {
     const users = await this.usersService.findAll();
@@ -65,11 +76,13 @@ export class AdminController {
       email: user.email,
       phoneNumber: user.phoneNumber,
       role: user.role,
+      permissions: user.permissions,
       createdAt: user.createdAt,
     }));
   }
 
   @Get('users/:id')
+  @RequireSection('customers', 'admins')
   async getUser(@Param('id') id: string) {
     const user = await this.usersService.findById(id);
     if (!user) {
@@ -81,6 +94,7 @@ export class AdminController {
       email: user.email,
       phoneNumber: user.phoneNumber,
       role: user.role,
+      permissions: user.permissions,
       createdAt: user.createdAt,
       wallets: wallets.map((wallet) => serializeWallet(wallet)),
     };
@@ -92,6 +106,7 @@ export class AdminController {
   // see and choose among all of that merchant's eligible wallets rather
   // than having one auto-picked for a single currency.
   @Get('merchants/by-phone')
+  @RequireSection('purchase')
   async getMerchantByPhone(@Query('phone') phone: string) {
     if (!phone) {
       throw new BadRequestException('phone query parameter is required');
@@ -116,6 +131,7 @@ export class AdminController {
   // Creates a charge/payment link on behalf of a merchant the admin looked
   // up by phone — the merchant never has to be logged in for this.
   @Post('purchase/charge')
+  @RequireSection('purchase')
   async createCharge(
     @Body() dto: AdminCreateChargeDto,
     @Headers('idempotency-key') idempotencyKey: string,
@@ -150,14 +166,36 @@ export class AdminController {
       );
     }
     const user = await this.usersService.setRole(id, dto.role);
-    return { id: user.id, email: user.email, role: user.role };
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      permissions: user.permissions,
+    };
+  }
+
+  // Also super-admin-only, same bar as role changes — narrows or widens
+  // which of ADMIN_SECTIONS a regular admin can reach. No-op/rejected for
+  // SUPER_ADMIN accounts (see UsersService.setPermissions), since they
+  // already bypass this system entirely.
+  @Patch('users/:id/permissions')
+  @UseGuards(SuperAdminGuard)
+  async updateUserPermissions(
+    @Param('id') id: string,
+    @Body() dto: UpdateUserPermissionsDto,
+  ) {
+    const user = await this.usersService.setPermissions(id, dto.permissions);
+    return { id: user.id, email: user.email, permissions: user.permissions };
   }
 
   @Get('users/:id/transactions')
+  @RequireSection('customers', 'admins')
   async getUserTransactions(@Param('id') id: string) {
     return this.transactionsService.getHistory(id);
   }
 
+  // Left ungated, same reasoning as listUsers — the dashboard and reports
+  // pages both need this raw list, and neither is section-gated.
   @Get('wallets')
   async listWallets() {
     const wallets = await this.walletsService.listAll();
@@ -169,6 +207,7 @@ export class AdminController {
     }));
   }
 
+  // Left ungated, same reasoning as listWallets.
   @Get('transactions')
   async listTransactions(@Query('limit') limit?: string) {
     const parsedLimit = limit ? parseInt(limit, 10) : undefined;
@@ -176,6 +215,7 @@ export class AdminController {
   }
 
   @Get('transactions/:id')
+  @RequireSection('transactions')
   async getTransaction(@Param('id') id: string) {
     return this.transactionsService.getByIdUnscoped(id);
   }
@@ -183,6 +223,7 @@ export class AdminController {
   // Every installment across every credit wallet, any customer — the panel
   // counterpart to a customer's own per-wallet installments view.
   @Get('installments')
+  @RequireSection('installments')
   async listInstallments() {
     const installments = await this.installmentsService.findAll();
     return installments.map((installment) => ({
@@ -199,6 +240,7 @@ export class AdminController {
   // — the admin panel's queue for the three overdue-collection actions
   // below.
   @Get('installments/overdue')
+  @RequireSection('installments')
   async listOverdueWallets() {
     return this.installmentsService.findBlockedWalletsSummary();
   }
@@ -207,6 +249,7 @@ export class AdminController {
   // for the wallet's entire outstanding balance — see
   // TransactionsService.initiateOverdueCollectionZarinPal.
   @Post('installments/:walletId/collect/zarinpal')
+  @RequireSection('installments')
   async collectOverdueZarinPal(
     @CurrentUser() user: AuthenticatedUser,
     @Param('walletId') walletId: string,
@@ -227,6 +270,7 @@ export class AdminController {
   // a proof document, stored on disk purely as an audit reference — nothing
   // reads it back through the API.
   @Post('installments/:walletId/collect/repository')
+  @RequireSection('installments')
   @UseInterceptors(
     FileInterceptor('document', { limits: { fileSize: MAX_UPLOAD_BYTES } }),
   )
@@ -279,12 +323,14 @@ export class AdminController {
   // and rail-settlement sweeps, purchase-timeout reversals) — the panel's
   // window into background jobs that otherwise only show up in server logs.
   @Get('scheduler-logs')
+  @RequireSection('schedulerLogs')
   async listSchedulerLogs(@Query('limit') limit?: string) {
     const parsedLimit = limit ? parseInt(limit, 10) : undefined;
     return this.loggingService.findRecent('SCHEDULER', parsedLimit);
   }
 
   @Post('wallets/:id/adjust')
+  @RequireSection('wallets', 'customers')
   adjustWallet(
     @CurrentUser() admin: AuthenticatedUser,
     @Param('id') walletId: string,
@@ -304,6 +350,7 @@ export class AdminController {
   // the self-service POST /wallets (see AdminCreateWalletDto), for quickly
   // provisioning a customer a wallet without them doing it themselves.
   @Post('customers/:userId/wallets')
+  @RequireSection('customers')
   async createWalletForCustomer(
     @Param('userId') userId: string,
     @Body() dto: AdminCreateWalletDto,
@@ -336,8 +383,18 @@ export class AdminController {
   // Reopens a wallet a customer (or a previous admin action) closed —
   // counterpart to the customer's own DELETE /wallets/:id soft-close.
   @Post('wallets/:id/reopen')
+  @RequireSection('wallets')
   async reopenWallet(@Param('id') walletId: string) {
     const wallet = await this.walletsService.reopenAsAdmin(walletId);
+    return serializeWallet(wallet);
+  }
+
+  // Admin-scoped soft-close, e.g. from the role-management panel's embedded
+  // wallet cards for another panel user — see WalletsService.closeAsAdmin.
+  @Delete('wallets/:id')
+  @RequireSection('wallets')
+  async closeWallet(@Param('id') walletId: string) {
+    const wallet = await this.walletsService.closeAsAdmin(walletId);
     return serializeWallet(wallet);
   }
 

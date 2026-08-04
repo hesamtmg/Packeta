@@ -462,6 +462,23 @@ export class WalletsService {
     return this.getByIdUnscoped(walletId);
   }
 
+  // Admin-only counterpart to closeForUser, same non-ownership reasoning as
+  // reopenAsAdmin — lets the role-management panel close a panel user's own
+  // wallet on their behalf, same zero-balance rule as the self-service path.
+  async closeAsAdmin(walletId: string): Promise<Wallet> {
+    const wallet = await this.getByIdUnscoped(walletId);
+    if (wallet.closedAt) {
+      throw new BadRequestException('This wallet is already closed');
+    }
+    if (BigInt(wallet.balance) !== 0n) {
+      throw new UnprocessableEntityException(
+        'Withdraw or transfer out the remaining balance before closing this wallet',
+      );
+    }
+    await this.walletsRepository.update(walletId, { closedAt: new Date() });
+    return this.getByIdUnscoped(walletId);
+  }
+
   // Rejects a min/max pair where both are set and min exceeds max — checked
   // whenever either bound changes, using the other's current value when only
   // one side of the pair is being updated.
@@ -703,7 +720,7 @@ export class WalletsService {
       .andWhere('walletType.allowPurchaseOut = true')
       .andWhere('walletType.currencyId = :currencyId', { currencyId })
       .andWhere('wallet.closedAt IS NULL')
-      .andWhere('walletType.code != :code',{code:'SUPPORT'})
+      .andWhere('walletType.code != :code', { code: 'SUPPORT' })
       .orderBy('wallet.createdAt', 'ASC')
       .getMany();
   }

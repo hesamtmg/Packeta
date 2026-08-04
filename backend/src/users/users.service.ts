@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -6,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User, UserRole } from './entities/user.entity';
+import { ADMIN_SECTIONS } from '../admin/admin-sections';
 
 @Injectable()
 export class UsersService {
@@ -107,7 +109,31 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException('User not found');
     }
+    // A freshly-promoted ADMIN starts with every section granted — matches
+    // what "being an admin" meant before this permission system existed.
+    // A super-admin can narrow it down afterwards via setPermissions.
+    if (
+      role === UserRole.ADMIN &&
+      user.role !== UserRole.ADMIN &&
+      !user.permissions?.length
+    ) {
+      user.permissions = [...ADMIN_SECTIONS];
+    }
     user.role = role;
+    return this.usersRepository.save(user);
+  }
+
+  async setPermissions(id: string, permissions: string[]): Promise<User> {
+    const user = await this.findById(id);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    if (user.role !== UserRole.ADMIN) {
+      throw new BadRequestException(
+        'Only regular ADMIN accounts have grantable panel sections — SUPER_ADMIN already has full access',
+      );
+    }
+    user.permissions = permissions;
     return this.usersRepository.save(user);
   }
 }

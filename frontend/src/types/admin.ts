@@ -1,10 +1,29 @@
 import type { CurrencyInfo } from '../utils/currency';
 
+// Mirrors backend/src/admin/admin-sections.ts — the panel sections a
+// regular ADMIN's access can be scoped to. SUPER_ADMIN always has every
+// section; "dashboard" isn't in this list because it's always visible to
+// any admin/super-admin and isn't individually grantable.
+export const ADMIN_SECTIONS = [
+  'transactions',
+  'wallets',
+  'customers',
+  'admins',
+  'walletTypes',
+  'purchase',
+  'installments',
+  'schedulerLogs',
+  'reports',
+] as const;
+
+export type AdminSection = (typeof ADMIN_SECTIONS)[number];
+
 export interface AdminUser {
   id: string;
   email: string;
   phoneNumber: string | null;
   role: 'USER' | 'ADMIN' | 'SUPER_ADMIN';
+  permissions: string[] | null;
   createdAt: string;
 }
 

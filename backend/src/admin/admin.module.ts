@@ -8,6 +8,7 @@ import { LoggingModule } from '../logging/logging.module';
 import { AdminGuardModule } from '../auth/admin-guard.module';
 import { AdminController } from './admin.controller';
 import { BatchImportService } from './batch-import.service';
+import { SectionGuard } from './guards/section.guard';
 
 @Module({
   imports: [
@@ -20,6 +21,6 @@ import { BatchImportService } from './batch-import.service';
     AdminGuardModule,
   ],
   controllers: [AdminController],
-  providers: [BatchImportService],
+  providers: [BatchImportService, SectionGuard],
 })
 export class AdminModule {}

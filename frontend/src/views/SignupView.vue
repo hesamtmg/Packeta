@@ -20,9 +20,14 @@ const { t } = useI18n();
 
 async function completeAuth(accessToken: string) {
   auth.setToken(accessToken);
-  const me = await apiRequest<{ role: string; email: string }>('/users/me');
+  const me = await apiRequest<{
+    role: string;
+    email: string;
+    permissions: string[] | null;
+  }>('/users/me');
   auth.setRole(me.role);
   auth.setEmail(me.email);
+  auth.setPermissions(me.permissions);
   router.push({ name: 'dashboard' });
 }
 

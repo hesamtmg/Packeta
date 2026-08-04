@@ -45,6 +45,7 @@ export class UsersController {
       id: found.id,
       email: found.email,
       role: found.role,
+      permissions: found.permissions,
       phoneNumber: found.phoneNumber,
       name: found.name,
       nationalCode: found.nationalCode,

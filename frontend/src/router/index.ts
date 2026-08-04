@@ -67,61 +67,61 @@ const router = createRouter({
       path: '/admin/transactions',
       name: 'admin-transactions',
       component: AdminTransactionsView,
-      meta: { requiresAuth: true, requiresAdmin: true },
+      meta: { requiresAuth: true, requiresAdmin: true, requiresSection: 'transactions' },
     },
     {
       path: '/admin/transactions/:id',
       name: 'admin-transaction-detail',
       component: AdminTransactionDetailView,
-      meta: { requiresAuth: true, requiresAdmin: true },
+      meta: { requiresAuth: true, requiresAdmin: true, requiresSection: 'transactions' },
     },
     {
       path: '/admin/wallets',
       name: 'admin-wallets',
       component: AdminWalletsView,
-      meta: { requiresAuth: true, requiresAdmin: true },
+      meta: { requiresAuth: true, requiresAdmin: true, requiresSection: 'wallets' },
     },
     {
       path: '/admin/customers',
       name: 'admin-customers',
       component: AdminCustomersView,
-      meta: { requiresAuth: true, requiresAdmin: true },
+      meta: { requiresAuth: true, requiresAdmin: true, requiresSection: 'customers' },
     },
     {
       path: '/admin/admins',
       name: 'admin-admins',
       component: AdminAdminsView,
-      meta: { requiresAuth: true, requiresAdmin: true },
+      meta: { requiresAuth: true, requiresAdmin: true, requiresSection: 'admins' },
     },
     {
       path: '/admin/wallet-types',
       name: 'admin-wallet-types',
       component: AdminWalletTypesView,
-      meta: { requiresAuth: true, requiresAdmin: true },
+      meta: { requiresAuth: true, requiresAdmin: true, requiresSection: 'walletTypes' },
     },
     {
       path: '/admin/reports',
       name: 'admin-reports',
       component: AdminReportsView,
-      meta: { requiresAuth: true, requiresAdmin: true },
+      meta: { requiresAuth: true, requiresAdmin: true, requiresSection: 'reports' },
     },
     {
       path: '/admin/purchase',
       name: 'admin-purchase',
       component: AdminPurchaseView,
-      meta: { requiresAuth: true, requiresAdmin: true },
+      meta: { requiresAuth: true, requiresAdmin: true, requiresSection: 'purchase' },
     },
     {
       path: '/admin/installments',
       name: 'admin-installments',
       component: AdminInstallmentsView,
-      meta: { requiresAuth: true, requiresAdmin: true },
+      meta: { requiresAuth: true, requiresAdmin: true, requiresSection: 'installments' },
     },
     {
       path: '/admin/scheduler-logs',
       name: 'admin-scheduler-logs',
       component: AdminSchedulerLogsView,
-      meta: { requiresAuth: true, requiresAdmin: true },
+      meta: { requiresAuth: true, requiresAdmin: true, requiresSection: 'schedulerLogs' },
     },
   ],
 });
@@ -133,6 +133,10 @@ router.beforeEach((to) => {
   }
   if (to.meta.requiresAdmin && !auth.isAdmin) {
     return { name: 'dashboard' };
+  }
+  const requiredSection = to.meta.requiresSection as string | undefined;
+  if (requiredSection && !auth.hasSection(requiredSection)) {
+    return { name: 'admin-dashboard' };
   }
   return true;
 });

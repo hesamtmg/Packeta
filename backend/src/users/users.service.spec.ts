@@ -1,6 +1,11 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { UsersService } from './users.service';
-import { User } from './entities/user.entity';
+import { User, UserRole } from './entities/user.entity';
+import { ADMIN_SECTIONS } from '../admin/admin-sections';
 
 function buildService(user: Partial<User>) {
   const record = { ...user } as User;
@@ -122,6 +127,84 @@ describe('UsersService.setAvatar', () => {
 
     await expect(
       service.setAvatar('missing', 'new.png'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('UsersService.setRole', () => {
+  it('grants every panel section when freshly promoting a USER to ADMIN', async () => {
+    const { service, record } = buildService({
+      id: 'u1',
+      role: UserRole.USER,
+      permissions: null,
+    });
+
+    await service.setRole('u1', UserRole.ADMIN);
+
+    expect(record.role).toBe(UserRole.ADMIN);
+    expect(record.permissions).toEqual([...ADMIN_SECTIONS]);
+  });
+
+  it('does not overwrite an existing ADMIN permissions list on a no-op role set', async () => {
+    const { service, record } = buildService({
+      id: 'u1',
+      role: UserRole.ADMIN,
+      permissions: ['wallets'],
+    });
+
+    await service.setRole('u1', UserRole.ADMIN);
+
+    expect(record.permissions).toEqual(['wallets']);
+  });
+
+  it('leaves permissions untouched when demoting to USER', async () => {
+    const { service, record } = buildService({
+      id: 'u1',
+      role: UserRole.ADMIN,
+      permissions: ['wallets'],
+    });
+
+    await service.setRole('u1', UserRole.USER);
+
+    expect(record.role).toBe(UserRole.USER);
+    expect(record.permissions).toEqual(['wallets']);
+  });
+});
+
+describe('UsersService.setPermissions', () => {
+  it('replaces the permissions list for a regular ADMIN', async () => {
+    const { service, record } = buildService({
+      id: 'u1',
+      role: UserRole.ADMIN,
+      permissions: ['wallets'],
+    });
+
+    await service.setPermissions('u1', ['customers', 'reports']);
+
+    expect(record.permissions).toEqual(['customers', 'reports']);
+  });
+
+  it('rejects narrowing permissions on a SUPER_ADMIN account', async () => {
+    const { service } = buildService({
+      id: 'u1',
+      role: UserRole.SUPER_ADMIN,
+      permissions: null,
+    });
+
+    await expect(
+      service.setPermissions('u1', ['wallets']),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('throws NotFoundException when the user does not exist', async () => {
+    const usersRepository = {
+      findOne: jest.fn(async () => null),
+      save: jest.fn(),
+    };
+    const service = new UsersService(usersRepository as any);
+
+    await expect(
+      service.setPermissions('missing', ['wallets']),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 });

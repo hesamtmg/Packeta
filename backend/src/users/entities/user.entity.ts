@@ -10,8 +10,10 @@ import {
 // SUPER_ADMIN sits above ADMIN: it can do everything a regular admin can,
 // plus the two things a regular admin can't — promote/demote other admins,
 // and manage wallet types (create/edit/delete the "laws" every wallet is
-// bound by). A regular admin still handles everything else (customers,
-// wallets, transactions, balance adjustments, reports) exactly as before.
+// bound by). SUPER_ADMIN also bypasses the `permissions` section system
+// below entirely (see SectionGuard) — a regular ADMIN's access to the rest
+// of the panel (customers, wallets, transactions, reports, etc.) is scoped
+// by whichever of ADMIN_SECTIONS they've been granted.
 export enum UserRole {
   USER = 'USER',
   ADMIN = 'ADMIN',
@@ -32,6 +34,13 @@ export class User {
 
   @Column({ type: 'enum', enum: UserRole, default: UserRole.USER })
   role: UserRole;
+
+  // Which ADMIN_SECTIONS this account can reach, meaningful only when
+  // role === ADMIN (SUPER_ADMIN bypasses it, USER never checks it). Null/
+  // empty means no panel sections beyond the always-visible dashboard —
+  // see UsersService.setPermissions and SectionGuard.
+  @Column({ type: 'simple-array', nullable: true })
+  permissions: string[] | null;
 
   // Used by the IPG's phone+OTP customer identification step (see
   // PurchaseGatewayController) to look up which account — and therefore
