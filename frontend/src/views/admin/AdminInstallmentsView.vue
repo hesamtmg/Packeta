@@ -43,10 +43,9 @@ const search = ref('');
 const blockedWallets = ref<BlockedWallet[]>([]);
 const overdueError = ref('');
 const busyWalletId = ref<string | null>(null);
-const openManualId = ref<string | null>(null);
-const manualDescription = ref<Record<string, string>>({});
-const manualDocument = ref<Record<string, File | undefined>>({});
-const zarinpalLinks = ref<Record<string, string>>({});
+const openRepositoryId = ref<string | null>(null);
+const repositoryDescription = ref<Record<string, string>>({});
+const repositoryDocument = ref<Record<string, File | undefined>>({});
 const collectionMessage = ref<Record<string, string>>({});
 
 const filtered = computed(() => {
@@ -75,15 +74,21 @@ async function loadOverdue() {
   }
 }
 
-function toggleManual(walletId: string) {
-  openManualId.value = openManualId.value === walletId ? null : walletId;
+function toggleRepositoryForm(walletId: string) {
+  openRepositoryId.value = openRepositoryId.value === walletId ? null : walletId;
 }
 
-function onManualFileChange(walletId: string, event: Event) {
+function onRepositoryFileChange(walletId: string, event: Event) {
   const input = event.target as HTMLInputElement;
-  manualDocument.value[walletId] = input.files?.[0];
+  repositoryDocument.value[walletId] = input.files?.[0];
 }
 
+// Unlike every other admin action, this one intentionally does NOT go
+// through apiRequest first — the customer is meant to complete this charge,
+// and admins very likely aren't logged into Packeta as that customer, so
+// there's nothing useful to show them here first. Redirecting straight to
+// the ZarinPal pay page (rather than showing a clickable link) matches how
+// the customer's own payInstallment() already behaves.
 async function collectZarinpal(wallet: BlockedWallet) {
   overdueError.value = '';
   collectionMessage.value[wallet.walletId] = '';
@@ -93,10 +98,9 @@ async function collectZarinpal(wallet: BlockedWallet) {
       `/admin/installments/${wallet.walletId}/collect/zarinpal`,
       { method: 'POST', idempotent: true },
     );
-    zarinpalLinks.value[wallet.walletId] = result.redirectUrl;
+    window.location.href = result.redirectUrl;
   } catch (err) {
     overdueError.value = err instanceof ApiError ? err.message : t('admin.installments.collectFailed');
-  } finally {
     busyWalletId.value = null;
   }
 }
@@ -104,40 +108,22 @@ async function collectZarinpal(wallet: BlockedWallet) {
 async function collectRepository(wallet: BlockedWallet) {
   overdueError.value = '';
   collectionMessage.value[wallet.walletId] = '';
-  busyWalletId.value = wallet.walletId;
-  try {
-    await apiRequest(`/admin/installments/${wallet.walletId}/collect/repository`, {
-      method: 'POST',
-      idempotent: true,
-    });
-    collectionMessage.value[wallet.walletId] = t('admin.installments.collectSuccess');
-    await loadOverdue();
-  } catch (err) {
-    overdueError.value = err instanceof ApiError ? err.message : t('admin.installments.collectFailed');
-  } finally {
-    busyWalletId.value = null;
-  }
-}
-
-async function collectManual(wallet: BlockedWallet) {
-  overdueError.value = '';
-  collectionMessage.value[wallet.walletId] = '';
-  const description = manualDescription.value[wallet.walletId]?.trim();
+  const description = repositoryDescription.value[wallet.walletId]?.trim();
   if (!description) {
-    overdueError.value = t('admin.installments.manualDescriptionRequired');
+    overdueError.value = t('admin.installments.repositoryDescriptionRequired');
     return;
   }
   busyWalletId.value = wallet.walletId;
   try {
     await postMultipart(
-      `/admin/installments/${wallet.walletId}/collect/manual`,
-      { description, document: manualDocument.value[wallet.walletId] },
+      `/admin/installments/${wallet.walletId}/collect/repository`,
+      { description, document: repositoryDocument.value[wallet.walletId] },
       { idempotent: true },
     );
     collectionMessage.value[wallet.walletId] = t('admin.installments.collectSuccess');
-    manualDescription.value[wallet.walletId] = '';
-    manualDocument.value[wallet.walletId] = undefined;
-    openManualId.value = null;
+    repositoryDescription.value[wallet.walletId] = '';
+    repositoryDocument.value[wallet.walletId] = undefined;
+    openRepositoryId.value = null;
     await loadOverdue();
   } catch (err) {
     overdueError.value = err instanceof ApiError ? err.message : t('admin.installments.collectFailed');
@@ -189,44 +175,31 @@ onMounted(() => {
                   type="button"
                   class="admin-btn admin-btn-ghost overdue-btn"
                   :disabled="busyWalletId === w.walletId"
-                  @click="collectRepository(w)"
+                  @click="toggleRepositoryForm(w.walletId)"
                 >
                   {{ t('admin.installments.actionRepository') }}
                 </button>
-                <button
-                  type="button"
-                  class="admin-btn admin-btn-ghost overdue-btn"
-                  :disabled="busyWalletId === w.walletId"
-                  @click="toggleManual(w.walletId)"
-                >
-                  {{ t('admin.installments.actionManual') }}
-                </button>
-              </td>
-            </tr>
-            <tr v-if="zarinpalLinks[w.walletId]">
-              <td colspan="5">
-                <a :href="zarinpalLinks[w.walletId]" target="_blank" rel="noopener">{{ t('admin.installments.openPaymentLink') }}</a>
               </td>
             </tr>
             <tr v-if="collectionMessage[w.walletId]">
               <td colspan="5" class="overdue-success">{{ collectionMessage[w.walletId] }}</td>
             </tr>
-            <tr v-if="openManualId === w.walletId">
+            <tr v-if="openRepositoryId === w.walletId">
               <td colspan="5">
-                <div class="manual-form">
+                <div class="repository-form">
                   <input
-                    v-model="manualDescription[w.walletId]"
+                    v-model="repositoryDescription[w.walletId]"
                     class="admin-input"
-                    :placeholder="t('admin.installments.manualDescriptionPlaceholder')"
+                    :placeholder="t('admin.installments.repositoryDescriptionPlaceholder')"
                   />
-                  <input type="file" @change="onManualFileChange(w.walletId, $event)" />
+                  <input type="file" @change="onRepositoryFileChange(w.walletId, $event)" />
                   <button
                     type="button"
                     class="admin-btn admin-btn-primary overdue-btn"
                     :disabled="busyWalletId === w.walletId"
-                    @click="collectManual(w)"
+                    @click="collectRepository(w)"
                   >
-                    {{ t('admin.installments.manualSubmit') }}
+                    {{ t('admin.installments.repositorySubmit') }}
                   </button>
                 </div>
               </td>
@@ -306,14 +279,14 @@ onMounted(() => {
 .overdue-success {
   color: var(--accent-lime);
 }
-.manual-form {
+.repository-form {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   padding: 8px 0;
 }
-.manual-form input.admin-input {
+.repository-form input.admin-input {
   min-width: 280px;
   flex: 1;
 }

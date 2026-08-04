@@ -1346,6 +1346,87 @@ describe('TransactionsService.verifyPurchase', () => {
     );
   });
 
+  it('credits only the principal to the repository (not the full charge) when fee/penalty sub-repositories are configured', async () => {
+    const repositoryWallet: WalletFixture = {
+      id: 'repo-1',
+      balance: '1000',
+      walletType: walletType({ name: 'Repository', allowPurchaseIn: true }),
+    };
+    const feeRepo: WalletFixture = {
+      id: 'fee-repo-1',
+      balance: '0',
+      walletType: walletType({ code: 'MERCHANT_REPOSITORY' }),
+    };
+    const creditWallet: WalletFixture = {
+      id: 'credit-1',
+      balance: '0',
+      walletType: walletType({
+        code: 'CREDIT',
+        allowPurchaseOut: true,
+        feeRepositoryWalletId: feeRepo.id,
+      } as any),
+    };
+    const installmentsService = {
+      markPaid: jest.fn(async () => undefined),
+      computeRepaymentSplit: jest.fn(computeRepaymentSplitFixture),
+    };
+    const { service, manager, walletsService } = buildService({
+      senderWallet: repositoryWallet,
+      recipientWallet: creditWallet,
+      installmentsService: installmentsService as any,
+    });
+    (walletsService.lockById as jest.Mock).mockImplementation(
+      async (_manager: unknown, id: string) => {
+        if (id === feeRepo.id) return feeRepo;
+        return repositoryWallet;
+      },
+    );
+
+    const pendingPurchase = {
+      id: 'installment-tx-2',
+      type: TransactionType.DEPOSIT,
+      status: 'PENDING',
+      fromWalletId: null,
+      toWalletId: repositoryWallet.id,
+      amount: '400',
+      installmentId: 'installment-1',
+      expiresAt: null,
+      ipgAuthority: 'zarinpal-auth-1',
+    };
+    manager.createQueryBuilder = jest.fn(() => {
+      const builder: any = {
+        setLock: () => builder,
+        where: () => builder,
+        andWhere: () => builder,
+        getOne: async () => pendingPurchase,
+      };
+      return builder;
+    });
+    manager.findOne = jest.fn().mockResolvedValue({
+      id: 'installment-1',
+      walletId: 'credit-1',
+      principalAmount: '350',
+      feeAmount: '50',
+      amount: '400',
+    });
+
+    const result = await service.verifyPurchase('installment-tx-2');
+
+    expect(result.status).toBe('COMPLETED');
+    // Only the 350 principal lands on the repository (1000 -> 1350), not
+    // the full 400 charge — the 50 fee goes to feeRepo instead, and the
+    // transaction row itself is shrunk to match what actually landed here.
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      repositoryWallet.id,
+      { balance: '1350' },
+    );
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), feeRepo.id, {
+      balance: '50',
+    });
+    expect(pendingPurchase.amount).toBe('350');
+  });
+
   it('verifies an admin overdue-collection payment and settles every outstanding installment on the wallet', async () => {
     const repositoryWallet: WalletFixture = {
       id: 'repo-1',
@@ -1775,7 +1856,7 @@ describe('TransactionsService.payInstallment', () => {
   it('rejects when the repository does not accept purchases', async () => {
     const closedRepository: WalletFixture = {
       ...repositoryWallet,
-      walletType: walletType({ name: 'Repository', allowPurchaseIn: false }),
+      walletType: walletType({ name: 'Repository', depositable: false }),
     };
     const installmentsService = {
       getByIdForUser: jest.fn(async () => baseInstallment()),
@@ -1881,7 +1962,13 @@ describe('TransactionsService overdue-collection methods', () => {
     });
 
     await expect(
-      service.collectOverdueFromRepository('admin-1', 'credit-1', 'idem-1'),
+      service.collectOverdueFromRepository(
+        'admin-1',
+        'credit-1',
+        'Wrote off as uncollectable',
+        null,
+        'idem-1',
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -1891,6 +1978,8 @@ describe('TransactionsService overdue-collection methods', () => {
     const result = await service.collectOverdueFromRepository(
       'admin-1',
       'credit-1',
+      'Wrote off as uncollectable',
+      null,
       'idem-2',
     );
 
@@ -1970,6 +2059,8 @@ describe('TransactionsService overdue-collection methods', () => {
     const result = await service.collectOverdueFromRepository(
       'admin-1',
       'credit-1',
+      'Wrote off as uncollectable',
+      null,
       'idem-2b',
     );
 
@@ -2031,34 +2122,45 @@ describe('TransactionsService overdue-collection methods', () => {
     );
 
     await expect(
-      service.collectOverdueFromRepository('admin-1', 'credit-1', 'idem-3'),
+      service.collectOverdueFromRepository(
+        'admin-1',
+        'credit-1',
+        'Wrote off as uncollectable',
+        null,
+        'idem-3',
+      ),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 
-  it('collectOverdueManually records the description and document reference without moving any balance', async () => {
+  it('collectOverdueFromRepository records the description and document reference as evidence for the write-off', async () => {
     const { service, manager, installmentsService } = buildOverdueService();
 
-    const result = await service.collectOverdueManually(
+    const result = await service.collectOverdueFromRepository(
       'admin-1',
       'credit-1',
-      'Paid via bank transfer',
-      'receipt-123.pdf',
+      'Customer unreachable, approved by finance',
+      'approval-123.pdf',
       'idem-4',
     );
 
-    expect(result.balance).toBe('0');
+    // No sub-repositories configured, so nothing actually leaves the
+    // repository — same balance as the plain write-off test — but the note
+    // now carries the justification and document reference.
+    expect(result.balance).toBe('5000');
     expect(manager.save).toHaveBeenCalledWith(
       expect.objectContaining({
         type: TransactionType.ADJUSTMENT,
-        fromWalletId: null,
+        fromWalletId: 'repo-1',
         toWalletId: null,
-        amount: '750',
-        note: expect.stringContaining('Paid via bank transfer'),
+        amount: '150',
+        note: expect.stringContaining(
+          'Customer unreachable, approved by finance',
+        ),
       }),
     );
     expect(manager.save).toHaveBeenCalledWith(
       expect.objectContaining({
-        note: expect.stringContaining('receipt-123.pdf'),
+        note: expect.stringContaining('approval-123.pdf'),
       }),
     );
     expect(installmentsService.markAllPaidAndUnblock).toHaveBeenCalledWith(
