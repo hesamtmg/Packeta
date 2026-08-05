@@ -8,6 +8,7 @@ import { displayIdentity } from '../../utils/identity';
 import {
   walletLookup,
   transactionCurrency,
+  transactionTypeClass,
   type AdminUser,
   type AdminWallet,
   type AdminTransaction,
@@ -123,7 +124,9 @@ onMounted(load);
         </div>
         <div class="admin-card" v-if="latestTransaction">
           <h2>{{ t('admin.dashboard.latestTransaction') }}</h2>
-          <div class="latest-amount">{{ formatTxAmount(latestTransaction) }}</div>
+          <div class="latest-amount" :class="latestTransaction.toWalletId ? 'money-in' : 'money-out'">
+            {{ latestTransaction.toWalletId ? '+' : '−' }} {{ formatTxAmount(latestTransaction) }}
+          </div>
           <div class="latest-meta">
             {{ latestTransaction.type }} · {{ walletLabel(latestTransaction.toWalletId ?? latestTransaction.fromWalletId) }}
           </div>
@@ -151,8 +154,12 @@ onMounted(load);
             class="tx-row-clickable"
             @click="$router.push({ name: 'admin-transaction-detail', params: { id: tx.id } })"
           >
-            <td><span class="admin-badge">{{ tx.type }}</span></td>
-            <td>{{ formatTxAmount(tx) }}</td>
+            <td><span class="admin-badge" :class="transactionTypeClass(tx.type)">{{ tx.type }}</span></td>
+            <td>
+              <span class="money-chip" :class="tx.toWalletId ? 'money-in' : 'money-out'">
+                {{ tx.toWalletId ? '+' : '−' }} {{ formatTxAmount(tx) }}
+              </span>
+            </td>
             <td>{{ walletLabel(tx.toWalletId ?? tx.fromWalletId) }}</td>
             <td>{{ ownerEmail(tx) }}</td>
             <td>{{ formatDate(tx.createdAt) }}</td>

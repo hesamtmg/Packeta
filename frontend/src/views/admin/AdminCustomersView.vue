@@ -5,9 +5,22 @@ import { apiRequest, ApiError } from '../../api/client';
 import { amountStep, formatAmount, toMinorUnits, type CurrencyInfo } from '../../utils/currency';
 import { formatDate, formatDateTime } from '../../utils/date';
 import { displayIdentity } from '../../utils/identity';
-import type { AdminUser } from '../../types/admin';
+import {
+  walletLookup,
+  transactionCurrency,
+  partyWalletLabel,
+  partyOwner,
+  transactionTypeClass,
+  transactionStatusClass,
+  type AdminUser,
+  type AdminWallet,
+  type AdminTransaction,
+} from '../../types/admin';
+import { useListControls } from '../../composables/useListControls';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
 import BatchImportCard from '../../components/admin/BatchImportCard.vue';
+import SortableTh from '../../components/admin/SortableTh.vue';
+import ListPagination from '../../components/admin/ListPagination.vue';
 import { useAuthStore } from '../../stores/auth';
 
 const { t } = useI18n();
@@ -36,17 +49,8 @@ interface UserDetail extends AdminUser {
   wallets: Wallet[];
 }
 
-interface AdminTransaction {
-  id: string;
-  type: string;
-  fromWalletId: string | null;
-  toWalletId: string | null;
-  amount: string;
-  note: string | null;
-  createdAt: string;
-}
-
 const users = ref<AdminUser[]>([]);
+const allWallets = ref<AdminWallet[]>([]);
 const selected = ref<UserDetail | null>(null);
 const transactions = ref<AdminTransaction[]>([]);
 const walletTypes = ref<WalletType[]>([]);
@@ -56,7 +60,6 @@ const adjustError = ref('');
 const addWalletError = ref('');
 const busy = ref(false);
 const addWalletBusy = ref(false);
-const search = ref('');
 
 const adjustAmount = ref<Record<string, string>>({});
 const adjustReason = ref<Record<string, string>>({});
@@ -69,23 +72,42 @@ const newWalletType = computed(() =>
   walletTypes.value.find((t) => t.id === newWalletTypeId.value) ?? null,
 );
 
+const walletsById = computed(() => walletLookup(allWallets.value));
+
 const customers = computed(() => users.value.filter((u) => u.role === 'USER'));
-const filtered = computed(() => {
-  const term = search.value.trim().toLowerCase();
-  if (!term) return customers.value;
-  return customers.value.filter((u) => u.email.toLowerCase().includes(term));
+
+const {
+  search,
+  sortKey,
+  sortDir,
+  pageItems,
+  sorted,
+  page,
+  pageSize,
+  totalPages,
+  toggleSort,
+  goToPage,
+} = useListControls(customers, {
+  searchFields: (u) => [u.email, u.phoneNumber],
+  sortAccessors: {
+    identity: (u) => displayIdentity(u).toLowerCase(),
+    joined: (u) => new Date(u.createdAt).getTime(),
+  },
+  defaultSort: { key: 'joined', dir: 'desc' },
+  pageSize: 25,
 });
 
-function transactionCurrency(tx: AdminTransaction): CurrencyInfo | null {
-  const wallets = selected.value?.wallets ?? [];
-  const w = wallets.find((w) => w.id === tx.fromWalletId || w.id === tx.toWalletId);
-  return w?.walletType.currency ?? null;
+function txCurrency(tx: AdminTransaction): CurrencyInfo | null {
+  return transactionCurrency(tx, walletsById.value);
 }
 
 async function loadUsers() {
   listError.value = '';
   try {
-    users.value = await apiRequest<AdminUser[]>('/admin/users');
+    [users.value, allWallets.value] = await Promise.all([
+      apiRequest<AdminUser[]>('/admin/users'),
+      apiRequest<AdminWallet[]>('/admin/wallets'),
+    ]);
   } catch (err) {
     listError.value = err instanceof ApiError ? err.message : t('admin.customers.loadFailed');
   }
@@ -172,26 +194,34 @@ loadWalletTypes();
 
     <div class="admin-card">
       <div class="filter-row">
-        <h2>{{ t('admin.customers.heading', { count: filtered.length }) }}</h2>
+        <h2>{{ t('admin.customers.heading', { count: sorted.length }) }}</h2>
         <input v-model="search" class="admin-input" :placeholder="t('admin.customers.searchPlaceholder')" />
       </div>
       <table class="admin-table">
         <thead>
           <tr>
-            <th>{{ t('admin.customers.tableEmail') }}</th>
-            <th>{{ t('admin.customers.tableJoined') }}</th>
+            <SortableTh :label="t('admin.customers.tableEmail')" col-key="identity" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
+            <SortableTh :label="t('admin.customers.tableJoined')" col-key="joined" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
             <th></th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="u in filtered" :key="u.id">
+          <tr v-for="u in pageItems" :key="u.id">
             <td>{{ displayIdentity(u) }}</td>
             <td>{{ formatDate(u.createdAt) }}</td>
             <td><button class="admin-btn admin-btn-ghost" @click="selectUser(u.id)">{{ t('admin.customers.view') }}</button></td>
           </tr>
-          <tr v-if="!filtered.length"><td colspan="3">{{ t('admin.customers.noCustomers') }}</td></tr>
+          <tr v-if="!pageItems.length"><td colspan="3">{{ t('admin.customers.noCustomers') }}</td></tr>
         </tbody>
       </table>
+      <ListPagination
+        :page="page"
+        :total-pages="totalPages"
+        :total="sorted.length"
+        :page-size="pageSize"
+        @update:page="goToPage"
+        @update:page-size="pageSize = $event"
+      />
     </div>
 
     <BatchImportCard
@@ -260,7 +290,10 @@ loadWalletTypes();
         <thead>
           <tr>
             <th>{{ t('admin.customers.tableType') }}</th>
+            <th>{{ t('admin.transactions.tableStatus') }}</th>
             <th>{{ t('admin.customers.tableAmount') }}</th>
+            <th>{{ t('admin.transactions.tableFrom') }}</th>
+            <th>{{ t('admin.transactions.tableTo') }}</th>
             <th>{{ t('admin.customers.tableNote') }}</th>
             <th>{{ t('admin.customers.tableDate') }}</th>
           </tr>
@@ -272,12 +305,29 @@ loadWalletTypes();
             class="tx-row-clickable"
             @click="$router.push({ name: 'admin-transaction-detail', params: { id: tx.id } })"
           >
-            <td><span class="admin-badge">{{ tx.type }}</span></td>
-            <td>{{ transactionCurrency(tx) ? formatAmount(tx.amount, transactionCurrency(tx)!) : tx.amount }}</td>
+            <td><span class="admin-badge" :class="transactionTypeClass(tx.type)">{{ t(`admin.transactions.${tx.type.toLowerCase()}`) }}</span></td>
+            <td><span class="admin-badge" :class="transactionStatusClass(tx.status)">{{ t(`admin.transactions.status${tx.status}`) }}</span></td>
+            <td>{{ txCurrency(tx) ? formatAmount(tx.amount, txCurrency(tx)!) : tx.amount }}</td>
+            <td>
+              <div v-if="tx.fromWalletId" class="party-cell">
+                <span class="party-label">{{ partyWalletLabel(tx.fromWalletId, walletsById) ?? t('common.unknown') }}</span>
+                <span class="party-owner">{{ partyOwner(tx.fromWalletId, walletsById) ? displayIdentity(partyOwner(tx.fromWalletId, walletsById)!) : t('common.unknown') }}</span>
+                <span class="money-chip money-out">− {{ txCurrency(tx) ? formatAmount(tx.amount, txCurrency(tx)!) : tx.amount }}</span>
+              </div>
+              <span v-else class="party-empty">{{ t('admin.transactions.externalSource') }}</span>
+            </td>
+            <td>
+              <div v-if="tx.toWalletId" class="party-cell">
+                <span class="party-label">{{ partyWalletLabel(tx.toWalletId, walletsById) ?? t('common.unknown') }}</span>
+                <span class="party-owner">{{ partyOwner(tx.toWalletId, walletsById) ? displayIdentity(partyOwner(tx.toWalletId, walletsById)!) : t('common.unknown') }}</span>
+                <span class="money-chip money-in">+ {{ txCurrency(tx) ? formatAmount(tx.amount, txCurrency(tx)!) : tx.amount }}</span>
+              </div>
+              <span v-else class="party-empty">{{ t('admin.transactions.externalDestination') }}</span>
+            </td>
             <td>{{ tx.note ?? t('common.none') }}</td>
             <td>{{ formatDateTime(tx.createdAt) }}</td>
           </tr>
-          <tr v-if="!transactions.length"><td colspan="4">{{ t('admin.customers.noTransactions') }}</td></tr>
+          <tr v-if="!transactions.length"><td colspan="7">{{ t('admin.customers.noTransactions') }}</td></tr>
         </tbody>
       </table>
     </div>

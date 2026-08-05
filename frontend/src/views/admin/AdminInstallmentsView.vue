@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError, postMultipart } from '../../api/client';
 import { displayIdentity } from '../../utils/identity';
 import { formatAmount, type CurrencyInfo } from '../../utils/currency';
 import { formatDate, formatCalendarDate } from '../../utils/date';
+import { useListControls } from '../../composables/useListControls';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
+import SortableTh from '../../components/admin/SortableTh.vue';
+import ListPagination from '../../components/admin/ListPagination.vue';
 
 interface AdminInstallment {
   id: string;
@@ -39,7 +42,6 @@ interface BlockedWallet {
 const { t } = useI18n();
 const installments = ref<AdminInstallment[]>([]);
 const error = ref('');
-const search = ref('');
 
 const blockedWallets = ref<BlockedWallet[]>([]);
 const overdueError = ref('');
@@ -49,12 +51,28 @@ const repositoryDescription = ref<Record<string, string>>({});
 const repositoryDocument = ref<Record<string, File | undefined>>({});
 const collectionMessage = ref<Record<string, string>>({});
 
-const filtered = computed(() => {
-  const term = search.value.trim().toLowerCase();
-  if (!term) return installments.value;
-  return installments.value.filter(
-    (i) => i.ownerEmail.toLowerCase().includes(term) || (i.ownerPhoneNumber ?? '').includes(term),
-  );
+const {
+  search,
+  sortKey,
+  sortDir,
+  pageItems,
+  sorted,
+  page,
+  pageSize,
+  totalPages,
+  toggleSort,
+  goToPage,
+} = useListControls(installments, {
+  searchFields: (i) => [i.ownerEmail, i.ownerPhoneNumber, i.walletTypeName, i.status],
+  sortAccessors: {
+    owner: (i) => displayIdentity({ email: i.ownerEmail, phoneNumber: i.ownerPhoneNumber }).toLowerCase(),
+    walletType: (i) => i.walletTypeName.toLowerCase(),
+    amount: (i) => Number(i.amount),
+    deadline: (i) => new Date(i.deadlineDate).getTime(),
+    status: (i) => i.status,
+  },
+  defaultSort: { key: 'deadline', dir: 'asc' },
+  pageSize: 25,
 });
 
 async function load() {
@@ -213,22 +231,22 @@ onMounted(() => {
 
     <div class="admin-card">
       <div class="filter-row">
-        <h2>{{ t('admin.installments.all', { count: filtered.length }) }}</h2>
+        <h2>{{ t('admin.installments.all', { count: sorted.length }) }}</h2>
         <input v-model="search" class="admin-input" :placeholder="t('admin.installments.searchPlaceholder')" />
       </div>
       <table class="admin-table">
         <thead>
           <tr>
-            <th>{{ t('admin.installments.tableOwner') }}</th>
-            <th>{{ t('admin.installments.tableWalletType') }}</th>
+            <SortableTh :label="t('admin.installments.tableOwner')" col-key="owner" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
+            <SortableTh :label="t('admin.installments.tableWalletType')" col-key="walletType" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
             <th>#</th>
-            <th>{{ t('admin.installments.tableAmount') }}</th>
-            <th>{{ t('admin.installments.tableDeadline') }}</th>
-            <th>{{ t('admin.installments.tableStatus') }}</th>
+            <SortableTh :label="t('admin.installments.tableAmount')" col-key="amount" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
+            <SortableTh :label="t('admin.installments.tableDeadline')" col-key="deadline" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
+            <SortableTh :label="t('admin.installments.tableStatus')" col-key="status" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
           </tr>
         </thead>
         <tbody>
-          <tr v-for="i in filtered" :key="i.id">
+          <tr v-for="i in pageItems" :key="i.id">
             <td>{{ displayIdentity({ email: i.ownerEmail, phoneNumber: i.ownerPhoneNumber }) }}</td>
             <td>{{ i.walletTypeName }}</td>
             <td>{{ i.sequenceNumber }}</td>
@@ -236,9 +254,17 @@ onMounted(() => {
             <td>{{ formatCalendarDate(i.deadlineDate) }}</td>
             <td><span class="admin-badge" :class="`installment-status-${i.status.toLowerCase()}`">{{ i.status }}</span></td>
           </tr>
-          <tr v-if="!filtered.length"><td colspan="6">{{ t('admin.installments.none') }}</td></tr>
+          <tr v-if="!pageItems.length"><td colspan="6">{{ t('admin.installments.none') }}</td></tr>
         </tbody>
       </table>
+      <ListPagination
+        :page="page"
+        :total-pages="totalPages"
+        :total="sorted.length"
+        :page-size="pageSize"
+        @update:page="goToPage"
+        @update:page-size="pageSize = $event"
+      />
     </div>
   </AdminLayout>
 </template>

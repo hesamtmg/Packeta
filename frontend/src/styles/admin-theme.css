@@ -334,6 +334,79 @@ body{
   grid-template-columns: repeat(4, 1fr);
 }
 
+/* Transaction type/status badges — same pill shape as .admin-badge, colored
+   per type/status so a glance at the list tells DEPOSIT from WITHDRAW etc.
+   without reading the label. */
+.tx-type-deposit,
+.tx-status-completed {
+  background: rgba(216, 255, 92, 0.14);
+  color: var(--accent-lime);
+}
+.tx-type-withdraw,
+.tx-status-reversed {
+  background: rgba(255, 107, 107, 0.14);
+  color: var(--accent-red);
+}
+.tx-type-transfer,
+.tx-type-purchase {
+  background: rgba(122, 162, 255, 0.14);
+  color: var(--accent-blue);
+}
+.tx-type-adjustment,
+.tx-status-pending {
+  background: rgba(255, 122, 69, 0.14);
+  color: var(--accent-orange);
+}
+.tx-type-virtual {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-dim);
+}
+
+/* A transaction's from/to cell: the wallet+owner label plus a colored
+   +/- amount chip — red for the side money left, green for the side it
+   landed in, so the direction of every row reads at a glance. */
+.party-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.party-label {
+  font-size: 0.85rem;
+}
+.party-owner {
+  font-size: 0.76rem;
+  color: var(--text-dimmer);
+}
+.party-empty {
+  color: var(--text-dimmer);
+}
+.money-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  width: fit-content;
+}
+.money-out {
+  color: var(--accent-red);
+}
+.money-in {
+  color: var(--accent-lime);
+}
+
+/* List controls: search box + sort-aware table + pagination, shared by
+   every admin list view via useListControls/SortableTh/ListPagination. */
+.list-controls-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.list-controls-row .admin-input {
+  min-width: 220px;
+}
+
 @media (max-width: 900px) {
   .admin-shell {
     flex-direction: column;

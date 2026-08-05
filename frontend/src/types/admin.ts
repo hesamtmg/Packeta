@@ -63,9 +63,20 @@ export interface AdminWallet {
   ownerPhoneNumber: string | null;
 }
 
+export type AdminTransactionType =
+  | 'DEPOSIT'
+  | 'WITHDRAW'
+  | 'TRANSFER'
+  | 'ADJUSTMENT'
+  | 'PURCHASE'
+  | 'VIRTUAL';
+
+export type AdminTransactionStatus = 'PENDING' | 'COMPLETED' | 'REVERSED';
+
 export interface AdminTransaction {
   id: string;
-  type: 'DEPOSIT' | 'WITHDRAW' | 'TRANSFER' | 'ADJUSTMENT';
+  type: AdminTransactionType;
+  status: AdminTransactionStatus;
   fromWalletId: string | null;
   toWalletId: string | null;
   amount: string;
@@ -88,4 +99,36 @@ export function transactionCurrency(
     (tx.fromWalletId && wallets.get(tx.fromWalletId)) ||
     (tx.toWalletId && wallets.get(tx.toWalletId));
   return w ? w.walletType.currency : null;
+}
+
+// "<wallet type> (<currency>)" for a transaction's from/to side, or null
+// when the wallet id is absent (DEPOSIT has no fromWallet; WITHDRAW has no
+// toWallet — money entering/leaving the system) or not in the given lookup.
+export function partyWalletLabel(
+  walletId: string | null,
+  wallets: Map<string, AdminWallet>,
+): string | null {
+  if (!walletId) return null;
+  const w = wallets.get(walletId);
+  return w ? `${w.walletType.name} (${w.walletType.currency.code})` : null;
+}
+
+export function partyOwner(
+  walletId: string | null,
+  wallets: Map<string, AdminWallet>,
+): { email: string; phoneNumber: string | null } | null {
+  if (!walletId) return null;
+  const w = wallets.get(walletId);
+  return w ? { email: w.ownerEmail, phoneNumber: w.ownerPhoneNumber } : null;
+}
+
+// Badge color per transaction type — matched by a same-named CSS class in
+// admin-theme.css (.tx-type-deposit, .tx-type-withdraw, ...).
+export function transactionTypeClass(type: AdminTransactionType): string {
+  return `tx-type-${type.toLowerCase()}`;
+}
+
+// Badge color per transaction status (.tx-status-pending, ...).
+export function transactionStatusClass(status: AdminTransactionStatus): string {
+  return `tx-status-${status.toLowerCase()}`;
 }

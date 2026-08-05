@@ -6,7 +6,10 @@ import { amountStep, formatAmount, toMinorUnits, type CurrencyInfo } from '../..
 import { formatDate } from '../../utils/date';
 import { displayIdentity } from '../../utils/identity';
 import { ADMIN_SECTIONS, FULL_ACCESS_ROLE_ID, type AdminUser, type PanelRole } from '../../types/admin';
+import { useListControls } from '../../composables/useListControls';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
+import SortableTh from '../../components/admin/SortableTh.vue';
+import ListPagination from '../../components/admin/ListPagination.vue';
 import { useAuthStore } from '../../stores/auth';
 
 interface WalletType {
@@ -52,6 +55,29 @@ const admins = computed(() =>
   users.value.filter((u) => u.role === 'ADMIN' || u.role === 'SUPER_ADMIN'),
 );
 const customers = computed(() => users.value.filter((u) => u.role === 'USER'));
+
+const {
+  search: adminSearch,
+  sortKey: adminSortKey,
+  sortDir: adminSortDir,
+  pageItems: adminPageItems,
+  sorted: adminSorted,
+  page: adminPage,
+  pageSize: adminPageSize,
+  totalPages: adminTotalPages,
+  toggleSort: toggleAdminSort,
+  goToPage: goToAdminPage,
+} = useListControls(admins, {
+  searchFields: (u) => [u.email, u.phoneNumber],
+  sortAccessors: {
+    identity: (u) => displayIdentity(u).toLowerCase(),
+    role: (u) => u.role,
+    access: (u) => roleLabel(u).toLowerCase(),
+    since: (u) => new Date(u.createdAt).getTime(),
+  },
+  defaultSort: { key: 'since', dir: 'desc' },
+  pageSize: 25,
+});
 
 // --- Roles: named, reusable bundles of ADMIN_SECTIONS ---
 const roles = ref<PanelRole[]>([]);
@@ -425,19 +451,22 @@ loadRoles();
     </div>
 
     <div class="admin-card">
-      <h2>{{ t('admin.admins.adminsHeading', { count: admins.length }) }}</h2>
+      <div class="filter-row">
+        <h2>{{ t('admin.admins.adminsHeading', { count: adminSorted.length }) }}</h2>
+        <input v-model="adminSearch" class="admin-input" :placeholder="t('admin.admins.searchPlaceholder')" />
+      </div>
       <table class="admin-table">
         <thead>
           <tr>
-            <th>{{ t('admin.admins.tableEmail') }}</th>
-            <th>{{ t('admin.admins.tableRole') }}</th>
-            <th>{{ t('admin.admins.tableSections') }}</th>
-            <th>{{ t('admin.admins.tableSince') }}</th>
+            <SortableTh :label="t('admin.admins.tableEmail')" col-key="identity" :active-key="adminSortKey" :dir="adminSortDir" @sort="toggleAdminSort" />
+            <SortableTh :label="t('admin.admins.tableRole')" col-key="role" :active-key="adminSortKey" :dir="adminSortDir" @sort="toggleAdminSort" />
+            <SortableTh :label="t('admin.admins.tableSections')" col-key="access" :active-key="adminSortKey" :dir="adminSortDir" @sort="toggleAdminSort" />
+            <SortableTh :label="t('admin.admins.tableSince')" col-key="since" :active-key="adminSortKey" :dir="adminSortDir" @sort="toggleAdminSort" />
             <th></th>
           </tr>
         </thead>
         <tbody>
-          <template v-for="a in admins" :key="a.id">
+          <template v-for="a in adminPageItems" :key="a.id">
             <tr class="admin-row" @click="toggleExpand(a)">
               <td>{{ displayIdentity(a) }}</td>
               <td>{{ a.role === 'SUPER_ADMIN' ? t('admin.admins.roleSuperAdmin') : t('admin.admins.roleAdmin') }}</td>
@@ -552,14 +581,37 @@ loadRoles();
               </td>
             </tr>
           </template>
-          <tr v-if="!admins.length"><td colspan="5">{{ t('admin.admins.noAdmins') }}</td></tr>
+          <tr v-if="!adminPageItems.length"><td colspan="5">{{ t('admin.admins.noAdmins') }}</td></tr>
         </tbody>
       </table>
+      <ListPagination
+        :page="adminPage"
+        :total-pages="adminTotalPages"
+        :total="adminSorted.length"
+        :page-size="adminPageSize"
+        @update:page="goToAdminPage"
+        @update:page-size="adminPageSize = $event"
+      />
     </div>
   </AdminLayout>
 </template>
 
 <style scoped>
+.filter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.filter-row h2 {
+  margin: 0;
+  white-space: nowrap;
+}
+.filter-row input {
+  min-width: 240px;
+}
 .promote-row {
   display: flex;
   gap: 10px;

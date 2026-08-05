@@ -1,32 +1,50 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../../api/client';
 import { amountStep, formatAmount, toMinorUnits } from '../../utils/currency';
 import { formatDate } from '../../utils/date';
 import { displayIdentity } from '../../utils/identity';
 import type { AdminWallet } from '../../types/admin';
+import { useListControls } from '../../composables/useListControls';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
 import BatchImportCard from '../../components/admin/BatchImportCard.vue';
+import SortableTh from '../../components/admin/SortableTh.vue';
+import ListPagination from '../../components/admin/ListPagination.vue';
 import { useAuthStore } from '../../stores/auth';
 
 const { t } = useI18n();
 const auth = useAuthStore();
 const wallets = ref<AdminWallet[]>([]);
 const error = ref('');
-const search = ref('');
 const busy = ref(false);
 
 const adjustAmount = ref<Record<string, string>>({});
 const adjustReason = ref<Record<string, string>>({});
 const openAdjustId = ref<string | null>(null);
 
-const filtered = computed(() => {
-  const term = search.value.trim().toLowerCase();
-  if (!term) return wallets.value;
-  return wallets.value.filter(
-    (w) => w.ownerEmail.toLowerCase().includes(term) || w.walletType.name.toLowerCase().includes(term),
-  );
+const {
+  search,
+  sortKey,
+  sortDir,
+  pageItems,
+  sorted,
+  page,
+  pageSize,
+  totalPages,
+  toggleSort,
+  goToPage,
+} = useListControls(wallets, {
+  searchFields: (w) => [w.ownerEmail, w.ownerPhoneNumber, w.walletType.name],
+  sortAccessors: {
+    owner: (w) => displayIdentity({ email: w.ownerEmail, phoneNumber: w.ownerPhoneNumber }).toLowerCase(),
+    type: (w) => w.walletType.name.toLowerCase(),
+    balance: (w) => Number(w.balance),
+    created: (w) => new Date(w.createdAt).getTime(),
+    status: (w) => (w.closedAt ? 1 : 0),
+  },
+  defaultSort: { key: 'created', dir: 'desc' },
+  pageSize: 25,
 });
 
 async function load() {
@@ -86,23 +104,23 @@ onMounted(load);
 
     <div class="admin-card">
       <div class="filter-row">
-        <h2>{{ t('admin.wallets.allWallets', { count: filtered.length }) }}</h2>
+        <h2>{{ t('admin.wallets.allWallets', { count: sorted.length }) }}</h2>
         <input v-model="search" class="admin-input" :placeholder="t('admin.wallets.searchPlaceholder')" />
       </div>
       <table class="admin-table">
         <thead>
           <tr>
-            <th>{{ t('admin.wallets.tableOwner') }}</th>
-            <th>{{ t('admin.wallets.tableType') }}</th>
+            <SortableTh :label="t('admin.wallets.tableOwner')" col-key="owner" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
+            <SortableTh :label="t('admin.wallets.tableType')" col-key="type" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
             <th>{{ t('admin.wallets.tableCurrency') }}</th>
-            <th>{{ t('admin.wallets.tableBalance') }}</th>
-            <th>{{ t('admin.wallets.tableCreated') }}</th>
-            <th>{{ t('admin.wallets.tableStatus') }}</th>
+            <SortableTh :label="t('admin.wallets.tableBalance')" col-key="balance" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
+            <SortableTh :label="t('admin.wallets.tableCreated')" col-key="created" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
+            <SortableTh :label="t('admin.wallets.tableStatus')" col-key="status" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
             <th></th>
           </tr>
         </thead>
         <tbody>
-          <template v-for="w in filtered" :key="w.id">
+          <template v-for="w in pageItems" :key="w.id">
             <tr>
               <td>{{ displayIdentity({ email: w.ownerEmail, phoneNumber: w.ownerPhoneNumber }) }}</td>
               <td>{{ w.walletType.name }}</td>
@@ -137,9 +155,17 @@ onMounted(load);
               </td>
             </tr>
           </template>
-          <tr v-if="!filtered.length"><td colspan="7">{{ t('admin.wallets.noWallets') }}</td></tr>
+          <tr v-if="!pageItems.length"><td colspan="7">{{ t('admin.wallets.noWallets') }}</td></tr>
         </tbody>
       </table>
+      <ListPagination
+        :page="page"
+        :total-pages="totalPages"
+        :total="sorted.length"
+        :page-size="pageSize"
+        @update:page="goToPage"
+        @update:page-size="pageSize = $event"
+      />
     </div>
 
     <BatchImportCard
