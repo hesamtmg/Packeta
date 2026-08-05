@@ -515,6 +515,7 @@ export default {
       promoteButton: 'ارتقاء',
       roleAdmin: 'مدیر',
       roleSuperAdmin: 'مدیر ارشد',
+      roleUser: 'مشتری',
       adminsHeading: 'کاربران پنل ({count})',
       searchPlaceholder: 'جستجو بر اساس ایمیل یا شماره تلفن…',
       tableEmail: 'ایمیل',
