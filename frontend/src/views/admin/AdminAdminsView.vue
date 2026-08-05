@@ -51,9 +51,10 @@ const busy = ref(false);
 const promoteUserId = ref('');
 const promoteRole = ref<'ADMIN' | 'SUPER_ADMIN'>('ADMIN');
 
-const admins = computed(() =>
-  users.value.filter((u) => u.role === 'ADMIN' || u.role === 'SUPER_ADMIN'),
-);
+// The "Panel users" table below includes every account (admins and
+// customers alike) so a role's access can be managed for USER accounts
+// from this same page, not just via the Customers page.
+const admins = computed(() => users.value);
 const customers = computed(() => users.value.filter((u) => u.role === 'USER'));
 
 const {
@@ -502,12 +503,20 @@ loadRoles();
           <template v-for="a in adminPageItems" :key="a.id">
             <tr class="admin-row" @click="toggleExpand(a)">
               <td>{{ displayIdentity(a) }}</td>
-              <td>{{ a.role === 'SUPER_ADMIN' ? t('admin.admins.roleSuperAdmin') : t('admin.admins.roleAdmin') }}</td>
+              <td>
+                {{
+                  a.role === 'SUPER_ADMIN'
+                    ? t('admin.admins.roleSuperAdmin')
+                    : a.role === 'ADMIN'
+                      ? t('admin.admins.roleAdmin')
+                      : t('admin.admins.roleUser')
+                }}
+              </td>
               <td><span class="admin-badge">{{ roleLabel(a) }}</span></td>
               <td>{{ formatDate(a.createdAt) }}</td>
               <td @click.stop>
                 <span v-if="a.email === auth.email" class="you-badge">{{ t('admin.admins.you') }}</span>
-                <template v-else-if="auth.isSuperAdmin">
+                <template v-else-if="auth.isSuperAdmin && a.role !== 'USER'">
                   <button
                     v-if="a.role === 'SUPER_ADMIN'"
                     class="admin-btn admin-btn-danger"
@@ -532,8 +541,9 @@ loadRoles();
                 <div class="detail-panel">
                   <p v-if="detailError" class="admin-error">{{ detailError }}</p>
 
-                  <div v-if="a.role === 'ADMIN'" class="assign-block">
+                  <div v-if="a.role === 'ADMIN' || a.role === 'USER'" class="assign-block">
                     <h3>{{ t('admin.admins.assignHeading') }}</h3>
+                    <p v-if="a.role === 'USER'" class="hint">{{ t('admin.customers.assignHint') }}</p>
                     <div class="assign-row">
                       <select v-model="assignRoleDraft" class="admin-input" :disabled="!auth.hasSection('roles')">
                         <option value="">{{ t('admin.admins.noRole') }}</option>

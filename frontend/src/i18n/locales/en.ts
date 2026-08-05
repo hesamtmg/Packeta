@@ -515,6 +515,7 @@ export default {
       promoteButton: 'Promote',
       roleAdmin: 'Admin',
       roleSuperAdmin: 'Super Admin',
+      roleUser: 'Customer',
       adminsHeading: 'Panel users ({count})',
       searchPlaceholder: 'Search by email or phone…',
       tableEmail: 'Email',
