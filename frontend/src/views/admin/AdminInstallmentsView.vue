@@ -178,7 +178,10 @@ onMounted(() => {
           <template v-for="w in blockedWallets" :key="w.walletId">
             <tr>
               <td>{{ displayIdentity({ email: w.ownerEmail, phoneNumber: w.ownerPhoneNumber }) }}</td>
-              <td>{{ w.walletTypeName }}</td>
+              <td>
+                <router-link :to="{ name: 'admin-wallet-detail', params: { id: w.walletId } }">{{ w.walletTypeName }}</router-link>
+                <div class="mono-id">{{ w.walletId }}</div>
+              </td>
               <td>{{ formatDate(w.blockedAt) }}</td>
               <td>{{ formatAmount(w.totalOwed, w.currency) }}</td>
               <td class="overdue-actions">
@@ -243,18 +246,22 @@ onMounted(() => {
             <SortableTh :label="t('admin.installments.tableAmount')" col-key="amount" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
             <SortableTh :label="t('admin.installments.tableDeadline')" col-key="deadline" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
             <SortableTh :label="t('admin.installments.tableStatus')" col-key="status" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
+            <th>{{ t('admin.installments.tableId') }}</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="i in pageItems" :key="i.id">
             <td>{{ displayIdentity({ email: i.ownerEmail, phoneNumber: i.ownerPhoneNumber }) }}</td>
-            <td>{{ i.walletTypeName }}</td>
+            <td>
+              <router-link :to="{ name: 'admin-wallet-detail', params: { id: i.walletId } }">{{ i.walletTypeName }}</router-link>
+            </td>
             <td>{{ i.sequenceNumber }}</td>
             <td>{{ formatAmount(i.amount, i.currency) }}</td>
             <td>{{ formatCalendarDate(i.deadlineDate) }}</td>
             <td><span class="admin-badge" :class="`installment-status-${i.status.toLowerCase()}`">{{ i.status }}</span></td>
+            <td class="mono-id">{{ i.id }}</td>
           </tr>
-          <tr v-if="!pageItems.length"><td colspan="6">{{ t('admin.installments.none') }}</td></tr>
+          <tr v-if="!pageItems.length"><td colspan="7">{{ t('admin.installments.none') }}</td></tr>
         </tbody>
       </table>
       <ListPagination

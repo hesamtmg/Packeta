@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useWalletStore, type Wallet, type WalletOptionsInput, type SettlementRailType } from '../stores/wallet';
 import { ApiError } from '../api/client';
-import { amountStep, formatAmount, toMinorUnits, type CurrencyInfo } from '../utils/currency';
+import { amountStep, formatAmount, formatAmountWords, toMinorUnits, type CurrencyInfo } from '../utils/currency';
 import { formatDateTime } from '../utils/date';
 import { transactionTypeClass, transactionStatusClass } from '../types/admin';
 import { walletDisplayName } from '../utils/wallet-name';
@@ -234,6 +234,13 @@ function formatTransactionAmount(tx: (typeof wallet.transactions)[number]): stri
     (tx.toWalletId && walletsById.value.get(tx.toWalletId));
   if (!w) return tx.amount;
   return formatAmount(tx.amount, w.walletType.currency);
+}
+
+function formatTransactionAmountWords(tx: (typeof wallet.transactions)[number]): string {
+  const w = (tx.fromWalletId && walletsById.value.get(tx.fromWalletId)) ||
+    (tx.toWalletId && walletsById.value.get(tx.toWalletId));
+  if (!w) return '';
+  return formatAmountWords(tx.amount, w.walletType.currency);
 }
 
 // Whether money is landing in one of the customer's own wallets on this
@@ -695,6 +702,7 @@ async function onGrantCredit() {
           <div class="latest-amount" :class="isIncoming(latestTransaction) ? 'money-in' : 'money-out'">
             {{ isIncoming(latestTransaction) ? '+' : '−' }} {{ formatTransactionAmount(latestTransaction) }}
           </div>
+          <div v-if="formatTransactionAmountWords(latestTransaction)" class="amount-words">{{ formatTransactionAmountWords(latestTransaction) }}</div>
           <div class="latest-meta">{{ describeTransaction(latestTransaction) }}</div>
           <div class="latest-meta">{{ formatDateTime(latestTransaction.createdAt) }}</div>
         </div>
@@ -810,10 +818,14 @@ async function onGrantCredit() {
           <span class="wallet-type">{{ walletDisplayName(w) }} · {{ w.walletType.currency.code }}</span>
           <span v-if="w.name" class="wallet-type-sub">{{ w.walletType.name }}</span>
           <span class="wallet-balance">{{ formatAmount(w.balance, w.walletType.currency) }}</span>
+          <span class="mono-id">{{ w.id }}</span>
           <div class="badges">
             <span v-for="b in badges(w)" :key="b" class="admin-badge">{{ b }}</span>
           </div>
           <div class="wallet-card-actions">
+            <router-link :to="{ name: 'wallet-detail', params: { id: w.id } }" class="admin-btn admin-btn-ghost">
+              {{ t('walletDetail.viewLink') }}
+            </router-link>
             <router-link
               v-if="w.walletType.code === 'CREDIT'"
               :to="{ name: 'wallet-installments', params: { walletId: w.id } }"
@@ -1183,6 +1195,7 @@ async function onGrantCredit() {
             <th>{{ t('dashboard.history.tableFrom') }}</th>
             <th>{{ t('dashboard.history.tableTo') }}</th>
             <th>{{ t('dashboard.history.tableNote') }}</th>
+            <th>{{ t('dashboard.history.tableId') }}</th>
             <SortableTh :label="t('dashboard.history.tableDate')" col-key="date" :active-key="historySortKey" :dir="historySortDir" @sort="historyToggleSort" />
           </tr>
         </thead>
@@ -1215,9 +1228,10 @@ async function onGrantCredit() {
               <span v-else class="party-empty">{{ t('dashboard.history.externalDestination') }}</span>
             </td>
             <td>{{ tx.note ?? t('common.none') }}</td>
+            <td class="mono-id">{{ tx.id }}</td>
             <td>{{ formatDateTime(tx.createdAt) }}</td>
           </tr>
-          <tr v-if="!historyPageItems.length"><td colspan="7">{{ t('dashboard.history.empty') }}</td></tr>
+          <tr v-if="!historyPageItems.length"><td colspan="8">{{ t('dashboard.history.empty') }}</td></tr>
         </tbody>
       </table>
       <ListPagination

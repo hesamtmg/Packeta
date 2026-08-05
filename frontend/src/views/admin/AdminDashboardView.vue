@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../../api/client';
-import { formatAmount } from '../../utils/currency';
+import { formatAmount, formatAmountWords } from '../../utils/currency';
 import { formatDate, formatDateTime } from '../../utils/date';
 import { displayIdentity } from '../../utils/identity';
 import {
@@ -50,6 +50,11 @@ const latestTransaction = computed(() => transactions.value[0] ?? null);
 function formatTxAmount(tx: AdminTransaction): string {
   const currency = transactionCurrency(tx, walletsById.value);
   return currency ? formatAmount(tx.amount, currency) : tx.amount;
+}
+
+function formatTxAmountWords(tx: AdminTransaction): string {
+  const currency = transactionCurrency(tx, walletsById.value);
+  return currency ? formatAmountWords(tx.amount, currency) : '';
 }
 
 function walletLabel(walletId: string | null): string {
@@ -128,6 +133,7 @@ onMounted(load);
           <div class="latest-amount" :class="latestTransaction.toWalletId ? 'money-in' : 'money-out'">
             {{ latestTransaction.toWalletId ? '+' : '−' }} {{ formatTxAmount(latestTransaction) }}
           </div>
+          <div v-if="formatTxAmountWords(latestTransaction)" class="amount-words">{{ formatTxAmountWords(latestTransaction) }}</div>
           <div class="latest-meta">
             {{ latestTransaction.type }} · {{ walletLabel(latestTransaction.toWalletId ?? latestTransaction.fromWalletId) }}
           </div>

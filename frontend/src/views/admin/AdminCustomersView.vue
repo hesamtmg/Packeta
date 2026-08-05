@@ -202,6 +202,7 @@ loadWalletTypes();
           <tr>
             <SortableTh :label="t('admin.customers.tableEmail')" col-key="identity" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
             <SortableTh :label="t('admin.customers.tableJoined')" col-key="joined" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
+            <th>{{ t('admin.customers.tableId') }}</th>
             <th></th>
           </tr>
         </thead>
@@ -209,9 +210,10 @@ loadWalletTypes();
           <tr v-for="u in pageItems" :key="u.id">
             <td>{{ displayIdentity(u) }}</td>
             <td>{{ formatDate(u.createdAt) }}</td>
+            <td class="mono-id">{{ u.id }}</td>
             <td><button class="admin-btn admin-btn-ghost" @click="selectUser(u.id)">{{ t('admin.customers.view') }}</button></td>
           </tr>
-          <tr v-if="!pageItems.length"><td colspan="3">{{ t('admin.customers.noCustomers') }}</td></tr>
+          <tr v-if="!pageItems.length"><td colspan="4">{{ t('admin.customers.noCustomers') }}</td></tr>
         </tbody>
       </table>
       <ListPagination
@@ -240,8 +242,11 @@ loadWalletTypes();
 
       <div class="wallets">
         <article v-for="w in selected.wallets" :key="w.id" class="wallet-card">
-          <span class="wallet-type">{{ w.walletType.name }} · {{ w.walletType.currency.code }}</span>
+          <router-link :to="{ name: 'admin-wallet-detail', params: { id: w.id } }" class="wallet-type">
+            {{ w.walletType.name }} · {{ w.walletType.currency.code }}
+          </router-link>
           <span class="wallet-balance">{{ formatAmount(w.balance, w.walletType.currency) }}</span>
+          <span class="mono-id">{{ w.id }}</span>
           <div class="adjust-form">
             <input
               v-model="adjustAmount[w.id]"
@@ -295,6 +300,7 @@ loadWalletTypes();
             <th>{{ t('admin.transactions.tableFrom') }}</th>
             <th>{{ t('admin.transactions.tableTo') }}</th>
             <th>{{ t('admin.customers.tableNote') }}</th>
+            <th>{{ t('admin.transactions.tableId') }}</th>
             <th>{{ t('admin.customers.tableDate') }}</th>
           </tr>
         </thead>
@@ -310,7 +316,13 @@ loadWalletTypes();
             <td>{{ txCurrency(tx) ? formatAmount(tx.amount, txCurrency(tx)!) : tx.amount }}</td>
             <td>
               <div v-if="tx.fromWalletId" class="party-cell">
-                <span class="party-label">{{ partyWalletLabel(tx.fromWalletId, walletsById) ?? t('common.unknown') }}</span>
+                <router-link
+                  class="party-label"
+                  :to="{ name: 'admin-wallet-detail', params: { id: tx.fromWalletId } }"
+                  @click.stop
+                >
+                  {{ partyWalletLabel(tx.fromWalletId, walletsById) ?? t('common.unknown') }}
+                </router-link>
                 <span class="party-owner">{{ partyOwner(tx.fromWalletId, walletsById) ? displayIdentity(partyOwner(tx.fromWalletId, walletsById)!) : t('common.unknown') }}</span>
                 <span class="money-chip money-out">− {{ txCurrency(tx) ? formatAmount(tx.amount, txCurrency(tx)!) : tx.amount }}</span>
               </div>
@@ -318,16 +330,23 @@ loadWalletTypes();
             </td>
             <td>
               <div v-if="tx.toWalletId" class="party-cell">
-                <span class="party-label">{{ partyWalletLabel(tx.toWalletId, walletsById) ?? t('common.unknown') }}</span>
+                <router-link
+                  class="party-label"
+                  :to="{ name: 'admin-wallet-detail', params: { id: tx.toWalletId } }"
+                  @click.stop
+                >
+                  {{ partyWalletLabel(tx.toWalletId, walletsById) ?? t('common.unknown') }}
+                </router-link>
                 <span class="party-owner">{{ partyOwner(tx.toWalletId, walletsById) ? displayIdentity(partyOwner(tx.toWalletId, walletsById)!) : t('common.unknown') }}</span>
                 <span class="money-chip money-in">+ {{ txCurrency(tx) ? formatAmount(tx.amount, txCurrency(tx)!) : tx.amount }}</span>
               </div>
               <span v-else class="party-empty">{{ t('admin.transactions.externalDestination') }}</span>
             </td>
             <td>{{ tx.note ?? t('common.none') }}</td>
+            <td class="mono-id">{{ tx.id }}</td>
             <td>{{ formatDateTime(tx.createdAt) }}</td>
           </tr>
-          <tr v-if="!transactions.length"><td colspan="7">{{ t('admin.customers.noTransactions') }}</td></tr>
+          <tr v-if="!transactions.length"><td colspan="8">{{ t('admin.customers.noTransactions') }}</td></tr>
         </tbody>
       </table>
     </div>

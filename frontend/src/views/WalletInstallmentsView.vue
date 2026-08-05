@@ -139,6 +139,7 @@ onMounted(load);
                 <div v-for="i in group.installments" :key="i.id" class="installment-detail-card">
                   <div class="installment-detail-header">
                     <span>#{{ i.sequenceNumber }}</span>
+                    <span class="mono-id">{{ i.id }}</span>
                     <span>{{ t('dashboard.installments.dueDate') }}: {{ formatCalendarDate(i.dueDate) }}</span>
                     <span>{{ t('dashboard.installments.deadlineDate') }}: {{ formatCalendarDate(i.deadlineDate) }}</span>
                     <span>{{ thisWallet ? formatAmount(i.amount, thisWallet.walletType.currency) : i.amount }}</span>
