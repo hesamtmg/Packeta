@@ -49,6 +49,7 @@ import { RequireSection } from './decorators/require-section.decorator';
 import { PanelRolesService } from '../panel-roles/panel-roles.service';
 import { CreatePanelRoleDto } from '../panel-roles/dto/create-panel-role.dto';
 import { UpdatePanelRoleDto } from '../panel-roles/dto/update-panel-role.dto';
+import { SettlementService } from '../settlement/settlement.service';
 
 function serializePanelRole(
   role: { id: string; name: string; permissions: string[] } | null,
@@ -75,6 +76,7 @@ export class AdminController {
     private readonly loggingService: LoggingService,
     private readonly batchImportService: BatchImportService,
     private readonly panelRolesService: PanelRolesService,
+    private readonly settlementService: SettlementService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -685,6 +687,29 @@ export class AdminController {
       }),
     );
     return serializeWallet({ ...wallet, walletType });
+  }
+
+  // Full single-wallet detail (every column, plus owner identity and its
+  // settlement account split) — backs the admin panel's wallet detail page,
+  // reached by clicking a row on the Wallets list.
+  @Get('wallets/:id')
+  @RequireSection('wallets')
+  async getWallet(
+    @CurrentUser() admin: AuthenticatedUser,
+    @Param('id') walletId: string,
+  ) {
+    await this.assertWalletInScope(admin.userId, walletId);
+    const wallet = await this.walletsService.getByIdWithOwner(walletId);
+    const settlementAccounts = await this.settlementService.findForWallet(
+      this.dataSource.manager,
+      walletId,
+    );
+    return {
+      ...serializeWallet(wallet, settlementAccounts),
+      ownerId: wallet.user.id,
+      ownerEmail: wallet.user.email,
+      ownerPhoneNumber: wallet.user.phoneNumber,
+    };
   }
 
   // Reopens a wallet a customer (or a previous admin action) closed —

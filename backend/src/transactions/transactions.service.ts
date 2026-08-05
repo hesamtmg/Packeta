@@ -2429,6 +2429,15 @@ export class TransactionsService {
       relatedTransactionId: transaction.relatedTransactionId,
       settledAt: transaction.settledAt,
       destinationIban: transaction.destinationIban,
+      performedByUserId: transaction.performedByUserId,
+      ipgAuthority: transaction.ipgAuthority,
+      ipgPaymentUrl: transaction.ipgPaymentUrl,
+      language: transaction.language,
+      installmentId: transaction.installmentId,
+      railSettlementId: transaction.railSettlementId,
+      completesPurchaseId: transaction.completesPurchaseId,
+      relatedPurchaseId: transaction.relatedPurchaseId,
+      settlesWalletId: transaction.settlesWalletId,
     };
   }
 
@@ -2481,6 +2490,14 @@ export class TransactionsService {
       settledAt: transaction.settledAt,
       destinationIban: transaction.destinationIban,
       performedByUserId: transaction.performedByUserId,
+      ipgAuthority: transaction.ipgAuthority,
+      ipgPaymentUrl: transaction.ipgPaymentUrl,
+      language: transaction.language,
+      installmentId: transaction.installmentId,
+      railSettlementId: transaction.railSettlementId,
+      completesPurchaseId: transaction.completesPurchaseId,
+      relatedPurchaseId: transaction.relatedPurchaseId,
+      settlesWalletId: transaction.settlesWalletId,
     };
   }
 

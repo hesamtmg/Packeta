@@ -116,6 +116,7 @@ onMounted(load);
             <th>{{ t('admin.transactions.tableFrom') }}</th>
             <th>{{ t('admin.transactions.tableTo') }}</th>
             <th>{{ t('admin.transactions.tableNote') }}</th>
+            <th>{{ t('admin.transactions.tableId') }}</th>
             <SortableTh :label="t('admin.transactions.tableDate')" col-key="date" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
           </tr>
         </thead>
@@ -131,7 +132,13 @@ onMounted(load);
             <td>{{ formatTxAmount(tx) }}</td>
             <td>
               <div v-if="tx.fromWalletId" class="party-cell">
-                <span class="party-label">{{ partyWalletLabel(tx.fromWalletId, walletsById) ?? t('common.unknown') }}</span>
+                <router-link
+                  class="party-label"
+                  :to="{ name: 'admin-wallet-detail', params: { id: tx.fromWalletId } }"
+                  @click.stop
+                >
+                  {{ partyWalletLabel(tx.fromWalletId, walletsById) ?? t('common.unknown') }}
+                </router-link>
                 <span class="party-owner">{{ partyOwner(tx.fromWalletId, walletsById) ? displayIdentity(partyOwner(tx.fromWalletId, walletsById)!) : t('common.unknown') }}</span>
                 <span class="money-chip money-out">− {{ formatTxAmount(tx) }}</span>
               </div>
@@ -139,16 +146,23 @@ onMounted(load);
             </td>
             <td>
               <div v-if="tx.toWalletId" class="party-cell">
-                <span class="party-label">{{ partyWalletLabel(tx.toWalletId, walletsById) ?? t('common.unknown') }}</span>
+                <router-link
+                  class="party-label"
+                  :to="{ name: 'admin-wallet-detail', params: { id: tx.toWalletId } }"
+                  @click.stop
+                >
+                  {{ partyWalletLabel(tx.toWalletId, walletsById) ?? t('common.unknown') }}
+                </router-link>
                 <span class="party-owner">{{ partyOwner(tx.toWalletId, walletsById) ? displayIdentity(partyOwner(tx.toWalletId, walletsById)!) : t('common.unknown') }}</span>
                 <span class="money-chip money-in">+ {{ formatTxAmount(tx) }}</span>
               </div>
               <span v-else class="party-empty">{{ t('admin.transactions.externalDestination') }}</span>
             </td>
             <td>{{ tx.note ?? t('common.none') }}</td>
+            <td class="mono-id">{{ tx.id }}</td>
             <td>{{ formatDateTime(tx.createdAt) }}</td>
           </tr>
-          <tr v-if="!pageItems.length"><td colspan="7">{{ t('admin.transactions.noTransactions') }}</td></tr>
+          <tr v-if="!pageItems.length"><td colspan="8">{{ t('admin.transactions.noTransactions') }}</td></tr>
         </tbody>
       </table>
       <ListPagination

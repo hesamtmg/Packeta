@@ -5,6 +5,7 @@ import SignupView from '../views/SignupView.vue';
 import DashboardView from '../views/DashboardView.vue';
 import ProfileView from '../views/ProfileView.vue';
 import TransactionDetailView from '../views/TransactionDetailView.vue';
+import WalletDetailView from '../views/WalletDetailView.vue';
 import WalletInstallmentsView from '../views/WalletInstallmentsView.vue';
 import PurchaseCallbackView from '../views/PurchaseCallbackView.vue';
 import AdminDashboardView from '../views/admin/AdminDashboardView.vue';
@@ -19,6 +20,7 @@ import AdminPurchaseView from '../views/admin/AdminPurchaseView.vue';
 import AdminInstallmentsView from '../views/admin/AdminInstallmentsView.vue';
 import AdminSchedulerLogsView from '../views/admin/AdminSchedulerLogsView.vue';
 import AdminOffboardingView from '../views/admin/AdminOffboardingView.vue';
+import AdminWalletDetailView from '../views/admin/AdminWalletDetailView.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -41,6 +43,12 @@ const router = createRouter({
       path: '/transactions/:id',
       name: 'transaction-detail',
       component: TransactionDetailView,
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/wallets/:id',
+      name: 'wallet-detail',
+      component: WalletDetailView,
       meta: { requiresAuth: true },
     },
     {
@@ -80,6 +88,12 @@ const router = createRouter({
       path: '/admin/wallets',
       name: 'admin-wallets',
       component: AdminWalletsView,
+      meta: { requiresAuth: true, requiresAdmin: true, requiresSection: 'wallets' },
+    },
+    {
+      path: '/admin/wallets/:id',
+      name: 'admin-wallet-detail',
+      component: AdminWalletDetailView,
       meta: { requiresAuth: true, requiresAdmin: true, requiresSection: 'wallets' },
     },
     {

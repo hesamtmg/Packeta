@@ -395,6 +395,25 @@ body{
   color: var(--accent-lime);
 }
 
+/* A row/card's raw id, shown as a small muted mono line under its main
+   label — used wherever a list shows a wallet/customer/transaction/
+   installment so the id is visible without opening detail. */
+.mono-id {
+  font-family: monospace;
+  font-size: 0.7rem;
+  color: var(--text-dimmer);
+  word-break: break-all;
+}
+
+/* A number spelled out in words under a raw amount, e.g. "1,200,000" /
+   "one million two hundred thousand" — see utils/currency.ts
+   formatAmountWords. */
+.amount-words {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
 /* List controls: search box + sort-aware table + pagination, shared by
    every admin list view via useListControls/SortableTh/ListPagination. */
 .list-controls-row {

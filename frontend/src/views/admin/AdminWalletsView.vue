@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { useRouter } from 'vue-router';
 import { apiRequest, ApiError } from '../../api/client';
 import { amountStep, formatAmount, toMinorUnits } from '../../utils/currency';
 import { formatDate } from '../../utils/date';
@@ -15,6 +16,7 @@ import ListPagination from '../../components/admin/ListPagination.vue';
 import { useAuthStore } from '../../stores/auth';
 
 const { t } = useI18n();
+const router = useRouter();
 const auth = useAuthStore();
 const wallets = ref<AdminWallet[]>([]);
 const error = ref('');
@@ -119,12 +121,13 @@ onMounted(load);
             <SortableTh :label="t('admin.wallets.tableBalance')" col-key="balance" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
             <SortableTh :label="t('admin.wallets.tableCreated')" col-key="created" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
             <SortableTh :label="t('admin.wallets.tableStatus')" col-key="status" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
+            <th>{{ t('admin.wallets.tableId') }}</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           <template v-for="w in pageItems" :key="w.id">
-            <tr>
+            <tr class="tx-row-clickable" @click="router.push({ name: 'admin-wallet-detail', params: { id: w.id } })">
               <td>{{ displayIdentity({ email: w.ownerEmail, phoneNumber: w.ownerPhoneNumber }) }}</td>
               <td>{{ w.name ?? t('common.none') }}</td>
               <td>{{ w.walletType.name }}</td>
@@ -136,15 +139,16 @@ onMounted(load);
                   {{ w.closedAt ? t('admin.wallets.statusClosed') : t('admin.wallets.statusActive') }}
                 </span>
               </td>
+              <td class="mono-id">{{ w.id }}</td>
               <td class="actions-cell">
-                <button class="admin-btn admin-btn-ghost" @click="toggleAdjust(w.id)">{{ t('admin.wallets.adjust') }}</button>
-                <button v-if="w.closedAt" class="admin-btn admin-btn-ghost" :disabled="busy" @click="reopen(w)">
+                <button class="admin-btn admin-btn-ghost" @click.stop="toggleAdjust(w.id)">{{ t('admin.wallets.adjust') }}</button>
+                <button v-if="w.closedAt" class="admin-btn admin-btn-ghost" :disabled="busy" @click.stop="reopen(w)">
                   {{ t('admin.wallets.reopen') }}
                 </button>
               </td>
             </tr>
             <tr v-if="openAdjustId === w.id">
-              <td colspan="8">
+              <td colspan="9">
                 <div class="adjust-row">
                   <input
                     v-model="adjustAmount[w.id]"
@@ -159,7 +163,7 @@ onMounted(load);
               </td>
             </tr>
           </template>
-          <tr v-if="!pageItems.length"><td colspan="8">{{ t('admin.wallets.noWallets') }}</td></tr>
+          <tr v-if="!pageItems.length"><td colspan="9">{{ t('admin.wallets.noWallets') }}</td></tr>
         </tbody>
       </table>
       <ListPagination
@@ -209,5 +213,8 @@ onMounted(load);
 }
 .status-closed {
   color: var(--accent-red);
+}
+.tx-row-clickable {
+  cursor: pointer;
 }
 </style>
