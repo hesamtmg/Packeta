@@ -74,7 +74,7 @@ const newWalletType = computed(() =>
 
 const walletsById = computed(() => walletLookup(allWallets.value));
 
-const customers = computed(() => users.value.filter((u) => u.role === 'USER'));
+const customers = computed(() => users.value.filter((u) => u.role === 'USER' || u.role === 'ADMIN' ));
 
 const {
   search,
