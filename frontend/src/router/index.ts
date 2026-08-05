@@ -18,6 +18,7 @@ import AdminTransactionDetailView from '../views/admin/AdminTransactionDetailVie
 import AdminPurchaseView from '../views/admin/AdminPurchaseView.vue';
 import AdminInstallmentsView from '../views/admin/AdminInstallmentsView.vue';
 import AdminSchedulerLogsView from '../views/admin/AdminSchedulerLogsView.vue';
+import AdminOffboardingView from '../views/admin/AdminOffboardingView.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -128,6 +129,12 @@ const router = createRouter({
       name: 'admin-scheduler-logs',
       component: AdminSchedulerLogsView,
       meta: { requiresAuth: true, requiresAdmin: true, requiresSection: 'schedulerLogs' },
+    },
+    {
+      path: '/admin/offboarding',
+      name: 'admin-offboarding',
+      component: AdminOffboardingView,
+      meta: { requiresAuth: true, requiresAdmin: true, requiresSection: 'offboarding' },
     },
   ],
 });

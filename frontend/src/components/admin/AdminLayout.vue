@@ -89,6 +89,12 @@ const allNavItems = computed<NavItem[]>(() => [
     label: t('adminNav.reports'),
     icon: 'M4 19V9m6 10V4m6 15v-6',
   },
+  {
+    name: 'admin-offboarding',
+    section: 'offboarding',
+    label: t('adminNav.offboarding'),
+    icon: 'M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3',
+  },
 ]);
 
 const navItems = computed(() =>

@@ -434,6 +434,134 @@ export class AdminController {
     return filename;
   }
 
+  // Offboarding: looks a customer up by phone or email and lists every
+  // CREDIT wallet they own with its outstanding balance — the "quit a
+  // customer" page's search step. Unlike the overdue-collection queue (only
+  // already-blocked wallets), this works on any credit wallet regardless of
+  // block state, since an admin may want to offboard someone in good
+  // standing just as easily as one behind on payments.
+  @Get('offboarding/lookup')
+  @RequireSection('offboarding')
+  async lookupOffboardingCandidate(
+    @CurrentUser() admin: AuthenticatedUser,
+    @Query('identifier') identifier: string,
+  ) {
+    if (!identifier?.trim()) {
+      throw new BadRequestException('identifier query parameter is required');
+    }
+    const trimmed = identifier.trim();
+    const target = trimmed.includes('@')
+      ? await this.usersService.findByEmail(trimmed)
+      : await this.usersService.findByPhoneNumber(
+          normalizePhoneNumber(trimmed),
+        );
+    if (!target) {
+      throw new NotFoundException(
+        'No account found with that email or phone number',
+      );
+    }
+    if (target.role === UserRole.USER) {
+      await this.assertCustomerInScope(admin.userId, target.id);
+    }
+
+    const wallets = await this.walletsService.listForUser(target.id);
+    const creditWallets = wallets.filter(
+      (wallet) => wallet.walletType.code === WalletTypeCode.CREDIT,
+    );
+    const summaries = await Promise.all(
+      creditWallets.map(async (wallet) => {
+        const outstanding =
+          await this.installmentsService.getOutstandingForWallet(wallet.id);
+        const outstandingTotal = outstanding.reduce(
+          (sum, installment) => sum + BigInt(installment.amount),
+          0n,
+        );
+        return {
+          ...serializeWallet(wallet),
+          outstandingTotal: outstandingTotal.toString(),
+          outstandingCount: outstanding.length,
+        };
+      }),
+    );
+
+    return {
+      id: target.id,
+      email: target.email,
+      phoneNumber: target.phoneNumber,
+      creditWallets: summaries,
+    };
+  }
+
+  // Offboarding, debt-collection method 1 of 2 — see
+  // TransactionsService.initiateQuitCollectionZarinPal. Same shape as the
+  // overdue-queue's ZarinPal endpoint, just reachable on any credit wallet.
+  @Post('offboarding/:walletId/collect/zarinpal')
+  @RequireSection('offboarding')
+  async collectQuitZarinpal(
+    @CurrentUser() admin: AuthenticatedUser,
+    @Param('walletId') walletId: string,
+    @Headers('idempotency-key') idempotencyKey: string,
+  ) {
+    await this.assertWalletInScope(admin.userId, walletId);
+    return this.transactionsService.initiateQuitCollectionZarinPal(
+      admin.userId,
+      walletId,
+      idempotencyKey,
+    );
+  }
+
+  // Offboarding, debt-collection method 2 of 2 — see
+  // TransactionsService.collectQuitDebtFromRepository. Same shape/audit
+  // trail as the overdue-queue's repository-absorb endpoint.
+  @Post('offboarding/:walletId/collect/repository')
+  @RequireSection('offboarding')
+  @UseInterceptors(
+    FileInterceptor('document', { limits: { fileSize: MAX_UPLOAD_BYTES } }),
+  )
+  async collectQuitRepository(
+    @CurrentUser() admin: AuthenticatedUser,
+    @Param('walletId') walletId: string,
+    @Body('description') description: string,
+    @Headers('idempotency-key') idempotencyKey: string,
+    @UploadedFile() document?: Express.Multer.File,
+  ) {
+    if (!description?.trim()) {
+      throw new BadRequestException(
+        'A description justifying this write-off is required',
+      );
+    }
+    await this.assertWalletInScope(admin.userId, walletId);
+    const documentReference = document
+      ? this.saveOverdueSettlementDocument(walletId, document)
+      : null;
+    return this.transactionsService.collectQuitDebtFromRepository(
+      admin.userId,
+      walletId,
+      description.trim(),
+      documentReference,
+      idempotencyKey,
+    );
+  }
+
+  // Offboarding step 2 of 2 — see
+  // TransactionsService.closeCreditWalletAndReclaim: only reachable once the
+  // wallet's outstanding balance is zero (settled via one of the two
+  // methods above, or the customer's own repayments).
+  @Post('offboarding/:walletId/close')
+  @RequireSection('offboarding')
+  async closeOffboardedWallet(
+    @CurrentUser() admin: AuthenticatedUser,
+    @Param('walletId') walletId: string,
+    @Headers('idempotency-key') idempotencyKey: string,
+  ) {
+    await this.assertWalletInScope(admin.userId, walletId);
+    return this.transactionsService.closeCreditWalletAndReclaim(
+      admin.userId,
+      walletId,
+      idempotencyKey,
+    );
+  }
+
   // AuthenticatedUser (the JWT payload) doesn't carry role, so every
   // scoping check re-fetches fresh from the DB — same pattern as
   // AdminGuard/SuperAdminGuard/SectionGuard, so a role change takes effect

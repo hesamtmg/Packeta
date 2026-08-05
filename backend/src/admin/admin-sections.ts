@@ -18,6 +18,7 @@ export const ADMIN_SECTIONS = [
   'schedulerLogs',
   'reports',
   'roles',
+  'offboarding',
 ] as const;
 
 export type AdminSection = (typeof ADMIN_SECTIONS)[number];

@@ -2194,3 +2194,147 @@ describe('TransactionsService overdue-collection methods', () => {
     );
   });
 });
+
+describe('TransactionsService offboarding (quit-customer) methods', () => {
+  const repositoryWallet: WalletFixture = {
+    id: 'repo-1',
+    balance: '5000',
+    virtualAmount: '200',
+    walletType: walletType({ name: 'Repository', allowPurchaseIn: true }),
+  };
+
+  // Deliberately NOT blocked — offboarding must work on a credit wallet in
+  // good standing, unlike the overdue-collection methods above.
+  const openCreditWallet: WalletFixture = {
+    id: 'credit-1',
+    userId: 'personnel-1',
+    balance: '0',
+    virtualAmount: '150',
+    blockedAt: null,
+    repositoryWalletId: 'repo-1',
+    walletType: walletType({ code: 'CREDIT', unblockFee: '50' }),
+  };
+
+  function buildQuitService(
+    wallet: WalletFixture = openCreditWallet,
+    outstanding: {
+      amount: string;
+      principalAmount: string;
+      feeAmount: string;
+    }[] = [{ amount: '400', principalAmount: '350', feeAmount: '50' }],
+  ) {
+    const installmentsService = {
+      getOutstandingForWallet: jest.fn(async () => outstanding),
+      markAllPaidAndUnblock: jest.fn(async () => undefined),
+      computeRepaymentSplit: jest.fn(computeRepaymentSplitFixture),
+    };
+    return {
+      ...buildService({
+        senderWallet: wallet,
+        repositoryWallet,
+        installmentsService: installmentsService as any,
+      }),
+      installmentsService,
+    };
+  }
+
+  it('initiateQuitCollectionZarinPal works on a wallet that is not blocked and never folds in unblockFee', async () => {
+    const { service, manager, zarinpalClientService } = buildQuitService();
+
+    const result = await service.initiateQuitCollectionZarinPal(
+      'admin-1',
+      'credit-1',
+      'idem-quit-1',
+    );
+
+    expect(result.redirectUrl).toBe(
+      'https://sandbox.zarinpal.com/pg/StartPay/zarinpal-auth-1',
+    );
+    expect(zarinpalClientService.createPayment).toHaveBeenCalled();
+    // Just the one outstanding installment's amount (400) — the type's
+    // unblockFee (50) never applies here, unlike the overdue-queue version.
+    expect(manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: TransactionType.DEPOSIT,
+        toWalletId: 'repo-1',
+        amount: '400',
+        settlesWalletId: 'credit-1',
+      }),
+    );
+  });
+
+  it('collectQuitDebtFromRepository never charges unblockFee and works on a non-blocked wallet', async () => {
+    const { service, manager, installmentsService } = buildQuitService();
+
+    const result = await service.collectQuitDebtFromRepository(
+      'admin-1',
+      'credit-1',
+      'Customer requested account closure',
+      null,
+      'idem-quit-2',
+    );
+
+    // fee 50 + penalty 0 = 50 recorded, no unblockFee component at all.
+    expect(result.balance).toBe('5000');
+    expect(manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: TransactionType.ADJUSTMENT,
+        fromWalletId: 'repo-1',
+        amount: '50',
+      }),
+    );
+    expect(installmentsService.markAllPaidAndUnblock).toHaveBeenCalledWith(
+      manager,
+      'credit-1',
+      undefined,
+    );
+  });
+
+  it('closeCreditWalletAndReclaim rejects while the wallet still owes an outstanding balance', async () => {
+    const { service } = buildQuitService();
+
+    await expect(
+      service.closeCreditWalletAndReclaim('admin-1', 'credit-1', 'idem-quit-3'),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+  });
+
+  it('closeCreditWalletAndReclaim hands the unused virtualAmount ceiling back to the repository and closes the wallet once nothing is owed', async () => {
+    const { service, manager } = buildQuitService(openCreditWallet, []);
+
+    const result = await service.closeCreditWalletAndReclaim(
+      'admin-1',
+      'credit-1',
+      'idem-quit-4',
+    );
+
+    expect(result).toEqual({ walletId: 'credit-1', reclaimed: '150' });
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'repo-1', {
+      virtualAmount: '350', // repository's existing 200 + reclaimed 150
+    });
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'credit-1', {
+      virtualAmount: '0',
+    });
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'credit-1', {
+      closedAt: expect.any(Date),
+    });
+    expect(manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: TransactionType.VIRTUAL,
+        fromWalletId: 'credit-1',
+        toWalletId: 'repo-1',
+        amount: '150',
+      }),
+    );
+  });
+
+  it('closeCreditWalletAndReclaim rejects a wallet that is already closed', async () => {
+    const { service } = buildQuitService(
+      { ...openCreditWallet, closedAt: new Date() },
+      [],
+    );
+
+    await expect(
+      service.closeCreditWalletAndReclaim('admin-1', 'credit-1', 'idem-quit-5'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});

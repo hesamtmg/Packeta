@@ -628,17 +628,30 @@ export class TransactionsService {
     );
   }
 
-  // Loads the wallet + repository + outstanding-balance total shared by all
-  // three overdue-collection methods below, and rejects anything that isn't
-  // actually a blocked, repository-backed credit wallet with money owed.
-  private async loadOverdueCollectionContext(walletId: string): Promise<{
+  // Loads the wallet + repository + outstanding-balance total shared by the
+  // overdue-collection methods below, and rejects anything that isn't
+  // actually a repository-backed credit wallet with money owed.
+  //
+  // requireBlocked/includeUnblockFee default to the original overdue-queue
+  // behavior (collection only makes sense on a wallet the customer is
+  // actually locked out of, and the charge folds in the type's unblockFee).
+  // The offboarding flow below passes both false: it settles ANY credit
+  // wallet's outstanding balance regardless of block state, and never
+  // charges unblockFee — there's no "unblocking" happening, the wallet is
+  // being closed for good.
+  private async loadOverdueCollectionContext(
+    walletId: string,
+    options: { requireBlocked?: boolean; includeUnblockFee?: boolean } = {},
+  ): Promise<{
     creditWallet: Wallet;
     repository: Wallet;
     outstanding: Installment[];
     totalOwed: bigint;
   }> {
+    const requireBlocked = options.requireBlocked ?? true;
+    const includeUnblockFee = options.includeUnblockFee ?? true;
     const creditWallet = await this.walletsService.getByIdUnscoped(walletId);
-    if (!creditWallet.blockedAt) {
+    if (requireBlocked && !creditWallet.blockedAt) {
       throw new BadRequestException(
         'This wallet is not currently blocked for overdue installments',
       );
@@ -660,7 +673,9 @@ export class TransactionsService {
     }
     const totalOwed =
       outstanding.reduce((sum, i) => sum + BigInt(i.amount), 0n) +
-      BigInt(creditWallet.walletType.unblockFee ?? '0');
+      (includeUnblockFee
+        ? BigInt(creditWallet.walletType.unblockFee ?? '0')
+        : 0n);
     return { creditWallet, repository, outstanding, totalOwed };
   }
 
@@ -961,6 +976,250 @@ export class TransactionsService {
           fromWalletId: repository.id,
           toWalletId: null,
           balance: newRepositoryBalance.toString(),
+        };
+      },
+    );
+  }
+
+  // Offboarding step 1 of 2, method 1 of 2 (see closeCreditWalletAndReclaim
+  // for step 2): same idea as initiateOverdueCollectionZarinPal — a real
+  // ZarinPal link for the wallet's entire outstanding balance — but usable
+  // on ANY repository-backed credit wallet, not just one already blocked,
+  // and never folds in unblockFee (nothing is being unblocked; the customer
+  // is leaving for good). Settling this way still goes through
+  // verifyPurchase's ordinary settlesWalletId branch, so it marks every
+  // installment paid and clears any block exactly like the overdue-queue
+  // version — closing the wallet itself is a separate, explicit step once
+  // the balance reaches zero.
+  async initiateQuitCollectionZarinPal(
+    adminUserId: string,
+    walletId: string,
+    idempotencyKey: string,
+  ): Promise<PurchaseInitiateResult> {
+    return this.run(
+      'quit_collect_zarinpal',
+      adminUserId,
+      { walletId },
+      idempotencyKey,
+      async (manager) => {
+        const { repository, totalOwed } =
+          await this.loadOverdueCollectionContext(walletId, {
+            requireBlocked: false,
+            includeUnblockFee: false,
+          });
+
+        const timeoutSeconds = DEFAULT_PURCHASE_TIMEOUT_SECONDS;
+        const expiresAt = new Date(Date.now() + timeoutSeconds * 1000);
+
+        const transaction = manager.create(Transaction, {
+          type: TransactionType.DEPOSIT,
+          status: TransactionStatus.PENDING,
+          fromWalletId: null,
+          toWalletId: repository.id,
+          amount: totalOwed.toString(),
+          idempotencyKey,
+          expiresAt,
+          settlesWalletId: walletId,
+        });
+        await manager.save(transaction);
+
+        const ipgFrontendUrl = this.configService.get<string>('ipgFrontendUrl');
+        const { authority, paymentUrl } =
+          await this.zarinpalClientService.createPayment({
+            merchantName: 'Credit line payoff',
+            amount: transaction.amount,
+            displayAmount: formatAmount(
+              totalOwed.toString(),
+              repository.walletType.currency,
+            ),
+            callbackUrl: `${ipgFrontendUrl}/pay/${transaction.id}?topupTxnId=${transaction.id}`,
+            timeoutSeconds,
+          });
+
+        transaction.ipgAuthority = authority;
+        transaction.ipgPaymentUrl = paymentUrl;
+        await manager.save(transaction);
+
+        return {
+          transactionId: transaction.id,
+          redirectUrl: paymentUrl,
+          expiresAt,
+        };
+      },
+    );
+  }
+
+  // Offboarding step 1 of 2, method 2 of 2: same idea as
+  // collectOverdueFromRepository — the repository absorbs the outstanding
+  // balance out of its own real funds — but usable on any repository-backed
+  // credit wallet regardless of block state, and never folds in unblockFee.
+  async collectQuitDebtFromRepository(
+    adminUserId: string,
+    walletId: string,
+    description: string,
+    documentReference: string | null,
+    idempotencyKey: string,
+  ): Promise<MoneyResult> {
+    return this.run(
+      'quit_collect_repository',
+      adminUserId,
+      { walletId, description, documentReference },
+      idempotencyKey,
+      async (manager) => {
+        const { creditWallet, outstanding } =
+          await this.loadOverdueCollectionContext(walletId, {
+            requireBlocked: false,
+            includeUnblockFee: false,
+          });
+
+        // Same reasoning as collectOverdueFromRepository: the principal
+        // share was already handed to the customer at purchase time, so
+        // only fee/penalty actually move here.
+        const { fee, penalty } =
+          this.installmentsService.computeRepaymentSplit(outstanding);
+
+        const repository = await this.walletsService.lockById(
+          manager,
+          creditWallet.repositoryWalletId!,
+        );
+
+        const unrouted = await this.creditFeeSplitLegs(
+          manager,
+          repository,
+          creditWallet.walletType,
+          { fee, penalty, unblockFee: 0n },
+          TransactionType.TRANSFER,
+          `quit-absorb:${idempotencyKey}`,
+        );
+        const routedTotal = fee + penalty - unrouted;
+
+        const newRepositoryBalance = BigInt(repository.balance) - routedTotal;
+        if (newRepositoryBalance < 0n) {
+          throw new UnprocessableEntityException(
+            "The repository's real balance is not enough to absorb this debt",
+          );
+        }
+        if (routedTotal > 0n) {
+          await manager.update(Wallet, repository.id, {
+            balance: newRepositoryBalance.toString(),
+          });
+        }
+
+        const transaction = manager.create(Transaction, {
+          type: TransactionType.ADJUSTMENT,
+          fromWalletId: repository.id,
+          toWalletId: null,
+          amount: (fee + penalty).toString(),
+          idempotencyKey,
+          note: (documentReference
+            ? `Offboarding: repository absorbed the debt for wallet ${walletId} ahead of closing it (principal written off; fee/penalty routed to their repositories). ${description} (document: ${documentReference})`
+            : `Offboarding: repository absorbed the debt for wallet ${walletId} ahead of closing it (principal written off; fee/penalty routed to their repositories). ${description}`
+          ).slice(0, 500),
+          performedByUserId: adminUserId,
+        });
+        await manager.save(transaction);
+
+        await this.installmentsService.markAllPaidAndUnblock(
+          manager,
+          walletId,
+          transaction.id,
+        );
+
+        return {
+          transactionId: transaction.id,
+          fromWalletId: repository.id,
+          toWalletId: null,
+          balance: newRepositoryBalance.toString(),
+        };
+      },
+    );
+  }
+
+  // Offboarding step 2 of 2: once a credit wallet's outstanding balance has
+  // been fully settled (via either method above, or the customer's own
+  // repayments), this actually removes them from the credit line — hands
+  // back whatever unused ceiling (virtualAmount) is left to the backing
+  // repository's own unallocated pool (the exact reverse of
+  // WalletsService.grantCredit, which carved it out in the first place), and
+  // soft-closes the wallet so it can never be drawn on again. Rejects if
+  // anything is still owed, so an admin can never accidentally write off a
+  // balance by closing instead of collecting it.
+  async closeCreditWalletAndReclaim(
+    adminUserId: string,
+    walletId: string,
+    idempotencyKey: string,
+  ): Promise<Record<string, any>> {
+    return this.run(
+      'quit_close_wallet',
+      adminUserId,
+      { walletId },
+      idempotencyKey,
+      async (manager) => {
+        // getByIdUnscoped (not lockById) purely for its walletType.code —
+        // lockById below doesn't join that relation.
+        const creditWalletTyped =
+          await this.walletsService.getByIdUnscoped(walletId);
+        if (creditWalletTyped.walletType.code !== WalletTypeCode.CREDIT) {
+          throw new BadRequestException(
+            'Only CREDIT wallets can be closed through offboarding',
+          );
+        }
+        const creditWallet = await this.walletsService.lockById(
+          manager,
+          walletId,
+        );
+        if (creditWallet.closedAt) {
+          throw new BadRequestException('This wallet is already closed');
+        }
+        if (!creditWallet.repositoryWalletId) {
+          throw new BadRequestException('This wallet has no linked repository');
+        }
+        const outstanding =
+          await this.installmentsService.getOutstandingForWallet(walletId);
+        if (outstanding.length) {
+          throw new UnprocessableEntityException(
+            'This customer still owes an outstanding balance — collect it first via ZarinPal or the repository before closing their wallet',
+          );
+        }
+        if (BigInt(creditWallet.balance) !== 0n) {
+          throw new UnprocessableEntityException(
+            'This wallet still has a nonzero balance',
+          );
+        }
+
+        const reclaimed = BigInt(creditWallet.virtualAmount ?? '0');
+        if (reclaimed > 0n) {
+          const repository = await this.walletsService.lockById(
+            manager,
+            creditWallet.repositoryWalletId,
+          );
+          await manager.update(Wallet, repository.id, {
+            virtualAmount: (
+              BigInt(repository.virtualAmount ?? '0') + reclaimed
+            ).toString(),
+          });
+          await manager.update(Wallet, creditWallet.id, {
+            virtualAmount: '0',
+          });
+
+          const transaction = manager.create(Transaction, {
+            type: TransactionType.VIRTUAL,
+            fromWalletId: creditWallet.id,
+            toWalletId: repository.id,
+            amount: reclaimed.toString(),
+            idempotencyKey,
+            note: "Credit line closed: customer's remaining unused ceiling reclaimed by the repository",
+          });
+          await manager.save(transaction);
+        }
+
+        await manager.update(Wallet, creditWallet.id, {
+          closedAt: new Date(),
+        });
+
+        return {
+          walletId: creditWallet.id,
+          reclaimed: reclaimed.toString(),
         };
       },
     );
@@ -2236,7 +2495,10 @@ export class TransactionsService {
       | 'purchase_reverse'
       | 'installment_pay'
       | 'overdue_collect_zarinpal'
-      | 'overdue_collect_repository',
+      | 'overdue_collect_repository'
+      | 'quit_collect_zarinpal'
+      | 'quit_collect_repository'
+      | 'quit_close_wallet',
     userId: string,
     payload: Record<string, unknown>,
     idempotencyKey: string,

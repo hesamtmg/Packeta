@@ -263,6 +263,70 @@ describe('InstallmentsService.generateDue', () => {
   });
 });
 
+// A customer who already has installments from a prior period, then spends
+// nothing the following month: generateDue must NOT invent a new batch (no
+// "same amount every month" regardless of activity), while
+// applyOverduePenalties keeps accruing on whatever they still owe from
+// before — and, if that debt sits unpaid long enough, blocks them. This is
+// the exact "I didn't spend this month" scenario, exercised end to end
+// across both scheduler entry points against the same wallet.
+describe('InstallmentsService generateDue + applyOverduePenalties (no-spend month)', () => {
+  it("skips generating a new batch for a period with zero spend, and still accrues penalty (and eventually blocks) on the customer's untouched prior-period installment", async () => {
+    const wallet = {
+      id: 'wallet-1',
+      repositoryWalletId: 'repo-1',
+      walletType: {
+        installmentCount: 3,
+        feePercent: '10',
+        paymentDeadlineDate: 15,
+        penaltyPercentPerDay: '2',
+        overdueDaysBeforeBlock: 3,
+      },
+    };
+    // Last period's installment, still unpaid, now past its deadline.
+    const priorInstallment = {
+      id: 'installment-prior',
+      amount: '330',
+      principalAmount: '300',
+      penaltyApplied: false,
+      penaltyDaysApplied: 0,
+      status: InstallmentStatus.PENDING,
+      deadlineDate: '2026-01-15',
+      wallet: {
+        id: 'wallet-1',
+        userId: 'user-1',
+        blockedAt: null,
+        walletType: wallet.walletType,
+      },
+    };
+
+    const { service, installmentsRepository, walletsRepository } = buildService(
+      {
+        wallets: [wallet],
+        virtualSumByWallet: {}, // no VIRTUAL draw-downs this period at all
+        overdueRows: [priorInstallment],
+      },
+    );
+
+    // This month's generation run: no new spend -> no new batch.
+    const created = await service.generateDue(new Date(2026, 1, 1));
+    expect(created).toHaveLength(0);
+    expect(installmentsRepository.create).not.toHaveBeenCalled();
+
+    // The same day's overdue sweep: 17 days past the Jan 15 deadline,
+    // 2%/day of the 300 principal = 6/day x 17 = 102 penalty, and since
+    // 17 > overdueDaysBeforeBlock (3), the wallet gets blocked.
+    const affected = await service.applyOverduePenalties(new Date(2026, 1, 1));
+
+    expect(affected).toBe(1);
+    expect(priorInstallment.amount).toBe('432'); // 330 + 102
+    expect(priorInstallment.status).toBe(InstallmentStatus.OVERDUE);
+    expect(walletsRepository.update).toHaveBeenCalledWith('wallet-1', {
+      blockedAt: expect.any(Date),
+    });
+  });
+});
+
 describe('InstallmentsService.applyOverduePenalties', () => {
   it('adds 5 days worth of penalty and marks OVERDUE, but does not block when the type has no overdueDaysBeforeBlock set', async () => {
     const row = {
