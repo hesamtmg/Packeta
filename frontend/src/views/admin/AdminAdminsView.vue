@@ -5,7 +5,7 @@ import { apiRequest, ApiError } from '../../api/client';
 import { amountStep, formatAmount, toMinorUnits, type CurrencyInfo } from '../../utils/currency';
 import { formatDate } from '../../utils/date';
 import { displayIdentity } from '../../utils/identity';
-import { ADMIN_SECTIONS, FULL_ACCESS_ROLE_ID, type AdminUser, type PanelRole } from '../../types/admin';
+import { ADMIN_SECTIONS, CUSTOMER_ACTIONS, FULL_ACCESS_ROLE_ID, type AdminUser, type PanelRole } from '../../types/admin';
 import { useListControls } from '../../composables/useListControls';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
 import SortableTh from '../../components/admin/SortableTh.vue';
@@ -163,6 +163,15 @@ async function deleteRole(role: PanelRole) {
 function roleLabel(user: AdminUser): string {
   if (user.role === 'SUPER_ADMIN') return t('admin.admins.fullAccess');
   return user.panelRole?.name ?? t('admin.admins.noRole');
+}
+
+// A permission key is either an admin nav section or a customer-dashboard
+// action — the two arrays never overlap, so this picks the right i18n
+// namespace for whichever one it belongs to.
+function permissionLabel(key: string): string {
+  return (ADMIN_SECTIONS as readonly string[]).includes(key)
+    ? t(`adminNav.${key}`)
+    : t(`customerActions.${key}`);
 }
 
 // --- Panel users: expand a row to assign a role + see their wallets ---
@@ -387,6 +396,7 @@ loadRoles();
         <article v-for="role in roles" :key="role.id" class="role-card">
           <template v-if="editingRoleId === role.id">
             <input v-model="editRoleName" type="text" class="admin-input" />
+            <h4>{{ t('admin.admins.roleSectionsLabel') }}</h4>
             <div class="permissions-grid">
               <label v-for="section in ADMIN_SECTIONS" :key="section" class="permission-checkbox">
                 <input
@@ -395,6 +405,17 @@ loadRoles();
                   @change="editRolePermissions = toggleInList(editRolePermissions, section)"
                 />
                 {{ t(`adminNav.${section}`) }}
+              </label>
+            </div>
+            <h4>{{ t('admin.admins.roleCustomerActionsLabel') }}</h4>
+            <div class="permissions-grid">
+              <label v-for="action in CUSTOMER_ACTIONS" :key="action" class="permission-checkbox">
+                <input
+                  type="checkbox"
+                  :checked="editRolePermissions.includes(action)"
+                  @change="editRolePermissions = toggleInList(editRolePermissions, action)"
+                />
+                {{ t(`customerActions.${action}`) }}
               </label>
             </div>
             <div class="role-card-actions">
@@ -407,7 +428,7 @@ loadRoles();
           <template v-else>
             <span class="role-name">{{ role.name }}</span>
             <div class="badges">
-              <span v-for="section in role.permissions" :key="section" class="admin-badge">{{ t(`adminNav.${section}`) }}</span>
+              <span v-for="section in role.permissions" :key="section" class="admin-badge">{{ permissionLabel(section) }}</span>
               <span v-if="!role.permissions.length" class="hint">{{ t('admin.admins.roleNoSections') }}</span>
             </div>
             <div class="role-card-actions">
@@ -434,6 +455,7 @@ loadRoles();
           :placeholder="t('admin.admins.roleNamePlaceholder')"
           required
         />
+        <h4>{{ t('admin.admins.roleSectionsLabel') }}</h4>
         <div class="permissions-grid">
           <label v-for="section in ADMIN_SECTIONS" :key="section" class="permission-checkbox">
             <input
@@ -442,6 +464,17 @@ loadRoles();
               @change="newRolePermissions = toggleInList(newRolePermissions, section)"
             />
             {{ t(`adminNav.${section}`) }}
+          </label>
+        </div>
+        <h4>{{ t('admin.admins.roleCustomerActionsLabel') }}</h4>
+        <div class="permissions-grid">
+          <label v-for="action in CUSTOMER_ACTIONS" :key="action" class="permission-checkbox">
+            <input
+              type="checkbox"
+              :checked="newRolePermissions.includes(action)"
+              @change="newRolePermissions = toggleInList(newRolePermissions, action)"
+            />
+            {{ t(`customerActions.${action}`) }}
           </label>
         </div>
         <button type="submit" class="admin-btn admin-btn-primary" :disabled="roleFormBusy || !newRoleName.trim()">
@@ -663,6 +696,13 @@ h3 {
   text-transform: uppercase;
   letter-spacing: 0.03em;
   margin: 0 0 10px;
+}
+h4 {
+  font-size: 0.75rem;
+  color: var(--text-dimmer);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin: 4px 0 0;
 }
 .roles-list {
   display: flex;

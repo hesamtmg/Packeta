@@ -2,7 +2,8 @@
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useWalletStore, type Wallet, type WalletOptionsInput, type SettlementRailType } from '../stores/wallet';
-import { ApiError } from '../api/client';
+import { useAuthStore } from '../stores/auth';
+import { apiRequest, ApiError } from '../api/client';
 import { amountStep, formatAmount, formatAmountWords, toMinorUnits, type CurrencyInfo } from '../utils/currency';
 import { formatDateTime } from '../utils/date';
 import { transactionTypeClass, transactionStatusClass } from '../types/admin';
@@ -14,6 +15,7 @@ import SortableTh from '../components/admin/SortableTh.vue';
 import ListPagination from '../components/admin/ListPagination.vue';
 
 const wallet = useWalletStore();
+const auth = useAuthStore();
 const { t } = useI18n();
 
 const chargeAmount = ref('');
@@ -321,6 +323,16 @@ onMounted(async () => {
     wallet.fetchWalletTypes(),
     wallet.fetchTransactions(),
   ]);
+  try {
+    const me = await apiRequest<{
+      role: string;
+      panelRole: { permissions: string[] } | null;
+    }>('/users/me');
+    auth.setRole(me.role);
+    auth.setPermissions(me.panelRole?.permissions ?? null);
+  } catch {
+    // Non-critical — the gated cards just keep whatever was cached.
+  }
 });
 
 function addChargeSplitRow() {
@@ -963,7 +975,7 @@ async function onGrantCredit() {
         </article>
       </div>
 
-      <form class="add-wallet" @submit.prevent="onAddWallet">
+      <form v-if="auth.canCustomerAction('addWallet')" class="add-wallet" @submit.prevent="onAddWallet">
         <select v-model="newWalletType" class="admin-input" required>
           <option value="" disabled>{{ t('dashboard.wallets.addPlaceholder') }}</option>
           <option v-for="t2 in wallet.walletTypes" :key="t2.id" :value="t2.id">
@@ -1112,7 +1124,7 @@ async function onGrantCredit() {
     </div>
 
     <div class="admin-grid admin-grid-4 actions">
-      <form class="admin-card" @submit.prevent="onDeposit">
+      <form v-if="auth.canCustomerAction('deposit')" class="admin-card" @submit.prevent="onDeposit">
         <h2>{{ t('dashboard.actions.deposit.title') }}</h2>
         <select v-model="depositWalletId" class="admin-input" required>
           <option value="" disabled>{{ t('dashboard.actions.deposit.chooseWallet') }}</option>
@@ -1124,7 +1136,7 @@ async function onGrantCredit() {
         <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.actions.deposit.submit') }}</button>
       </form>
 
-      <form class="admin-card" @submit.prevent="onWithdraw">
+      <form v-if="auth.canCustomerAction('withdraw')" class="admin-card" @submit.prevent="onWithdraw">
         <h2>{{ t('dashboard.actions.withdraw.title') }}</h2>
         <select v-model="withdrawWalletId" class="admin-input" required>
           <option value="" disabled>{{ t('dashboard.actions.withdraw.chooseWallet') }}</option>
@@ -1143,7 +1155,7 @@ async function onGrantCredit() {
         <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.actions.withdraw.submit') }}</button>
       </form>
 
-      <form class="admin-card" @submit.prevent="onTransfer">
+      <form v-if="auth.canCustomerAction('transfer')" class="admin-card" @submit.prevent="onTransfer">
         <h2>{{ t('dashboard.actions.transfer.title') }}</h2>
         <select v-model="transferFromWalletId" class="admin-input" required>
           <option value="" disabled>{{ t('dashboard.actions.transfer.fromWallet') }}</option>
@@ -1156,7 +1168,7 @@ async function onGrantCredit() {
         <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.actions.transfer.submit') }}</button>
       </form>
 
-      <form class="admin-card" @submit.prevent="onPurchase">
+      <form v-if="auth.canCustomerAction('purchaseAction')" class="admin-card" @submit.prevent="onPurchase">
         <h2>{{ t('dashboard.actions.purchase.title') }}</h2>
         <select v-model="purchaseFromWalletId" class="admin-input" required>
           <option value="" disabled>{{ t('dashboard.actions.purchase.payFrom') }}</option>

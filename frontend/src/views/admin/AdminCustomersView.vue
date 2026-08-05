@@ -15,6 +15,7 @@ import {
   type AdminUser,
   type AdminWallet,
   type AdminTransaction,
+  type PanelRole,
 } from '../../types/admin';
 import { useListControls } from '../../composables/useListControls';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
@@ -67,6 +68,12 @@ const adjustReason = ref<Record<string, string>>({});
 const newWalletTypeId = ref('');
 const newWalletVirtualAmount = ref('');
 const newWalletNationalCode = ref('');
+
+const roles = ref<PanelRole[]>([]);
+const assignRoleDraft = ref('');
+const assignBusy = ref(false);
+const assignError = ref('');
+const assignSuccess = ref('');
 
 const newWalletType = computed(() =>
   walletTypes.value.find((t) => t.id === newWalletTypeId.value) ?? null,
@@ -121,9 +128,19 @@ async function loadWalletTypes() {
   }
 }
 
+async function loadRoles() {
+  try {
+    roles.value = await apiRequest<PanelRole[]>('/admin/roles');
+  } catch {
+    // Non-critical — the assignment select just stays empty.
+  }
+}
+
 async function selectUser(id: string) {
   detailError.value = '';
   adjustError.value = '';
+  assignError.value = '';
+  assignSuccess.value = '';
   try {
     const [detail, txs] = await Promise.all([
       apiRequest<UserDetail>(`/admin/users/${id}`),
@@ -131,8 +148,28 @@ async function selectUser(id: string) {
     ]);
     selected.value = detail;
     transactions.value = txs;
+    assignRoleDraft.value = detail.panelRole?.id ?? '';
   } catch (err) {
     detailError.value = err instanceof ApiError ? err.message : t('admin.customers.detailFailed');
+  }
+}
+
+async function saveAssignment() {
+  if (!selected.value) return;
+  assignError.value = '';
+  assignSuccess.value = '';
+  assignBusy.value = true;
+  try {
+    await apiRequest(`/admin/users/${selected.value.id}/panel-role`, {
+      method: 'PATCH',
+      body: { panelRoleId: assignRoleDraft.value || null },
+    });
+    assignSuccess.value = t('admin.customers.assignSaved');
+    await selectUser(selected.value.id);
+  } catch (err) {
+    assignError.value = err instanceof ApiError ? err.message : t('admin.customers.assignFailed');
+  } finally {
+    assignBusy.value = false;
   }
 }
 
@@ -186,6 +223,7 @@ async function onAddWallet() {
 
 loadUsers();
 loadWalletTypes();
+loadRoles();
 </script>
 
 <template>
@@ -239,6 +277,22 @@ loadWalletTypes();
       <h2>{{ displayIdentity(selected) }}</h2>
       <p v-if="detailError" class="admin-error">{{ detailError }}</p>
       <p v-if="adjustError" class="admin-error">{{ adjustError }}</p>
+
+      <div v-if="auth.hasSection('roles')" class="assign-block">
+        <h3>{{ t('admin.customers.assignHeading') }}</h3>
+        <p class="hint">{{ t('admin.customers.assignHint') }}</p>
+        <p v-if="assignError" class="admin-error">{{ assignError }}</p>
+        <div class="assign-row">
+          <select v-model="assignRoleDraft" class="admin-input">
+            <option value="">{{ t('admin.admins.noRole') }}</option>
+            <option v-for="role in roles" :key="role.id" :value="role.id">{{ role.name }}</option>
+          </select>
+          <button class="admin-btn admin-btn-primary" :disabled="assignBusy" @click="saveAssignment">
+            {{ t('admin.admins.assignSave') }}
+          </button>
+        </div>
+        <p v-if="assignSuccess" class="admins-success">{{ assignSuccess }}</p>
+      </div>
 
       <div class="wallets">
         <article v-for="w in selected.wallets" :key="w.id" class="wallet-card">
@@ -377,6 +431,22 @@ h3 {
   text-transform: uppercase;
   letter-spacing: 0.03em;
   margin: 20px 0 10px;
+}
+.assign-block {
+  margin-bottom: 10px;
+}
+.assign-row {
+  display: flex;
+  gap: 10px;
+  margin: 10px 0;
+}
+.assign-row select {
+  flex: 1;
+  max-width: 320px;
+}
+.admins-success {
+  color: var(--accent-lime);
+  font-size: 0.85rem;
 }
 .wallets {
   display: grid;

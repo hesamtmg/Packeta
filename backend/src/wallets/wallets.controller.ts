@@ -24,9 +24,11 @@ import { UpdateWalletDto } from './dto/update-wallet.dto';
 import { GrantCreditDto } from './dto/grant-credit.dto';
 import { serializeWallet } from './wallet.serializer';
 import { SettlementService } from '../settlement/settlement.service';
+import { CustomerActionGuard } from '../admin/guards/customer-action.guard';
+import { RequireCustomerAction } from '../admin/decorators/require-customer-action.decorator';
 
 @Controller('wallets')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, CustomerActionGuard)
 export class WalletsController {
   constructor(
     private readonly walletsService: WalletsService,
@@ -63,6 +65,7 @@ export class WalletsController {
   }
 
   @Post()
+  @RequireCustomerAction('addWallet')
   async create(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateWalletDto,

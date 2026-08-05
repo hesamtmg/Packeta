@@ -11,6 +11,7 @@ import { CurrenciesModule } from '../currencies/currencies.module';
 import { SettlementModule } from '../settlement/settlement.module';
 import { InstallmentsModule } from '../installments/installments.module';
 import { RailSettlementsModule } from '../rail-settlements/rail-settlements.module';
+import { CustomerActionGuard } from '../admin/guards/customer-action.guard';
 
 @Module({
   imports: [
@@ -25,7 +26,7 @@ import { RailSettlementsModule } from '../rail-settlements/rail-settlements.modu
     RailSettlementsModule,
   ],
   controllers: [TransactionsController],
-  providers: [TransactionsService],
+  providers: [TransactionsService, CustomerActionGuard],
   exports: [TransactionsService],
 })
 export class TransactionsModule {}

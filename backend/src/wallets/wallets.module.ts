@@ -6,6 +6,7 @@ import { WalletsController } from './wallets.controller';
 import { WalletTypesModule } from '../wallet-types/wallet-types.module';
 import { SettlementModule } from '../settlement/settlement.module';
 import { IdempotencyModule } from '../idempotency/idempotency.module';
+import { CustomerActionGuard } from '../admin/guards/customer-action.guard';
 
 @Module({
   imports: [
@@ -15,7 +16,7 @@ import { IdempotencyModule } from '../idempotency/idempotency.module';
     IdempotencyModule,
   ],
   controllers: [WalletsController],
-  providers: [WalletsService],
+  providers: [WalletsService, CustomerActionGuard],
   exports: [WalletsService],
 })
 export class WalletsModule {}

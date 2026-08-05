@@ -27,6 +27,35 @@ export function isAdminSection(value: string): value is AdminSection {
   return (ADMIN_SECTIONS as readonly string[]).includes(value);
 }
 
+// Customer-facing actions a regular USER's Panel Role can be scoped to —
+// gates the Add Wallet / Deposit / Withdraw / Transfer / Purchase cards on
+// the customer dashboard (and the matching API routes). Uses the same
+// PanelRole entity/mechanism as ADMIN_SECTIONS but for a different account
+// role; a customer with no panelRoleId assigned keeps full access to all
+// five (backward-compatible default), see UsersService.setPanelRole.
+// "purchaseAction" (not "purchase") — ADMIN_SECTIONS already uses "purchase"
+// for the admin's "Create Charge" nav item; reusing that string here would
+// make the two unrelated grants indistinguishable in a role's permissions
+// array (granting one would visually and functionally grant the other).
+export const CUSTOMER_ACTIONS = [
+  'addWallet',
+  'deposit',
+  'withdraw',
+  'transfer',
+  'purchaseAction',
+] as const;
+
+export type CustomerAction = (typeof CUSTOMER_ACTIONS)[number];
+
+export function isCustomerAction(value: string): value is CustomerAction {
+  return (CUSTOMER_ACTIONS as readonly string[]).includes(value);
+}
+
+export const PANEL_ROLE_PERMISSIONS = [
+  ...ADMIN_SECTIONS,
+  ...CUSTOMER_ACTIONS,
+] as const;
+
 // Fixed ID (not a name lookup) for the seeded "Full Access" panel role — see
 // the AddPanelRoles migration and UsersService.setRole's auto-assign on
 // promotion. Referencing a fixed ID means a super-admin renaming that role

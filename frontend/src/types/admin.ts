@@ -23,6 +23,21 @@ export const ADMIN_SECTIONS = [
 
 export type AdminSection = (typeof ADMIN_SECTIONS)[number];
 
+// Mirrors backend/src/admin/admin-sections.ts's CUSTOMER_ACTIONS — the
+// customer-facing dashboard actions a USER's assigned PanelRole can be
+// scoped to. Uses the same PanelRole entity as ADMIN_SECTIONS, just applied
+// to customer accounts instead of admins. "purchaseAction" (not "purchase")
+// to avoid colliding with ADMIN_SECTIONS's "purchase" (Create Charge).
+export const CUSTOMER_ACTIONS = [
+  'addWallet',
+  'deposit',
+  'withdraw',
+  'transfer',
+  'purchaseAction',
+] as const;
+
+export type CustomerAction = (typeof CUSTOMER_ACTIONS)[number];
+
 // The seeded, non-deletable role every fresh ADMIN promotion starts on —
 // mirrors backend/src/admin/admin-sections.ts's FULL_ACCESS_ROLE_ID.
 export const FULL_ACCESS_ROLE_ID = '00000000-0000-0000-0000-000000000001';
