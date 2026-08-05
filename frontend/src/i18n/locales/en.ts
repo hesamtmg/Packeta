@@ -33,6 +33,13 @@ export default {
     roles: 'Roles',
     offboarding: 'Offboarding',
   },
+  customerActions: {
+    addWallet: 'Add wallet',
+    deposit: 'Deposit',
+    withdraw: 'Withdraw',
+    transfer: 'Transfer',
+    purchaseAction: 'Purchase',
+  },
   auth: {
     methodEmail: 'Email',
     methodPhone: 'Phone',
@@ -495,6 +502,10 @@ export default {
       addWalletNationalCodePlaceholder: 'National code (optional)',
       addWallet: 'Add wallet',
       addWalletFailed: 'Failed to add wallet',
+      assignHeading: 'Panel role',
+      assignHint: 'Restricts which dashboard actions (add wallet, deposit, withdraw, transfer, purchase) this customer can use. No role assigned means full access.',
+      assignSaved: 'Role assigned.',
+      assignFailed: 'Failed to assign role',
     },
     admins: {
       title: 'Role management',
@@ -536,6 +547,8 @@ export default {
       roleNamePlaceholder: 'Role name',
       roleCreate: 'Create role',
       roleCreateFailed: 'Failed to create role',
+      roleSectionsLabel: 'Admin panel sections',
+      roleCustomerActionsLabel: 'Customer dashboard actions',
       assignHeading: 'Panel role',
       assignSave: 'Save',
       assignSaved: 'Role assigned.',

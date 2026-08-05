@@ -33,6 +33,13 @@ export default {
     roles: 'نقش‌ها',
     offboarding: 'قطع همکاری',
   },
+  customerActions: {
+    addWallet: 'افزودن کیف پول',
+    deposit: 'واریز',
+    withdraw: 'برداشت',
+    transfer: 'انتقال',
+    purchaseAction: 'خرید',
+  },
   auth: {
     methodEmail: 'ایمیل',
     methodPhone: 'شماره تلفن',
@@ -495,6 +502,10 @@ export default {
       addWalletNationalCodePlaceholder: 'کد ملی (اختیاری)',
       addWallet: 'افزودن کیف پول',
       addWalletFailed: 'افزودن کیف پول ناموفق بود',
+      assignHeading: 'نقش پنل',
+      assignHint: 'مشخص می‌کند این مشتری کدام اقدامات داشبورد (افزودن کیف پول، واریز، برداشت، انتقال، خرید) را می‌تواند استفاده کند. بدون نقش یعنی دسترسی کامل.',
+      assignSaved: 'نقش اختصاص داده شد.',
+      assignFailed: 'اختصاص نقش ناموفق بود',
     },
     admins: {
       title: 'مدیریت نقش‌ها',
@@ -536,6 +547,8 @@ export default {
       roleNamePlaceholder: 'نام نقش',
       roleCreate: 'ایجاد نقش',
       roleCreateFailed: 'ایجاد نقش ناموفق بود',
+      roleSectionsLabel: 'بخش‌های پنل مدیریت',
+      roleCustomerActionsLabel: 'اقدامات داشبورد مشتری',
       assignHeading: 'نقش پنل',
       assignSave: 'ذخیره',
       assignSaved: 'نقش اختصاص یافت.',

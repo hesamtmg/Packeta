@@ -256,6 +256,22 @@ describe('UsersService.setPanelRole', () => {
     expect(record.panelRoleId).toBeNull();
   });
 
+  it('assigns an existing role to a regular USER (customer)', async () => {
+    const role = {
+      id: 'r1',
+      name: 'Restricted Customer',
+      permissions: ['deposit'],
+    } as PanelRole;
+    const { service, record } = buildService(
+      { id: 'u1', role: UserRole.USER, panelRoleId: null },
+      [role],
+    );
+
+    await service.setPanelRole('u1', 'r1');
+
+    expect(record.panelRoleId).toBe('r1');
+  });
+
   it('rejects assigning a role to a SUPER_ADMIN account', async () => {
     const { service } = buildService({
       id: 'u1',

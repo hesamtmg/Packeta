@@ -22,13 +22,16 @@ import { TransferDto } from './dto/transfer.dto';
 import { InitiatePurchaseDto } from './dto/initiate-purchase.dto';
 import { InitiateChargeDto } from './dto/initiate-charge.dto';
 import { ReverseTransactionDto } from './dto/reverse-transaction.dto';
+import { CustomerActionGuard } from '../admin/guards/customer-action.guard';
+import { RequireCustomerAction } from '../admin/decorators/require-customer-action.decorator';
 
 @Controller('transactions')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, CustomerActionGuard)
 export class TransactionsController {
   constructor(private readonly transactionsService: TransactionsService) {}
 
   @Post('deposit')
+  @RequireCustomerAction('deposit')
   deposit(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: DepositDto,
@@ -43,6 +46,7 @@ export class TransactionsController {
   }
 
   @Post('withdraw')
+  @RequireCustomerAction('withdraw')
   withdraw(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: WithdrawDto,
@@ -58,6 +62,7 @@ export class TransactionsController {
   }
 
   @Post('transfer')
+  @RequireCustomerAction('transfer')
   transfer(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: TransferDto,
@@ -73,6 +78,7 @@ export class TransactionsController {
   }
 
   @Post('purchase/initiate')
+  @RequireCustomerAction('purchaseAction')
   initiatePurchase(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: InitiatePurchaseDto,

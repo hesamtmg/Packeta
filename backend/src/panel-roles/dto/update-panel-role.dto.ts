@@ -7,7 +7,7 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
-import { ADMIN_SECTIONS } from '../../admin/admin-sections';
+import { PANEL_ROLE_PERMISSIONS } from '../../admin/admin-sections';
 
 export class UpdatePanelRoleDto {
   @IsOptional()
@@ -19,6 +19,6 @@ export class UpdatePanelRoleDto {
   @IsOptional()
   @IsArray()
   @ArrayUnique()
-  @IsIn(ADMIN_SECTIONS, { each: true })
+  @IsIn(PANEL_ROLE_PERMISSIONS, { each: true })
   permissions?: string[];
 }

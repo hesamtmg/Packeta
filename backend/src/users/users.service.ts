@@ -143,9 +143,9 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException('User not found');
     }
-    if (user.role !== UserRole.ADMIN) {
+    if (user.role === UserRole.SUPER_ADMIN) {
       throw new BadRequestException(
-        'Only regular ADMIN accounts can be assigned a panel role — SUPER_ADMIN already has full access',
+        'SUPER_ADMIN already has full access and cannot be assigned a panel role',
       );
     }
     if (panelRoleId) {
