@@ -113,6 +113,7 @@ export class WalletsController {
 
     const wallet = await this.dataSource.transaction((manager) =>
       this.walletsService.createForUser(manager, user.userId, walletType.id, {
+        name: dto.name,
         purchaseTimeoutSeconds: dto.purchaseTimeoutSeconds,
         settlementAccounts: dto.settlementAccounts,
         restrictedCounterparties: dto.restrictedCounterparties,
@@ -200,6 +201,7 @@ export class WalletsController {
 
     const wallet = await this.dataSource.transaction((manager) =>
       this.walletsService.updateForUser(manager, user.userId, id, {
+        name: dto.name,
         purchaseTimeoutSeconds: dto.purchaseTimeoutSeconds,
         settlementAccounts: dto.settlementAccounts,
         restrictedCounterparties: dto.restrictedCounterparties,

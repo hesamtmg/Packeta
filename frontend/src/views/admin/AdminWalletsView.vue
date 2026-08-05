@@ -6,6 +6,7 @@ import { amountStep, formatAmount, toMinorUnits } from '../../utils/currency';
 import { formatDate } from '../../utils/date';
 import { displayIdentity } from '../../utils/identity';
 import type { AdminWallet } from '../../types/admin';
+import { walletDisplayName } from '../../utils/wallet-name';
 import { useListControls } from '../../composables/useListControls';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
 import BatchImportCard from '../../components/admin/BatchImportCard.vue';
@@ -35,9 +36,10 @@ const {
   toggleSort,
   goToPage,
 } = useListControls(wallets, {
-  searchFields: (w) => [w.ownerEmail, w.ownerPhoneNumber, w.walletType.name],
+  searchFields: (w) => [w.ownerEmail, w.ownerPhoneNumber, w.walletType.name, w.name],
   sortAccessors: {
     owner: (w) => displayIdentity({ email: w.ownerEmail, phoneNumber: w.ownerPhoneNumber }).toLowerCase(),
+    name: (w) => walletDisplayName(w).toLowerCase(),
     type: (w) => w.walletType.name.toLowerCase(),
     balance: (w) => Number(w.balance),
     created: (w) => new Date(w.createdAt).getTime(),
@@ -111,6 +113,7 @@ onMounted(load);
         <thead>
           <tr>
             <SortableTh :label="t('admin.wallets.tableOwner')" col-key="owner" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
+            <SortableTh :label="t('admin.wallets.tableName')" col-key="name" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
             <SortableTh :label="t('admin.wallets.tableType')" col-key="type" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
             <th>{{ t('admin.wallets.tableCurrency') }}</th>
             <SortableTh :label="t('admin.wallets.tableBalance')" col-key="balance" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
@@ -123,6 +126,7 @@ onMounted(load);
           <template v-for="w in pageItems" :key="w.id">
             <tr>
               <td>{{ displayIdentity({ email: w.ownerEmail, phoneNumber: w.ownerPhoneNumber }) }}</td>
+              <td>{{ w.name ?? t('common.none') }}</td>
               <td>{{ w.walletType.name }}</td>
               <td>{{ w.walletType.currency.code }}</td>
               <td>{{ formatAmount(w.balance, w.walletType.currency) }}</td>
@@ -140,7 +144,7 @@ onMounted(load);
               </td>
             </tr>
             <tr v-if="openAdjustId === w.id">
-              <td colspan="7">
+              <td colspan="8">
                 <div class="adjust-row">
                   <input
                     v-model="adjustAmount[w.id]"
@@ -155,7 +159,7 @@ onMounted(load);
               </td>
             </tr>
           </template>
-          <tr v-if="!pageItems.length"><td colspan="7">{{ t('admin.wallets.noWallets') }}</td></tr>
+          <tr v-if="!pageItems.length"><td colspan="8">{{ t('admin.wallets.noWallets') }}</td></tr>
         </tbody>
       </table>
       <ListPagination

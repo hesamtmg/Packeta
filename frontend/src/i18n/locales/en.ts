@@ -183,6 +183,8 @@ export default {
       saveEdit: 'Save changes',
       close: 'Close wallet',
       closeRequiresZero: 'Balance must be zero to close this wallet',
+      nameLabel: 'Wallet name (optional)',
+      namePlaceholder: 'e.g. Rent savings',
       marketLabel: 'Restricted to counterparties (optional)',
       marketPlaceholder: "email1{'@'}example.com, email2{'@'}example.com",
       marketHint:
@@ -397,6 +399,7 @@ export default {
       allWallets: 'All wallets ({count})',
       searchPlaceholder: 'Search by owner or wallet type…',
       tableOwner: 'Owner',
+      tableName: 'Name',
       tableType: 'Type',
       tableCurrency: 'Currency',
       tableBalance: 'Balance',

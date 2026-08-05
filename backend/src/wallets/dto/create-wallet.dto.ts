@@ -22,6 +22,14 @@ export class CreateWalletDto {
   @IsUUID()
   walletTypeId: string;
 
+  // A customer-chosen display name for this specific wallet — purely
+  // cosmetic, shown in place of the wallet type's name wherever this wallet
+  // appears (cards, transaction from/to, transaction detail).
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  name?: string;
+
   // Only meaningful when the wallet type's allowPurchaseIn is true: how long
   // (in seconds) a PURCHASE stays PENDING awaiting IPG verification before
   // the timeout sweep marks it REVERSED.

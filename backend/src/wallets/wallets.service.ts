@@ -46,6 +46,7 @@ export class WalletsService {
     userId: string,
     walletTypeId: string,
     options?: {
+      name?: string;
       purchaseTimeoutSeconds?: number;
       settlementAccounts?: SettlementAccountDto[];
       restrictedCounterparties?: string[];
@@ -75,6 +76,7 @@ export class WalletsService {
       userId,
       walletTypeId,
       balance: '0',
+      name: options?.name?.trim() ? options.name.trim() : null,
       purchaseTimeoutSeconds: options?.purchaseTimeoutSeconds ?? null,
       restrictedCounterparties: options?.restrictedCounterparties ?? null,
       terminalId: options?.terminalId ?? null,
@@ -113,6 +115,7 @@ export class WalletsService {
     userId: string,
     walletId: string,
     options: {
+      name?: string;
       purchaseTimeoutSeconds?: number;
       settlementAccounts?: SettlementAccountDto[];
       restrictedCounterparties?: string[];
@@ -157,6 +160,9 @@ export class WalletsService {
     );
 
     const patch: Partial<Wallet> = {};
+    if (options.name !== undefined) {
+      patch.name = options.name.trim() ? options.name.trim() : null;
+    }
     if (options.purchaseTimeoutSeconds !== undefined) {
       patch.purchaseTimeoutSeconds = options.purchaseTimeoutSeconds;
     }

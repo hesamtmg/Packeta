@@ -6,6 +6,7 @@ import { ApiError } from '../api/client';
 import { amountStep, formatAmount, toMinorUnits, type CurrencyInfo } from '../utils/currency';
 import { formatDateTime } from '../utils/date';
 import { transactionTypeClass, transactionStatusClass } from '../types/admin';
+import { walletDisplayName } from '../utils/wallet-name';
 import { useListControls } from '../composables/useListControls';
 import AppLayout from '../components/AppLayout.vue';
 import MiniLineChart from '../components/admin/MiniLineChart.vue';
@@ -24,6 +25,7 @@ const chargeResult = ref<{ redirectUrl: string; expiresAt: string } | null>(null
 const chargeLinkCopied = ref(false);
 
 const newWalletType = ref('');
+const newWalletName = ref('');
 const newWalletPurchaseTimeoutMinutes = ref('');
 const newWalletSettlementAccounts = ref<{ iban: string; label: string; percent: string }[]>([]);
 const newWalletRestrictedCounterparties = ref('');
@@ -42,6 +44,7 @@ const newWalletRailScheduleTimes = ref('');
 const newWalletVirtualAmount = ref('');
 
 const editingWalletId = ref<string | null>(null);
+const editWalletName = ref('');
 const editRestrictedCounterparties = ref('');
 const editPurchaseTimeoutMinutes = ref('');
 const editSettlementAccounts = ref<{ iban: string; label: string; percent: string }[]>([]);
@@ -170,7 +173,7 @@ const transferStep = computed(() => {
 });
 
 function walletLabel(w: Wallet): string {
-  return `${w.walletType.name} (${w.walletType.currency.code}) — ${formatAmount(w.balance, w.walletType.currency)}`;
+  return `${walletDisplayName(w)} (${w.walletType.currency.code}) — ${formatAmount(w.balance, w.walletType.currency)}`;
 }
 
 function badges(w: Wallet): string[] {
@@ -214,15 +217,15 @@ function describeTransaction(tx: (typeof wallet.transactions)[number]): string {
   const toMine = tx.toWalletId ? walletsById.value.get(tx.toWalletId) : null;
   const walletFallback = t('transaction.direction.wallet');
 
-  if (tx.type === 'DEPOSIT') return t('transaction.direction.depositTo', { wallet: toMine?.walletType.name ?? walletFallback });
-  if (tx.type === 'WITHDRAW') return t('transaction.direction.withdrawFrom', { wallet: fromMine?.walletType.name ?? walletFallback });
+  if (tx.type === 'DEPOSIT') return t('transaction.direction.depositTo', { wallet: toMine ? walletDisplayName(toMine) : walletFallback });
+  if (tx.type === 'WITHDRAW') return t('transaction.direction.withdrawFrom', { wallet: fromMine ? walletDisplayName(fromMine) : walletFallback });
   if (tx.type === 'PURCHASE') {
     return fromMine
       ? t('transaction.direction.purchasePaidTo', { wallet: t('transaction.direction.merchant') })
       : t('transaction.direction.purchase');
   }
-  if (fromMine) return t('transaction.direction.sentFrom', { wallet: fromMine.walletType.name });
-  if (toMine) return t('transaction.direction.receivedInto', { wallet: toMine.walletType.name });
+  if (fromMine) return t('transaction.direction.sentFrom', { wallet: walletDisplayName(fromMine) });
+  if (toMine) return t('transaction.direction.receivedInto', { wallet: walletDisplayName(toMine) });
   return t('transaction.direction.transfer');
 }
 
@@ -252,7 +255,13 @@ const historyByType = computed(() =>
 function historySearchText(tx: (typeof wallet.transactions)[number]): (string | null)[] {
   const fromMine = tx.fromWalletId ? walletsById.value.get(tx.fromWalletId) : null;
   const toMine = tx.toWalletId ? walletsById.value.get(tx.toWalletId) : null;
-  return [tx.type, tx.status, tx.note, fromMine?.walletType.name ?? null, toMine?.walletType.name ?? null];
+  return [
+    tx.type,
+    tx.status,
+    tx.note,
+    fromMine ? walletDisplayName(fromMine) : null,
+    toMine ? walletDisplayName(toMine) : null,
+  ];
 }
 
 const {
@@ -396,6 +405,7 @@ function toggleEditWallet(w: Wallet) {
     return;
   }
   editingWalletId.value = w.id;
+  editWalletName.value = w.name ?? '';
   editRestrictedCounterparties.value = (w.restrictedCounterparties ?? []).join(', ');
   editPurchaseTimeoutMinutes.value = w.purchaseTimeoutSeconds
     ? String(Math.round(w.purchaseTimeoutSeconds / 60))
@@ -440,6 +450,7 @@ function parseTimeList(raw: string): string[] {
 function onSaveWalletEdit(w: Wallet) {
   runAction(async () => {
     const options: WalletOptionsInput = {
+      name: editWalletName.value,
       restrictedCounterparties: parseEmailList(editRestrictedCounterparties.value),
     };
     const scale = 10 ** w.walletType.currency.decimalPlaces;
@@ -492,6 +503,7 @@ function onCloseWallet(w: Wallet) {
 function onAddWallet() {
   runAction(async () => {
     const options: WalletOptionsInput = {};
+    if (newWalletName.value.trim()) options.name = newWalletName.value.trim();
     const restricted = parseEmailList(newWalletRestrictedCounterparties.value);
     if (restricted.length) {
       options.restrictedCounterparties = restricted;
@@ -542,6 +554,7 @@ function onAddWallet() {
     }
     await wallet.createWallet(newWalletType.value, options);
     newWalletType.value = '';
+    newWalletName.value = '';
     newWalletPurchaseTimeoutMinutes.value = '';
     newWalletSettlementAccounts.value = [];
     newWalletRestrictedCounterparties.value = '';
@@ -794,7 +807,8 @@ async function onGrantCredit() {
       <h2>{{ t('dashboard.wallets.title') }}</h2>
       <div class="wallets">
         <article v-for="w in wallet.wallets" :key="w.id" class="wallet-card">
-          <span class="wallet-type">{{ w.walletType.name }} · {{ w.walletType.currency.code }}</span>
+          <span class="wallet-type">{{ walletDisplayName(w) }} · {{ w.walletType.currency.code }}</span>
+          <span v-if="w.name" class="wallet-type-sub">{{ w.walletType.name }}</span>
           <span class="wallet-balance">{{ formatAmount(w.balance, w.walletType.currency) }}</span>
           <div class="badges">
             <span v-for="b in badges(w)" :key="b" class="admin-badge">{{ b }}</span>
@@ -827,6 +841,16 @@ async function onGrantCredit() {
           </div>
 
           <form v-if="editingWalletId === w.id" class="wallet-edit-form" @submit.prevent="onSaveWalletEdit(w)">
+            <label>
+              {{ t('dashboard.wallets.nameLabel') }}
+              <input
+                v-model="editWalletName"
+                type="text"
+                maxlength="100"
+                :placeholder="t('dashboard.wallets.namePlaceholder')"
+                class="admin-input"
+              />
+            </label>
             <label>
               {{ t('dashboard.wallets.marketLabel') }}
               <input
@@ -934,6 +958,17 @@ async function onGrantCredit() {
             {{ t2.name }} ({{ t2.currency.code }})
           </option>
         </select>
+
+        <label class="market-field">
+          {{ t('dashboard.wallets.nameLabel') }}
+          <input
+            v-model="newWalletName"
+            type="text"
+            maxlength="100"
+            :placeholder="t('dashboard.wallets.namePlaceholder')"
+            class="admin-input"
+          />
+        </label>
 
         <label class="market-field">
           {{ t('dashboard.wallets.marketLabel') }}
@@ -1163,7 +1198,7 @@ async function onGrantCredit() {
             <td>{{ formatTransactionAmount(tx) }}</td>
             <td>
               <div v-if="tx.fromWalletId && findWallet(tx.fromWalletId)" class="party-cell">
-                <span class="party-label">{{ findWallet(tx.fromWalletId)!.walletType.name }} ({{ findWallet(tx.fromWalletId)!.walletType.currency.code }})</span>
+                <span class="party-label">{{ walletDisplayName(findWallet(tx.fromWalletId)!) }} ({{ findWallet(tx.fromWalletId)!.walletType.currency.code }})</span>
                 <span class="party-owner">{{ t('common.you') }}</span>
                 <span class="money-chip money-out">− {{ formatTransactionAmount(tx) }}</span>
               </div>
@@ -1172,7 +1207,7 @@ async function onGrantCredit() {
             </td>
             <td>
               <div v-if="tx.toWalletId && findWallet(tx.toWalletId)" class="party-cell">
-                <span class="party-label">{{ findWallet(tx.toWalletId)!.walletType.name }} ({{ findWallet(tx.toWalletId)!.walletType.currency.code }})</span>
+                <span class="party-label">{{ walletDisplayName(findWallet(tx.toWalletId)!) }} ({{ findWallet(tx.toWalletId)!.walletType.currency.code }})</span>
                 <span class="party-owner">{{ t('common.you') }}</span>
                 <span class="money-chip money-in">+ {{ formatTransactionAmount(tx) }}</span>
               </div>
@@ -1321,6 +1356,12 @@ async function onGrantCredit() {
   color: var(--text-dimmer);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+.wallet-type-sub {
+  font-size: 0.68rem;
+  color: var(--text-dimmer);
+  opacity: 0.7;
+  margin-top: -6px;
 }
 .wallet-balance {
   font-size: 1.5rem;

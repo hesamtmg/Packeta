@@ -13,6 +13,7 @@ import {
   type AdminWallet,
   type AdminTransaction,
 } from '../../types/admin';
+import { walletDisplayName } from '../../utils/wallet-name';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
 import MiniLineChart from '../../components/admin/MiniLineChart.vue';
 
@@ -54,7 +55,7 @@ function formatTxAmount(tx: AdminTransaction): string {
 function walletLabel(walletId: string | null): string {
   if (!walletId) return t('common.none');
   const w = walletsById.value.get(walletId);
-  return w ? `${w.walletType.name} (${w.walletType.currency.code})` : t('common.unknown');
+  return w ? `${walletDisplayName(w)} (${w.walletType.currency.code})` : t('common.unknown');
 }
 
 function ownerEmail(tx: AdminTransaction): string {

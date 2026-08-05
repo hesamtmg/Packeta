@@ -16,6 +16,7 @@ export function serializeWallet(
 ) {
   return {
     id: wallet.id,
+    name: wallet.name,
     balance: wallet.balance,
     purchaseTimeoutSeconds: wallet.purchaseTimeoutSeconds,
     restrictedCounterparties: wallet.restrictedCounterparties,

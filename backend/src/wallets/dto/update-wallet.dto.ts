@@ -26,6 +26,11 @@ import { SettlementRailType } from '../../rail-settlements/entities/rail-settlem
 // a purchase's settlement.
 export class UpdateWalletDto {
   @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  name?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(30)

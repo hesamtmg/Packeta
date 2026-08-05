@@ -1,4 +1,5 @@
 import type { CurrencyInfo } from '../utils/currency';
+import { walletDisplayName } from '../utils/wallet-name';
 
 // Mirrors backend/src/admin/admin-sections.ts — the panel sections a
 // regular ADMIN's access can be scoped to (via an assigned PanelRole).
@@ -55,6 +56,7 @@ export interface AdminWalletType {
 
 export interface AdminWallet {
   id: string;
+  name: string | null;
   balance: string;
   walletType: AdminWalletType;
   createdAt: string;
@@ -102,16 +104,17 @@ export function transactionCurrency(
   return w ? w.walletType.currency : null;
 }
 
-// "<wallet type> (<currency>)" for a transaction's from/to side, or null
-// when the wallet id is absent (DEPOSIT has no fromWallet; WITHDRAW has no
-// toWallet — money entering/leaving the system) or not in the given lookup.
+// "<wallet name or type> (<currency>)" for a transaction's from/to side, or
+// null when the wallet id is absent (DEPOSIT has no fromWallet; WITHDRAW has
+// no toWallet — money entering/leaving the system) or not in the given
+// lookup. Prefers the wallet's own custom name over its type's name.
 export function partyWalletLabel(
   walletId: string | null,
   wallets: Map<string, AdminWallet>,
 ): string | null {
   if (!walletId) return null;
   const w = wallets.get(walletId);
-  return w ? `${w.walletType.name} (${w.walletType.currency.code})` : null;
+  return w ? `${walletDisplayName(w)} (${w.walletType.currency.code})` : null;
 }
 
 export function partyOwner(

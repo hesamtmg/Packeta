@@ -6,12 +6,14 @@ import { apiRequest, ApiError } from '../../api/client';
 import { formatAmount, type CurrencyInfo } from '../../utils/currency';
 import { formatDateTime } from '../../utils/date';
 import { displayIdentity } from '../../utils/identity';
+import { walletDisplayName } from '../../utils/wallet-name';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
 
 const { t } = useI18n();
 
 interface WalletSummary {
   id: string;
+  name: string | null;
   ownerId: string;
   ownerEmail: string;
   ownerPhoneNumber: string | null;
@@ -83,14 +85,14 @@ onMounted(load);
         <template v-if="transaction.fromWallet">
           <dt>{{ t('transaction.fromWallet') }}</dt>
           <dd>
-            {{ transaction.fromWallet.walletType.name }} ({{ transaction.fromWallet.walletType.currency.code }})
+            {{ walletDisplayName(transaction.fromWallet) }} ({{ transaction.fromWallet.walletType.currency.code }})
             <span class="owner-tag">{{ displayIdentity({ email: transaction.fromWallet.ownerEmail, phoneNumber: transaction.fromWallet.ownerPhoneNumber }) }}</span>
           </dd>
         </template>
         <template v-if="transaction.toWallet">
           <dt>{{ t('transaction.toWallet') }}</dt>
           <dd>
-            {{ transaction.toWallet.walletType.name }} ({{ transaction.toWallet.walletType.currency.code }})
+            {{ walletDisplayName(transaction.toWallet) }} ({{ transaction.toWallet.walletType.currency.code }})
             <span class="owner-tag">{{ displayIdentity({ email: transaction.toWallet.ownerEmail, phoneNumber: transaction.toWallet.ownerPhoneNumber }) }}</span>
           </dd>
         </template>

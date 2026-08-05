@@ -5,12 +5,14 @@ import { useRoute } from 'vue-router';
 import { apiRequest, ApiError } from '../api/client';
 import { formatAmount, type CurrencyInfo } from '../utils/currency';
 import { formatDateTime } from '../utils/date';
+import { walletDisplayName } from '../utils/wallet-name';
 import AppLayout from '../components/AppLayout.vue';
 
 const { t } = useI18n();
 
 interface WalletSummary {
   id: string;
+  name: string | null;
   walletType: {
     name: string;
     code: string;
@@ -47,18 +49,18 @@ const directionLabel = computed(() => {
   const d = transaction.value;
   switch (d.type) {
     case 'DEPOSIT':
-      return t('transaction.direction.depositTo', { wallet: d.toWallet?.walletType.name ?? t('transaction.direction.wallet') });
+      return t('transaction.direction.depositTo', { wallet: d.toWallet ? walletDisplayName(d.toWallet) : t('transaction.direction.wallet') });
     case 'WITHDRAW':
-      return t('transaction.direction.withdrawFrom', { wallet: d.fromWallet?.walletType.name ?? t('transaction.direction.wallet') });
+      return t('transaction.direction.withdrawFrom', { wallet: d.fromWallet ? walletDisplayName(d.fromWallet) : t('transaction.direction.wallet') });
     case 'ADJUSTMENT':
       return d.direction === 'OUT' ? t('transaction.direction.adminDebit') : t('transaction.direction.adminCredit');
     case 'TRANSFER':
-      if (d.direction === 'OUT') return t('transaction.direction.sentFrom', { wallet: d.fromWallet?.walletType.name ?? t('transaction.direction.wallet') });
-      if (d.direction === 'IN') return t('transaction.direction.receivedInto', { wallet: d.toWallet?.walletType.name ?? t('transaction.direction.wallet') });
+      if (d.direction === 'OUT') return t('transaction.direction.sentFrom', { wallet: d.fromWallet ? walletDisplayName(d.fromWallet) : t('transaction.direction.wallet') });
+      if (d.direction === 'IN') return t('transaction.direction.receivedInto', { wallet: d.toWallet ? walletDisplayName(d.toWallet) : t('transaction.direction.wallet') });
       return t('transaction.direction.transfer');
     case 'PURCHASE':
-      if (d.direction === 'OUT') return t('transaction.direction.purchasePaidTo', { wallet: d.toWallet?.walletType.name ?? t('transaction.direction.merchant') });
-      if (d.direction === 'IN') return t('transaction.direction.purchaseReceivedInto', { wallet: d.toWallet?.walletType.name ?? t('transaction.direction.wallet') });
+      if (d.direction === 'OUT') return t('transaction.direction.purchasePaidTo', { wallet: d.toWallet ? walletDisplayName(d.toWallet) : t('transaction.direction.merchant') });
+      if (d.direction === 'IN') return t('transaction.direction.purchaseReceivedInto', { wallet: d.toWallet ? walletDisplayName(d.toWallet) : t('transaction.direction.wallet') });
       return t('transaction.direction.purchase');
     default:
       return d.type;
@@ -113,11 +115,11 @@ onMounted(load);
       <dl>
         <template v-if="transaction.fromWallet">
           <dt>{{ t('transaction.fromWallet') }}</dt>
-          <dd>{{ transaction.fromWallet.walletType.name }} ({{ transaction.fromWallet.walletType.currency.code }})</dd>
+          <dd>{{ walletDisplayName(transaction.fromWallet) }} ({{ transaction.fromWallet.walletType.currency.code }})</dd>
         </template>
         <template v-if="transaction.toWallet">
           <dt>{{ t('transaction.toWallet') }}</dt>
-          <dd>{{ transaction.toWallet.walletType.name }} ({{ transaction.toWallet.walletType.currency.code }})</dd>
+          <dd>{{ walletDisplayName(transaction.toWallet) }} ({{ transaction.toWallet.walletType.currency.code }})</dd>
         </template>
         <template v-if="transaction.status === 'PENDING' && transaction.expiresAt">
           <dt>{{ t('transaction.verifyBy') }}</dt>

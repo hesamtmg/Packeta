@@ -42,6 +42,13 @@ export class Wallet {
   @Column({ type: 'bigint', default: 0 })
   balance: string;
 
+  // Customer-chosen display name for this specific wallet (e.g. "Rent
+  // savings"), shown in place of the wallet type's name wherever this
+  // wallet appears — cards, transaction from/to, transaction detail. Null
+  // falls back to walletType.name everywhere it's displayed.
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  name: string | null;
+
   // Merchant wallets only: how long a PURCHASE stays PENDING awaiting the
   // merchant's /verify call before the timeout sweep auto-reverses it. Set
   // at creation, only meaningful when the wallet type's allowPurchaseIn is

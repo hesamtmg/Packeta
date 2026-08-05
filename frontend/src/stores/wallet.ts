@@ -57,6 +57,7 @@ export interface RailSettlement {
 
 export interface Wallet {
   id: string;
+  name: string | null;
   balance: string;
   purchaseTimeoutSeconds: number | null;
   restrictedCounterparties: string[] | null;
@@ -85,6 +86,7 @@ export interface Wallet {
 }
 
 export interface WalletOptionsInput {
+  name?: string;
   purchaseTimeoutSeconds?: number;
   settlementAccounts?: SettlementAccountInput[];
   restrictedCounterparties?: string[];

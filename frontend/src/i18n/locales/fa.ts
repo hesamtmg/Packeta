@@ -183,6 +183,8 @@ export default {
       saveEdit: 'ذخیره تغییرات',
       close: 'بستن کیف پول',
       closeRequiresZero: 'برای بستن این کیف پول، موجودی باید صفر باشد',
+      nameLabel: 'نام کیف پول (اختیاری)',
+      namePlaceholder: 'مثلاً پس‌انداز اجاره',
       marketLabel: 'محدود به طرف‌های حساب مشخص (اختیاری)',
       marketPlaceholder: "email1{'@'}example.com, email2{'@'}example.com",
       marketHint:
@@ -397,6 +399,7 @@ export default {
       allWallets: 'همه کیف‌پول‌ها ({count})',
       searchPlaceholder: 'جستجو بر اساس مالک یا نوع کیف پول…',
       tableOwner: 'مالک',
+      tableName: 'نام',
       tableType: 'نوع',
       tableCurrency: 'ارز',
       tableBalance: 'موجودی',
