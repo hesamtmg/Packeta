@@ -5,8 +5,12 @@ import { useWalletStore, type Wallet, type WalletOptionsInput, type SettlementRa
 import { ApiError } from '../api/client';
 import { amountStep, formatAmount, toMinorUnits, type CurrencyInfo } from '../utils/currency';
 import { formatDateTime } from '../utils/date';
+import { transactionTypeClass, transactionStatusClass } from '../types/admin';
+import { useListControls } from '../composables/useListControls';
 import AppLayout from '../components/AppLayout.vue';
 import MiniLineChart from '../components/admin/MiniLineChart.vue';
+import SortableTh from '../components/admin/SortableTh.vue';
+import ListPagination from '../components/admin/ListPagination.vue';
 
 const wallet = useWalletStore();
 const { t } = useI18n();
@@ -228,6 +232,51 @@ function formatTransactionAmount(tx: (typeof wallet.transactions)[number]): stri
   if (!w) return tx.amount;
   return formatAmount(tx.amount, w.walletType.currency);
 }
+
+// Whether money is landing in one of the customer's own wallets on this
+// transaction — used to color the +/- treatment. toWalletId is checked
+// first since for a transfer between two of the customer's own wallets
+// both sides are technically "mine"; the incoming side wins.
+function isIncoming(tx: (typeof wallet.transactions)[number]): boolean {
+  return !!tx.toWalletId && walletsById.value.has(tx.toWalletId);
+}
+
+const historyTypeFilter = ref('');
+
+const historyByType = computed(() =>
+  historyTypeFilter.value
+    ? wallet.transactions.filter((tx) => tx.type === historyTypeFilter.value)
+    : wallet.transactions,
+);
+
+function historySearchText(tx: (typeof wallet.transactions)[number]): (string | null)[] {
+  const fromMine = tx.fromWalletId ? walletsById.value.get(tx.fromWalletId) : null;
+  const toMine = tx.toWalletId ? walletsById.value.get(tx.toWalletId) : null;
+  return [tx.type, tx.status, tx.note, fromMine?.walletType.name ?? null, toMine?.walletType.name ?? null];
+}
+
+const {
+  search: historySearch,
+  sortKey: historySortKey,
+  sortDir: historySortDir,
+  pageItems: historyPageItems,
+  sorted: historySorted,
+  page: historyPage,
+  pageSize: historyPageSize,
+  totalPages: historyTotalPages,
+  toggleSort: historyToggleSort,
+  goToPage: historyGoToPage,
+} = useListControls(historyByType, {
+  searchFields: historySearchText,
+  sortAccessors: {
+    type: (tx) => tx.type,
+    status: (tx) => tx.status,
+    amount: (tx) => Number(tx.amount),
+    date: (tx) => new Date(tx.createdAt).getTime(),
+  },
+  defaultSort: { key: 'date', dir: 'desc' },
+  pageSize: 25,
+});
 
 const currencyCount = computed(
   () => new Set(wallet.wallets.map((w) => w.walletType.currency.code)).size,
@@ -630,7 +679,9 @@ async function onGrantCredit() {
         </div>
         <div class="admin-card" v-if="latestTransaction">
           <h2>{{ t('dashboard.latestTransactionHeading') }}</h2>
-          <div class="latest-amount">{{ formatTransactionAmount(latestTransaction) }}</div>
+          <div class="latest-amount" :class="isIncoming(latestTransaction) ? 'money-in' : 'money-out'">
+            {{ isIncoming(latestTransaction) ? '+' : '−' }} {{ formatTransactionAmount(latestTransaction) }}
+          </div>
           <div class="latest-meta">{{ describeTransaction(latestTransaction) }}</div>
           <div class="latest-meta">{{ formatDateTime(latestTransaction.createdAt) }}</div>
         </div>
@@ -1073,24 +1124,75 @@ async function onGrantCredit() {
     </div>
 
     <div class="admin-card">
-      <h2>{{ t('dashboard.history.title') }}</h2>
+      <div class="filter-row">
+        <h2>{{ t('dashboard.history.allTransactions', { count: historySorted.length }) }}</h2>
+        <div class="list-controls-row">
+          <input v-model="historySearch" class="admin-input" :placeholder="t('dashboard.history.searchPlaceholder')" />
+          <select v-model="historyTypeFilter" class="admin-input">
+            <option value="">{{ t('dashboard.history.allTypes') }}</option>
+            <option value="DEPOSIT">{{ t('dashboard.history.deposit') }}</option>
+            <option value="WITHDRAW">{{ t('dashboard.history.withdraw') }}</option>
+            <option value="TRANSFER">{{ t('dashboard.history.transfer') }}</option>
+            <option value="PURCHASE">{{ t('dashboard.history.purchase') }}</option>
+            <option value="ADJUSTMENT">{{ t('dashboard.history.adjustment') }}</option>
+            <option value="VIRTUAL">{{ t('dashboard.history.virtual') }}</option>
+          </select>
+        </div>
+      </div>
       <table class="admin-table">
         <thead>
           <tr>
-            <th>{{ t('dashboard.history.description') }}</th>
-            <th>{{ t('dashboard.history.amount') }}</th>
-            <th>{{ t('dashboard.history.date') }}</th>
+            <SortableTh :label="t('dashboard.history.tableType')" col-key="type" :active-key="historySortKey" :dir="historySortDir" @sort="historyToggleSort" />
+            <SortableTh :label="t('dashboard.history.tableStatus')" col-key="status" :active-key="historySortKey" :dir="historySortDir" @sort="historyToggleSort" />
+            <SortableTh :label="t('dashboard.history.tableAmount')" col-key="amount" :active-key="historySortKey" :dir="historySortDir" @sort="historyToggleSort" />
+            <th>{{ t('dashboard.history.tableFrom') }}</th>
+            <th>{{ t('dashboard.history.tableTo') }}</th>
+            <th>{{ t('dashboard.history.tableNote') }}</th>
+            <SortableTh :label="t('dashboard.history.tableDate')" col-key="date" :active-key="historySortKey" :dir="historySortDir" @sort="historyToggleSort" />
           </tr>
         </thead>
         <tbody>
-          <tr v-for="tx in wallet.transactions" :key="tx.id" class="tx-row-clickable" @click="$router.push({ name: 'transaction-detail', params: { id: tx.id } })">
-            <td>{{ describeTransaction(tx) }}</td>
+          <tr
+            v-for="tx in historyPageItems"
+            :key="tx.id"
+            class="tx-row-clickable"
+            @click="$router.push({ name: 'transaction-detail', params: { id: tx.id } })"
+          >
+            <td><span class="admin-badge" :class="transactionTypeClass(tx.type)">{{ t(`dashboard.history.${tx.type.toLowerCase()}`) }}</span></td>
+            <td><span class="admin-badge" :class="transactionStatusClass(tx.status)">{{ t(`dashboard.history.status${tx.status}`) }}</span></td>
             <td>{{ formatTransactionAmount(tx) }}</td>
+            <td>
+              <div v-if="tx.fromWalletId && findWallet(tx.fromWalletId)" class="party-cell">
+                <span class="party-label">{{ findWallet(tx.fromWalletId)!.walletType.name }} ({{ findWallet(tx.fromWalletId)!.walletType.currency.code }})</span>
+                <span class="party-owner">{{ t('common.you') }}</span>
+                <span class="money-chip money-out">− {{ formatTransactionAmount(tx) }}</span>
+              </div>
+              <span v-else-if="tx.fromWalletId" class="party-empty">{{ tx.type === 'PURCHASE' ? t('transaction.direction.merchant') : t('dashboard.history.otherWallet') }}</span>
+              <span v-else class="party-empty">{{ t('dashboard.history.externalSource') }}</span>
+            </td>
+            <td>
+              <div v-if="tx.toWalletId && findWallet(tx.toWalletId)" class="party-cell">
+                <span class="party-label">{{ findWallet(tx.toWalletId)!.walletType.name }} ({{ findWallet(tx.toWalletId)!.walletType.currency.code }})</span>
+                <span class="party-owner">{{ t('common.you') }}</span>
+                <span class="money-chip money-in">+ {{ formatTransactionAmount(tx) }}</span>
+              </div>
+              <span v-else-if="tx.toWalletId" class="party-empty">{{ tx.type === 'PURCHASE' ? t('transaction.direction.merchant') : t('dashboard.history.otherWallet') }}</span>
+              <span v-else class="party-empty">{{ t('dashboard.history.externalDestination') }}</span>
+            </td>
+            <td>{{ tx.note ?? t('common.none') }}</td>
             <td>{{ formatDateTime(tx.createdAt) }}</td>
           </tr>
-          <tr v-if="!wallet.transactions.length"><td colspan="3">{{ t('dashboard.history.empty') }}</td></tr>
+          <tr v-if="!historyPageItems.length"><td colspan="7">{{ t('dashboard.history.empty') }}</td></tr>
         </tbody>
       </table>
+      <ListPagination
+        :page="historyPage"
+        :total-pages="historyTotalPages"
+        :total="historySorted.length"
+        :page-size="historyPageSize"
+        @update:page="historyGoToPage"
+        @update:page-size="historyPageSize = $event"
+      />
     </div>
   </AppLayout>
 </template>
@@ -1289,6 +1391,18 @@ async function onGrantCredit() {
 }
 .tx-row-clickable {
   cursor: pointer;
+}
+.filter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.filter-row h2 {
+  margin: 0;
+  white-space: nowrap;
 }
 .charge-form {
   display: flex;

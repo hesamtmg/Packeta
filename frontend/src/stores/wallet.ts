@@ -127,10 +127,12 @@ export interface SettlementSplitInput {
 
 interface Transaction {
   id: string;
-  type: 'DEPOSIT' | 'WITHDRAW' | 'TRANSFER' | 'ADJUSTMENT' | 'PURCHASE';
+  type: 'DEPOSIT' | 'WITHDRAW' | 'TRANSFER' | 'ADJUSTMENT' | 'PURCHASE' | 'VIRTUAL';
+  status: 'PENDING' | 'COMPLETED' | 'REVERSED';
   fromWalletId: string | null;
   toWalletId: string | null;
   amount: string;
+  note: string | null;
   createdAt: string;
 }
 
