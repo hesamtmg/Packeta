@@ -15,6 +15,10 @@ export class CreatePaymentDto {
 
   @IsOptional()
   @IsString()
+  displayAmountFa?: string;
+
+  @IsOptional()
+  @IsString()
   displayAmountWordsEn?: string;
 
   @IsOptional()

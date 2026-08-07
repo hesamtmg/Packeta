@@ -37,6 +37,12 @@ export class PaymentIntent {
   @Column({ type: 'varchar', length: 50 })
   displayAmount: string;
 
+  // Farsi-styled variant of displayAmount (Nastaliq Rial mark, grouped
+  // thousands, Persian numerals) — same reason as displayAmountWordsEn/Fa
+  // below: baked by the merchant since this sandbox has no currency table.
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  displayAmountFa: string | null;
+
   // Same amount spelled out in words, pre-formatted by the merchant in both
   // languages so the pay page can switch between them on its language
   // toggle without a currency table of its own to recompute from.
