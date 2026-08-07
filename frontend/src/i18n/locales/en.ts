@@ -411,6 +411,9 @@ export default {
       externalDestination: 'External (out of the system)',
       noTransactions: 'No transactions found.',
       loadFailed: 'Failed to load transactions',
+      groupRelated: 'Group related transactions',
+      ungroupRelated: 'Show flat list',
+      breakdownTitle: 'What happened',
     },
     installments: {
       title: 'Installments',

@@ -9,6 +9,7 @@ import { formatDateTime } from '../utils/date';
 import { transactionTypeClass, transactionStatusClass } from '../types/admin';
 import { walletDisplayName } from '../utils/wallet-name';
 import { useListControls } from '../composables/useListControls';
+import { groupTransactionClusters } from '../utils/txCluster';
 import AppLayout from '../components/AppLayout.vue';
 import MiniLineChart from '../components/admin/MiniLineChart.vue';
 
@@ -273,51 +274,13 @@ const { search: historySearch, sorted: historySorted } = useListControls(history
   defaultSort: { key: 'date', dir: 'desc' },
 });
 
-// A single customer action can post more than one ledger row to get the job
-// done — a credit wallet purchase alone can write a PURCHASE plus a TRANSFER
-// funding it from its repository/support wallet plus a VIRTUAL row drawing
-// down its ceiling (see TransactionsService.settleCreditFundedPurchase),
-// and reversing one adds the mirror-image legs on top of that. Only some of
-// those legs carry an explicit link back to the purchase they belong to
-// (relatedPurchaseId/relatedTransactionId/completesPurchaseId); the rest
-// only carry it in their idempotencyKey prefix, so both are checked here.
-// Whatever's left over — the ordinary case — is already its own single-row
-// "cluster" and renders exactly as before.
-const SUB_LEG_KEY_PATTERN =
-  /^(?:credit-fund|credit-draw|support-fund|credit-fund-reverse|credit-draw-reverse):([0-9a-f-]{36})/i;
-
-function clusterRootId(tx: (typeof wallet.transactions)[number]): string {
-  if (tx.relatedPurchaseId) return tx.relatedPurchaseId;
-  if (tx.relatedTransactionId) return tx.relatedTransactionId;
-  if (tx.completesPurchaseId) return tx.completesPurchaseId;
-  const match = tx.idempotencyKey?.match(SUB_LEG_KEY_PATTERN);
-  if (match) return match[1];
-  return tx.id;
-}
-
-const historyClusters = computed(() => {
-  const byRoot = new Map<string, (typeof wallet.transactions)>();
-  for (const tx of historySorted.value) {
-    const root = clusterRootId(tx);
-    const list = byRoot.get(root);
-    if (list) list.push(tx);
-    else byRoot.set(root, [tx]);
-  }
-  return [...byRoot.entries()]
-    .map(([root, items]) => {
-      // The root transaction itself best represents the whole cluster (it's
-      // the actual purchase the other legs exist to fund/unwind) — but a
-      // viewer who can only see some of a cluster's legs (e.g. a repository
-      // owner sees their own funding transfer but not the purchase it
-      // funded) won't have it in `items`, so fall back to whichever leg is
-      // theirs.
-      const primary = items.find((tx) => tx.id === root) ?? items[0];
-      return { root, items, primary };
-    })
-    .sort(
-      (a, b) => new Date(b.primary.createdAt).getTime() - new Date(a.primary.createdAt).getTime(),
-    );
-});
+// See utils/txCluster.ts for why a single customer action can span more
+// than one ledger row, and how those rows get grouped back together.
+const historyClusters = computed(() =>
+  groupTransactionClusters(historySorted.value).sort(
+    (a, b) => new Date(b.primary.createdAt).getTime() - new Date(a.primary.createdAt).getTime(),
+  ),
+);
 
 const expandedTx = ref(new Set<string>());
 function toggleTx(id: string) {

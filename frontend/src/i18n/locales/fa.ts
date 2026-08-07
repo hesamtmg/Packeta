@@ -411,6 +411,9 @@ export default {
       externalDestination: 'خارجی (خروج از سامانه)',
       noTransactions: 'تراکنشی یافت نشد.',
       loadFailed: 'بارگذاری تراکنش‌ها ناموفق بود',
+      groupRelated: 'گروه‌بندی تراکنش‌های مرتبط',
+      ungroupRelated: 'نمایش فهرست تخت',
+      breakdownTitle: 'جزئیات مراحل',
     },
     installments: {
       title: 'اقساط',

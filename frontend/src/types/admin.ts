@@ -100,6 +100,13 @@ export interface AdminTransaction {
   amount: string;
   note: string | null;
   createdAt: string;
+  // Present on the API response but only meaningful for grouping a single
+  // customer-facing action's sub-legs back together — see
+  // utils/txCluster.ts and AdminTransactionsView's "Group related" toggle.
+  idempotencyKey?: string;
+  relatedTransactionId?: string | null;
+  relatedPurchaseId?: string | null;
+  completesPurchaseId?: string | null;
 }
 
 // Builds a walletId -> wallet lookup so transaction rows (which only carry
