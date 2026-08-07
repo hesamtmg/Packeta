@@ -540,72 +540,6 @@ onUnmounted(() => {
 
       <div class="card">
        <div class="merchant-column">
-        <!-- Wallet step shows every eligible wallet as its own selectable
-             card; every other step shows one static summary card (the
-             selected wallet once known, otherwise the transaction itself). -->
-        <div v-if="step === 'wallet' && eligibleWallets.length" class="carousel-wrap">
-          <button class="carousel-nav" type="button" @click="scrollCarousel(-1)">‹</button>
-          <div ref="carousel" class="carousel">
-            <button
-              v-for="w in eligibleWallets"
-              :key="w.id"
-              type="button"
-              class="paycard"
-              :class="{ selected: selectedWalletId === w.id }"
-              @click="selectWallet(w.id)"
-            >
-              <div class="paycard-top">
-                <span class="paycard-chip" aria-hidden="true">
-                  <svg viewBox="0 0 32 24" fill="none"><rect x="1" y="1" width="30" height="22" rx="4" fill="currentColor" opacity="0.9"/><path d="M1 9h30M1 15h30M11 1v22M21 1v22" stroke="#fff" stroke-width="1"/></svg>
-                </span>
-                <span class="paycard-top-right">
-                  <span class="paycard-contactless" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none"><path d="M7 9a7 7 0 0 1 0 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M10.3 6.5a11 11 0 0 1 0 11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M13.6 4a15 15 0 0 1 0 16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-                  </span>
-                  <span class="paycard-brand">{{ t('brand') }}</span>
-                </span>
-              </div>
-              <div class="paycard-number">{{ maskId(w.id) }}</div>
-              <div class="paycard-bottom">
-                <div class="paycard-field">
-                  <span class="paycard-label">{{ t('card.wallet') }}</span>
-                  <span class="paycard-value">{{ w.walletType.name }}</span>
-                </div>
-                <div class="paycard-field paycard-field-right">
-                  <span class="paycard-label">{{ t('card.balance') }}</span>
-                  <span class="paycard-value">{{ formatAmount((BigInt(w.balance) + BigInt(w.virtualAmount || '0')).toString(), w.walletType.currency) }}</span>
-                </div>
-              </div>
-            </button>
-          </div>
-          <button class="carousel-nav" type="button" @click="scrollCarousel(1)">›</button>
-        </div>
-
-        <div v-else-if="step !== 'loading'" class="paycard paycard-static" aria-hidden="false">
-          <div class="paycard-top">
-            <span class="paycard-chip" aria-hidden="true">
-              <svg viewBox="0 0 32 24" fill="none"><rect x="1" y="1" width="30" height="22" rx="4" fill="currentColor" opacity="0.9"/><path d="M1 9h30M1 15h30M11 1v22M21 1v22" stroke="#fff" stroke-width="1"/></svg>
-            </span>
-            <span class="paycard-top-right">
-              <span class="paycard-contactless" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M7 9a7 7 0 0 1 0 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M10.3 6.5a11 11 0 0 1 0 11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M13.6 4a15 15 0 0 1 0 16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-              </span>
-              <span class="paycard-brand">{{ t('brand') }}</span>
-            </span>
-          </div>
-          <div class="paycard-number">{{ activeCard.masked }}</div>
-          <div class="paycard-bottom">
-            <div class="paycard-field">
-              <span class="paycard-label">{{ activeCard.holderLabel }}</span>
-              <span class="paycard-value">{{ activeCard.holderValue }}</span>
-            </div>
-            <div class="paycard-field paycard-field-right">
-              <span class="paycard-label">{{ activeCard.subLabel }}</span>
-              <span class="paycard-value">{{ activeCard.subValue }}</span>
-            </div>
-          </div>
-        </div>
-
         <div v-if="hasMerchantPanel" class="merchant-panel">
           <div class="merchant-panel-row merchant-panel-title">
             <span class="merchant-panel-label">{{ t('merchantInfo.company') }}</span>
@@ -645,6 +579,75 @@ onUnmounted(() => {
        </div>
 
        <div class="form-column">
+        <!-- No wallet is known yet on the very first (phone) step, so there's
+             nothing meaningful to put on a card — it only appears from the
+             next step onward. Wallet step shows every eligible wallet as its
+             own selectable card; every later step shows one static summary
+             card (the selected wallet once known, otherwise the transaction
+             itself). -->
+        <div v-if="step === 'wallet' && eligibleWallets.length" class="carousel-wrap">
+          <button class="carousel-nav" type="button" @click="scrollCarousel(-1)">‹</button>
+          <div ref="carousel" class="carousel">
+            <button
+              v-for="w in eligibleWallets"
+              :key="w.id"
+              type="button"
+              class="paycard"
+              :class="{ selected: selectedWalletId === w.id }"
+              @click="selectWallet(w.id)"
+            >
+              <div class="paycard-top">
+                <span class="paycard-chip" aria-hidden="true">
+                  <svg viewBox="0 0 32 24" fill="none"><rect x="1" y="1" width="30" height="22" rx="4" fill="currentColor" opacity="0.9"/><path d="M1 9h30M1 15h30M11 1v22M21 1v22" stroke="#fff" stroke-width="1"/></svg>
+                </span>
+                <span class="paycard-top-right">
+                  <span class="paycard-contactless" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none"><path d="M7 9a7 7 0 0 1 0 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M10.3 6.5a11 11 0 0 1 0 11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M13.6 4a15 15 0 0 1 0 16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                  </span>
+                  <span class="paycard-brand">{{ t('brand') }}</span>
+                </span>
+              </div>
+              <div class="paycard-number">{{ maskId(w.id) }}</div>
+              <div class="paycard-bottom">
+                <div class="paycard-field">
+                  <span class="paycard-label">{{ t('card.wallet') }}</span>
+                  <span class="paycard-value">{{ w.walletType.name }}</span>
+                </div>
+                <div class="paycard-field paycard-field-right">
+                  <span class="paycard-label">{{ t('card.balance') }}</span>
+                  <span class="paycard-value">{{ formatAmount((BigInt(w.balance) + BigInt(w.virtualAmount || '0')).toString(), w.walletType.currency) }}</span>
+                </div>
+              </div>
+            </button>
+          </div>
+          <button class="carousel-nav" type="button" @click="scrollCarousel(1)">›</button>
+        </div>
+
+        <div v-else-if="step !== 'loading' && step !== 'phone'" class="paycard paycard-static" aria-hidden="false">
+          <div class="paycard-top">
+            <span class="paycard-chip" aria-hidden="true">
+              <svg viewBox="0 0 32 24" fill="none"><rect x="1" y="1" width="30" height="22" rx="4" fill="currentColor" opacity="0.9"/><path d="M1 9h30M1 15h30M11 1v22M21 1v22" stroke="#fff" stroke-width="1"/></svg>
+            </span>
+            <span class="paycard-top-right">
+              <span class="paycard-contactless" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M7 9a7 7 0 0 1 0 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M10.3 6.5a11 11 0 0 1 0 11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M13.6 4a15 15 0 0 1 0 16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              </span>
+              <span class="paycard-brand">{{ t('brand') }}</span>
+            </span>
+          </div>
+          <div class="paycard-number">{{ activeCard.masked }}</div>
+          <div class="paycard-bottom">
+            <div class="paycard-field">
+              <span class="paycard-label">{{ activeCard.holderLabel }}</span>
+              <span class="paycard-value">{{ activeCard.holderValue }}</span>
+            </div>
+            <div class="paycard-field paycard-field-right">
+              <span class="paycard-label">{{ activeCard.subLabel }}</span>
+              <span class="paycard-value">{{ activeCard.subValue }}</span>
+            </div>
+          </div>
+        </div>
+
         <template v-if="step === 'loading'">
           <p class="status">{{ t('loading') }}</p>
         </template>
