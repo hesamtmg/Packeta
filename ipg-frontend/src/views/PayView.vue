@@ -539,6 +539,7 @@ onUnmounted(() => {
       <p class="page-subheading">{{ t('subheading') }}</p>
 
       <div class="card">
+       <div class="merchant-column">
         <!-- Wallet step shows every eligible wallet as its own selectable
              card; every other step shows one static summary card (the
              selected wallet once known, otherwise the transaction itself). -->
@@ -641,7 +642,9 @@ onUnmounted(() => {
             <strong class="totals-amount">{{ merchantSummary.displayAmount }}</strong>
           </div>
         </div>
+       </div>
 
+       <div class="form-column">
         <template v-if="step === 'loading'">
           <p class="status">{{ t('loading') }}</p>
         </template>
@@ -754,6 +757,7 @@ onUnmounted(() => {
 
           <p v-else class="status">{{ t('loading') }}</p>
         </template>
+       </div>
       </div>
     </main>
 
@@ -927,6 +931,43 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 0.9rem;
   box-shadow: 0 24px 60px -18px rgba(20, 60, 140, 0.25);
+}
+.merchant-column,
+.form-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  min-width: 0;
+}
+
+/* At desktop widths there's room to show the merchant/wallet card
+   alongside the phone/OTP/wallet-recognition form instead of stacking
+   them, so the customer can see who and how much they're paying without
+   scrolling past it first. */
+@media (min-width: 860px) {
+  .card {
+    max-width: 760px;
+    flex-direction: row;
+    align-items: flex-start;
+    text-align: left;
+    padding: 2rem;
+  }
+  .merchant-column {
+    flex: 0 0 320px;
+  }
+  .form-column {
+    flex: 1 1 auto;
+    justify-content: center;
+    padding-top: 0.5rem;
+    border-left: 1px solid #edf1fb;
+    padding-left: 2rem;
+  }
+  [dir='rtl'] .form-column {
+    border-left: none;
+    border-right: 1px solid #edf1fb;
+    padding-left: 0;
+    padding-right: 2rem;
+  }
 }
 
 /* The "physical card" visual: represents either the wallet the customer is
