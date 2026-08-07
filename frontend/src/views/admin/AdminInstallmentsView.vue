@@ -164,7 +164,8 @@ onMounted(() => {
 
     <div class="admin-card overdue-card">
       <h2>{{ t('admin.installments.overdueHeading', { count: blockedWallets.length }) }}</h2>
-      <table class="admin-table" v-if="blockedWallets.length">
+      <div class="table-scroll" v-if="blockedWallets.length">
+      <table class="admin-table">
         <thead>
           <tr>
             <th>{{ t('admin.installments.tableOwner') }}</th>
@@ -229,6 +230,7 @@ onMounted(() => {
           </template>
         </tbody>
       </table>
+      </div>
       <p v-else class="overdue-empty">{{ t('admin.installments.overdueEmpty') }}</p>
     </div>
 
@@ -237,6 +239,7 @@ onMounted(() => {
         <h2>{{ t('admin.installments.all', { count: sorted.length }) }}</h2>
         <input v-model="search" class="admin-input" :placeholder="t('admin.installments.searchPlaceholder')" />
       </div>
+      <div class="table-scroll">
       <table class="admin-table">
         <thead>
           <tr>
@@ -264,6 +267,7 @@ onMounted(() => {
           <tr v-if="!pageItems.length"><td colspan="7">{{ t('admin.installments.none') }}</td></tr>
         </tbody>
       </table>
+      </div>
       <ListPagination
         :page="page"
         :total-pages="totalPages"
@@ -283,6 +287,7 @@ onMounted(() => {
   justify-content: space-between;
   margin-bottom: 14px;
   gap: 12px;
+  flex-wrap: wrap;
 }
 .filter-row h2 {
   margin: 0;

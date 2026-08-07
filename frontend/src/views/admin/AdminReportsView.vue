@@ -118,6 +118,7 @@ onMounted(load);
 
     <div class="admin-card">
       <h2>{{ t('admin.reports.topCustomersHeading') }}</h2>
+      <div class="table-scroll">
       <table class="admin-table">
         <thead>
           <tr>
@@ -133,6 +134,7 @@ onMounted(load);
           <tr v-if="!topCustomers.length"><td colspan="2">{{ t('admin.reports.noActivity') }}</td></tr>
         </tbody>
       </table>
+      </div>
     </div>
   </AdminLayout>
 </template>

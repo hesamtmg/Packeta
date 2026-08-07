@@ -185,6 +185,13 @@ export class WalletType {
   @Column({ type: 'boolean', default: false })
   hasVirtualBalance: boolean;
 
+  // Hides wallets of this type from a customer's own wallets/transactions
+  // lists (see TransactionsService.getHistory and WalletsController.list).
+  // The admin panel is unaffected — every admin view keeps showing these
+  // wallets regardless of this flag.
+  @Column({ type: 'boolean', default: false })
+  hiddenFromCustomer: boolean;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

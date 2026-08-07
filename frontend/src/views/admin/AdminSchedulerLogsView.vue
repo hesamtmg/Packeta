@@ -69,6 +69,7 @@ onMounted(load);
           <button type="button" class="admin-btn admin-btn-ghost" @click="load">{{ t('admin.schedulerLogs.refresh') }}</button>
         </div>
       </div>
+      <div class="table-scroll">
       <table class="admin-table">
         <thead>
           <tr>
@@ -86,6 +87,7 @@ onMounted(load);
           <tr v-if="!pageItems.length"><td colspan="3">{{ t('admin.schedulerLogs.none') }}</td></tr>
         </tbody>
       </table>
+      </div>
       <ListPagination
         :page="page"
         :total-pages="totalPages"

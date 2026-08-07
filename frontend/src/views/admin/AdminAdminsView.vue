@@ -489,6 +489,7 @@ loadRoles();
         <h2>{{ t('admin.admins.adminsHeading', { count: adminSorted.length }) }}</h2>
         <input v-model="adminSearch" class="admin-input" :placeholder="t('admin.admins.searchPlaceholder')" />
       </div>
+      <div class="table-scroll">
       <table class="admin-table">
         <thead>
           <tr>
@@ -627,6 +628,7 @@ loadRoles();
           <tr v-if="!adminPageItems.length"><td colspan="5">{{ t('admin.admins.noAdmins') }}</td></tr>
         </tbody>
       </table>
+      </div>
       <ListPagination
         :page="adminPage"
         :total-pages="adminTotalPages"

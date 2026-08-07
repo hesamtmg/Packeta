@@ -111,6 +111,7 @@ onMounted(load);
         <h2>{{ t('admin.wallets.allWallets', { count: sorted.length }) }}</h2>
         <input v-model="search" class="admin-input" :placeholder="t('admin.wallets.searchPlaceholder')" />
       </div>
+      <div class="table-scroll">
       <table class="admin-table">
         <thead>
           <tr>
@@ -166,6 +167,7 @@ onMounted(load);
           <tr v-if="!pageItems.length"><td colspan="9">{{ t('admin.wallets.noWallets') }}</td></tr>
         </tbody>
       </table>
+      </div>
       <ListPagination
         :page="page"
         :total-pages="totalPages"
@@ -194,6 +196,7 @@ onMounted(load);
   justify-content: space-between;
   margin-bottom: 14px;
   gap: 12px;
+  flex-wrap: wrap;
 }
 .filter-row h2 {
   margin: 0;

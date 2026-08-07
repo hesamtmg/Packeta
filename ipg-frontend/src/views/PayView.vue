@@ -12,6 +12,11 @@ interface PaymentInfo {
   displayAmount: string;
   status: 'INITIATED' | 'AUTHORIZED' | 'VERIFIED' | 'CANCELED' | 'EXPIRED';
   expiresAt: string;
+  terminalId?: string | null;
+  acceptorCode?: string | null;
+  storeSite?: string | null;
+  category?: string | null;
+  subCategory?: string | null;
 }
 
 interface ChargeStatus {
@@ -20,6 +25,8 @@ interface ChargeStatus {
   storeSite: string | null;
   terminalId: string | null;
   acceptorCode: string | null;
+  category: string | null;
+  subCategory: string | null;
   displayAmount: string;
   expiresAt: string | null;
   language: string;
@@ -92,6 +99,67 @@ const shortfallDisplay = computed(() =>
     ? formatAmount(insufficientCredit.value.shortfall, selectedWallet.value.walletType.currency)
     : '',
 );
+
+// One merchant-info source regardless of which flow got us here: the
+// charge-based flow (identify yourself first) reports it on chargeInfo,
+// the direct/already-wallet-picked flow reports it on info (PaymentInfo) —
+// same fields, just two different response shapes upstream.
+const merchantSummary = computed(() => ({
+  name: chargeInfo.value?.merchantName ?? info.value?.merchantName ?? '',
+  storeSite: chargeInfo.value?.storeSite ?? info.value?.storeSite ?? null,
+  terminalId: chargeInfo.value?.terminalId ?? info.value?.terminalId ?? null,
+  acceptorCode: chargeInfo.value?.acceptorCode ?? info.value?.acceptorCode ?? null,
+  category: chargeInfo.value?.category ?? info.value?.category ?? null,
+  subCategory: chargeInfo.value?.subCategory ?? info.value?.subCategory ?? null,
+  displayAmount: chargeInfo.value?.displayAmount ?? info.value?.displayAmount ?? '',
+}));
+const hasMerchantPanel = computed(
+  () =>
+    !!merchantSummary.value.name &&
+    (step.value === 'phone' ||
+      step.value === 'otp' ||
+      step.value === 'wallet' ||
+      step.value === 'insufficient-credit' ||
+      step.value === 'pay'),
+);
+
+// Masks any id (wallet id or payment authority) into a card-number-style
+// group of dots ending in the last 4 characters — purely cosmetic, this is
+// never a real card number since customers pay from an existing Packeta
+// wallet, not a card entered here.
+function maskId(id: string): string {
+  const clean = id.replace(/-/g, '').toUpperCase();
+  const last4 = clean.slice(-4);
+  return `•••• •••• •••• ${last4}`;
+}
+
+// Drives the always-visible summary "card" once a wallet is either
+// selected (wallet step) or already attached (later steps) — falls back to
+// a transaction-level summary card before any wallet is known yet.
+const activeCard = computed(() => {
+  if (selectedWallet.value) {
+    return {
+      masked: maskId(selectedWallet.value.id),
+      holderLabel: t('card.wallet'),
+      holderValue: selectedWallet.value.walletType.name,
+      subLabel: t('card.balance'),
+      subValue: formatAmount(
+        (
+          BigInt(selectedWallet.value.balance) +
+          BigInt(selectedWallet.value.virtualAmount || '0')
+        ).toString(),
+        selectedWallet.value.walletType.currency,
+      ),
+    };
+  }
+  return {
+    masked: maskId(authority ?? ''),
+    holderLabel: t('card.payTo'),
+    holderValue: merchantSummary.value.name || t('brand'),
+    subLabel: t('card.amount'),
+    subValue: merchantSummary.value.displayAmount,
+  };
+});
 
 const info = ref<PaymentInfo | null>(null);
 const loadError = ref('');
@@ -471,17 +539,108 @@ onUnmounted(() => {
       <p class="page-subheading">{{ t('subheading') }}</p>
 
       <div class="card">
-        <template v-if="chargeInfo && step !== 'loading'">
-          <div class="merchant-header">
-            <div class="merchant">{{ chargeInfo.merchantName }}</div>
-            <div v-if="chargeInfo.storeSite" class="merchant-site">{{ chargeInfo.storeSite }}</div>
-            <div class="amount">{{ chargeInfo.displayAmount }}</div>
-            <div v-if="chargeInfo.terminalId || chargeInfo.acceptorCode" class="merchant-meta">
-              <span v-if="chargeInfo.terminalId">{{ t('merchant.terminal', { value: chargeInfo.terminalId }) }}</span>
-              <span v-if="chargeInfo.acceptorCode">{{ t('merchant.acceptor', { value: chargeInfo.acceptorCode }) }}</span>
+        <!-- Wallet step shows every eligible wallet as its own selectable
+             card; every other step shows one static summary card (the
+             selected wallet once known, otherwise the transaction itself). -->
+        <div v-if="step === 'wallet' && eligibleWallets.length" class="carousel-wrap">
+          <button class="carousel-nav" type="button" @click="scrollCarousel(-1)">‹</button>
+          <div ref="carousel" class="carousel">
+            <button
+              v-for="w in eligibleWallets"
+              :key="w.id"
+              type="button"
+              class="paycard"
+              :class="{ selected: selectedWalletId === w.id }"
+              @click="selectWallet(w.id)"
+            >
+              <div class="paycard-top">
+                <span class="paycard-chip" aria-hidden="true">
+                  <svg viewBox="0 0 32 24" fill="none"><rect x="1" y="1" width="30" height="22" rx="4" fill="currentColor" opacity="0.9"/><path d="M1 9h30M1 15h30M11 1v22M21 1v22" stroke="#fff" stroke-width="1"/></svg>
+                </span>
+                <span class="paycard-top-right">
+                  <span class="paycard-contactless" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none"><path d="M7 9a7 7 0 0 1 0 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M10.3 6.5a11 11 0 0 1 0 11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M13.6 4a15 15 0 0 1 0 16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                  </span>
+                  <span class="paycard-brand">{{ t('brand') }}</span>
+                </span>
+              </div>
+              <div class="paycard-number">{{ maskId(w.id) }}</div>
+              <div class="paycard-bottom">
+                <div class="paycard-field">
+                  <span class="paycard-label">{{ t('card.wallet') }}</span>
+                  <span class="paycard-value">{{ w.walletType.name }}</span>
+                </div>
+                <div class="paycard-field paycard-field-right">
+                  <span class="paycard-label">{{ t('card.balance') }}</span>
+                  <span class="paycard-value">{{ formatAmount((BigInt(w.balance) + BigInt(w.virtualAmount || '0')).toString(), w.walletType.currency) }}</span>
+                </div>
+              </div>
+            </button>
+          </div>
+          <button class="carousel-nav" type="button" @click="scrollCarousel(1)">›</button>
+        </div>
+
+        <div v-else-if="step !== 'loading'" class="paycard paycard-static" aria-hidden="false">
+          <div class="paycard-top">
+            <span class="paycard-chip" aria-hidden="true">
+              <svg viewBox="0 0 32 24" fill="none"><rect x="1" y="1" width="30" height="22" rx="4" fill="currentColor" opacity="0.9"/><path d="M1 9h30M1 15h30M11 1v22M21 1v22" stroke="#fff" stroke-width="1"/></svg>
+            </span>
+            <span class="paycard-top-right">
+              <span class="paycard-contactless" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M7 9a7 7 0 0 1 0 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M10.3 6.5a11 11 0 0 1 0 11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M13.6 4a15 15 0 0 1 0 16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              </span>
+              <span class="paycard-brand">{{ t('brand') }}</span>
+            </span>
+          </div>
+          <div class="paycard-number">{{ activeCard.masked }}</div>
+          <div class="paycard-bottom">
+            <div class="paycard-field">
+              <span class="paycard-label">{{ activeCard.holderLabel }}</span>
+              <span class="paycard-value">{{ activeCard.holderValue }}</span>
+            </div>
+            <div class="paycard-field paycard-field-right">
+              <span class="paycard-label">{{ activeCard.subLabel }}</span>
+              <span class="paycard-value">{{ activeCard.subValue }}</span>
             </div>
           </div>
-        </template>
+        </div>
+
+        <div v-if="hasMerchantPanel" class="merchant-panel">
+          <div class="merchant-panel-row merchant-panel-title">
+            <span class="merchant-panel-label">{{ t('merchantInfo.company') }}</span>
+            <span class="merchant-panel-value">{{ merchantSummary.name }}</span>
+          </div>
+          <div v-if="merchantSummary.storeSite" class="merchant-panel-row">
+            <span class="merchant-panel-label">{{ t('merchantInfo.storeSite') }}</span>
+            <span class="merchant-panel-value">{{ merchantSummary.storeSite }}</span>
+          </div>
+          <div v-if="merchantSummary.terminalId" class="merchant-panel-row">
+            <span class="merchant-panel-label">{{ t('merchantInfo.terminalId') }}</span>
+            <span class="merchant-panel-value">{{ merchantSummary.terminalId }}</span>
+          </div>
+          <div v-if="merchantSummary.acceptorCode" class="merchant-panel-row">
+            <span class="merchant-panel-label">{{ t('merchantInfo.acceptorCode') }}</span>
+            <span class="merchant-panel-value">{{ merchantSummary.acceptorCode }}</span>
+          </div>
+          <div v-if="merchantSummary.category" class="merchant-panel-row">
+            <span class="merchant-panel-label">{{ t('merchantInfo.category') }}</span>
+            <span class="merchant-panel-value">{{ merchantSummary.category }}</span>
+          </div>
+          <div v-if="merchantSummary.subCategory" class="merchant-panel-row">
+            <span class="merchant-panel-label">{{ t('merchantInfo.subCategory') }}</span>
+            <span class="merchant-panel-value">{{ merchantSummary.subCategory }}</span>
+          </div>
+        </div>
+
+        <div v-if="step !== 'loading' && merchantSummary.displayAmount" class="totals-bar">
+          <span class="totals-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2V2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 8h6M9 12h6M9 16h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </span>
+          <div class="totals-text">
+            <span class="totals-label">{{ t('totals.label') }}</span>
+            <strong class="totals-amount">{{ merchantSummary.displayAmount }}</strong>
+          </div>
+        </div>
 
         <template v-if="step === 'loading'">
           <p class="status">{{ t('loading') }}</p>
@@ -496,11 +655,21 @@ onUnmounted(() => {
         <template v-else-if="step === 'phone'">
           <p class="status">{{ t('phone.prompt') }}</p>
           <form class="gateway-form" @submit.prevent="onRequestOtp">
-            <input v-model="phoneNumber" type="tel" :placeholder="t('phone.placeholder')" required />
+            <label class="icon-field">
+              <span class="icon-field-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M6.5 2h3l2 5-2.3 1.6a13 13 0 0 0 6.2 6.2L17 12.5l5 2v3a2 2 0 0 1-2.2 2A18 18 0 0 1 4.5 4.2 2 2 0 0 1 6.5 2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+              </span>
+              <input v-model="phoneNumber" type="tel" :placeholder="t('phone.placeholder')" required />
+            </label>
             <label v-if="captchaImage" class="captcha-label">
               {{ t('phone.captchaPrefix') }}
               <img :src="captchaImage" :alt="t('phone.captchaPrefix')" class="captcha-image" />
-              <input v-model="captchaAnswer" type="text" inputmode="numeric" :placeholder="t('phone.answerPlaceholder')" required />
+              <span class="icon-field">
+                <span class="icon-field-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M12 2 4 5v6c0 5 3.4 8.7 8 9 4.6-.3 8-4 8-9V5l-8-3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="m9 12 2 2 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </span>
+                <input v-model="captchaAnswer" type="text" inputmode="numeric" :placeholder="t('phone.answerPlaceholder')" required />
+              </span>
             </label>
             <button class="confirm" type="submit" :disabled="gatewayBusy">{{ t('phone.sendCode') }}</button>
           </form>
@@ -532,25 +701,7 @@ onUnmounted(() => {
 
         <template v-else-if="step === 'wallet'">
           <p class="status">{{ t('wallet.prompt') }}</p>
-          <div v-if="eligibleWallets.length" class="carousel-wrap">
-            <button class="carousel-nav" type="button" @click="scrollCarousel(-1)">‹</button>
-            <div ref="carousel" class="carousel">
-              <button
-                v-for="w in eligibleWallets"
-                :key="w.id"
-                type="button"
-                class="wallet-card"
-                :class="{ selected: selectedWalletId === w.id }"
-                @click="selectWallet(w.id)"
-              >
-                <span class="wallet-card-type">{{ w.walletType.name }}</span>
-                <span class="wallet-card-balance">{{ formatAmount(w.balance+w.virtualAmount, w.walletType.currency) }}</span>
-                <span class="wallet-card-currency">{{ w.walletType.currency.code }}</span>
-              </button>
-            </div>
-            <button class="carousel-nav" type="button" @click="scrollCarousel(1)">›</button>
-          </div>
-          <p v-else class="status">{{ t('wallet.none') }}</p>
+          <p v-if="!eligibleWallets.length" class="status">{{ t('wallet.none') }}</p>
           <button
             v-if="eligibleWallets.length"
             class="confirm"
@@ -613,6 +764,9 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+* {
+  box-sizing: border-box;
+}
 .shell {
   position: relative;
   min-height: 100vh;
@@ -632,7 +786,7 @@ onUnmounted(() => {
   height: 240px;
   top: -70px;
   right: -50px;
-  background: linear-gradient(135deg, #8b7bf0, #4b39ef);
+  background: linear-gradient(135deg, #6fa8ff, #2f6fed);
   opacity: 0.9;
 }
 .blob-2 {
@@ -640,7 +794,7 @@ onUnmounted(() => {
   height: 90px;
   top: 60px;
   right: 190px;
-  background: #4b39ef;
+  background: #2f6fed;
   opacity: 0.6;
 }
 .blob-3 {
@@ -648,7 +802,7 @@ onUnmounted(() => {
   height: 360px;
   bottom: -140px;
   left: -120px;
-  background: linear-gradient(135deg, #6c5dd3, #3c2fc7);
+  background: linear-gradient(135deg, #4f8bff, #1550c9);
   opacity: 0.85;
 }
 
@@ -676,7 +830,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #6c5dd3, #4b39ef);
+  background: linear-gradient(135deg, #4f8bff, #2f6fed);
   color: #fff;
   font-weight: 700;
   font-size: 1.05rem;
@@ -684,7 +838,7 @@ onUnmounted(() => {
 .logo-text {
   font-weight: 700;
   font-size: 1.05rem;
-  color: #1c1b3a;
+  color: #14213d;
 }
 .nav-actions {
   display: flex;
@@ -694,9 +848,9 @@ onUnmounted(() => {
 .lang-toggle {
   padding: 0.4rem 0.8rem;
   border-radius: 999px;
-  border: 1px solid #e3e5f2;
+  border: 1px solid #dce6fb;
   background: #fff;
-  color: #4b39ef;
+  color: #2f6fed;
   font-size: 0.8rem;
   font-weight: 700;
   cursor: pointer;
@@ -708,14 +862,14 @@ onUnmounted(() => {
   padding: 0.45rem 0.9rem;
   border-radius: 999px;
   background: #fff;
-  color: #4b39ef;
+  color: #2f6fed;
   font-weight: 700;
   font-size: 0.9rem;
   font-variant-numeric: tabular-nums;
   box-shadow:
-    0 6px 16px rgba(75, 57, 239, 0.18),
-    0 1px 2px rgba(28, 27, 58, 0.06);
-  border: 1px solid #e3e5f2;
+    0 6px 16px rgba(47, 111, 237, 0.18),
+    0 1px 2px rgba(20, 33, 61, 0.06);
+  border: 1px solid #dce6fb;
 }
 .timer-icon {
   width: 16px;
@@ -754,53 +908,200 @@ onUnmounted(() => {
   margin: 0 0 0.35rem;
   font-size: 1.9rem;
   font-weight: 800;
-  color: #1c1b3a;
+  color: #14213d;
 }
 .page-subheading {
   margin: 0 0 1.75rem;
-  color: #6b7280;
+  color: #64748b;
   font-size: 0.95rem;
 }
 .card {
   width: 100%;
-  max-width: 400px;
+  max-width: 420px;
   background: #ffffff;
-  border: 1px solid #e3e5f2;
+  border: 1px solid #e3e9f7;
   border-radius: 22px;
-  padding: 2rem;
+  padding: 1.75rem;
   text-align: center;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  box-shadow: 0 24px 60px -18px rgba(43, 33, 111, 0.28);
+  gap: 0.9rem;
+  box-shadow: 0 24px 60px -18px rgba(20, 60, 140, 0.25);
 }
-.merchant-header {
+
+/* The "physical card" visual: represents either the wallet the customer is
+   about to pay from, or (before one's chosen) the transaction itself. */
+.paycard {
+  position: relative;
+  width: 100%;
+  min-height: 168px;
+  border-radius: 18px;
+  padding: 18px 20px;
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
-  padding-bottom: 0.75rem;
-  border-bottom: 1px solid #edeef8;
-  margin-bottom: 0.25rem;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+  color: #fff;
+  background: linear-gradient(135deg, #2f6fed 0%, #1550c9 60%, #103e9e 100%);
+  box-shadow: 0 16px 34px -14px rgba(21, 80, 201, 0.55);
+  border: none;
+  cursor: default;
+  font-family: inherit;
 }
-.merchant {
-  font-size: 1rem;
-  color: #6b7280;
+.paycard-static {
+  cursor: default;
 }
-.amount {
-  font-size: 2.25rem;
-  font-weight: 800;
-  color: #1c1b3a;
+button.paycard {
+  cursor: pointer;
+  flex: 0 0 84%;
+  scroll-snap-align: center;
+  opacity: 0.72;
+  transform: scale(0.96);
+  transition: opacity 0.18s ease, transform 0.18s ease;
 }
-.merchant-site {
-  font-size: 0.78rem;
-  color: #8b8aa8;
+button.paycard.selected {
+  opacity: 1;
+  transform: scale(1);
+  box-shadow: 0 20px 40px -14px rgba(21, 80, 201, 0.65);
 }
-.merchant-meta {
+.paycard-top {
   display: flex;
-  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+.paycard-top-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.paycard-chip {
+  width: 34px;
+  height: 24px;
+  color: rgba(255, 255, 255, 0.85);
+}
+.paycard-chip svg,
+.paycard-contactless svg {
+  width: 100%;
+  height: 100%;
+}
+.paycard-contactless {
+  width: 22px;
+  height: 22px;
+  color: rgba(255, 255, 255, 0.85);
+}
+.paycard-number {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  direction: ltr;
+  text-align: left;
+}
+.paycard-bottom {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+}
+.paycard-field {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.paycard-field-right {
+  text-align: right;
+  align-items: flex-end;
+}
+.paycard-label {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.65);
+}
+.paycard-value {
+  font-size: 0.85rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.paycard-brand {
   font-size: 0.72rem;
-  color: #a3a2ba;
-  font-family: monospace;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.merchant-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.9rem 1rem;
+  border-radius: 14px;
+  background: #f4f8ff;
+  border: 1px solid #e3e9f7;
+  text-align: left;
+}
+.merchant-panel-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.merchant-panel-title .merchant-panel-value {
+  font-size: 1rem;
+  font-weight: 800;
+  color: #14213d;
+}
+.merchant-panel-label {
+  font-size: 0.75rem;
+  color: #64748b;
+  white-space: nowrap;
+}
+.merchant-panel-value {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #1e2a4a;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.totals-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #eaf1ff, #f7faff);
+  border: 1px solid #dce6fb;
+}
+.totals-icon {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  color: #2f6fed;
+}
+.totals-icon svg {
+  width: 100%;
+  height: 100%;
+}
+.totals-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.totals-label {
+  font-size: 0.78rem;
+  color: #5b6b8c;
+}
+.totals-amount {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: #14213d;
 }
 .status {
   color: #6b7280;
@@ -840,7 +1141,7 @@ onUnmounted(() => {
   cursor: pointer;
 }
 .confirm {
-  background: linear-gradient(135deg, #6c5dd3, #4b39ef);
+  background: linear-gradient(135deg, #4f8bff, #1550c9);
   color: #fff;
   padding: 0.8rem;
   border-radius: 999px;
@@ -848,12 +1149,12 @@ onUnmounted(() => {
   font-size: 0.95rem;
   font-weight: 700;
   cursor: pointer;
-  box-shadow: 0 12px 24px -8px rgba(75, 57, 239, 0.55);
+  box-shadow: 0 12px 24px -8px rgba(21, 80, 201, 0.55);
 }
 .cancel {
   background: #fff;
-  color: #1c1b3a;
-  border: 1px solid #e3e5f2 !important;
+  color: #14213d;
+  border: 1px solid #e3e9f7 !important;
 }
 .actions button:disabled,
 .gateway-form button:disabled,
@@ -868,24 +1169,54 @@ onUnmounted(() => {
   gap: 0.6rem;
 }
 .gateway-form input {
+  width: 100%;
   padding: 0.7rem 0.8rem;
   border-radius: 12px;
-  border: 1px solid #e3e5f2;
-  background: #f3f4fb;
-  color: #1c1b3a;
+  border: 1px solid #e3e9f7;
+  background: #f4f8ff;
+  color: #14213d;
   font-size: 0.95rem;
-  text-align: center;
+  text-align: left;
 }
 .gateway-form input:focus {
   outline: none;
-  border-color: #6c5dd3;
-  box-shadow: 0 0 0 3px rgba(108, 93, 211, 0.18);
+  border-color: #2f6fed;
+  box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.18);
+}
+.icon-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-left: 0.7rem;
+  border-radius: 12px;
+  border: 1px solid #e3e9f7;
+  background: #f4f8ff;
+}
+.icon-field:focus-within {
+  border-color: #2f6fed;
+  box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.18);
+}
+.icon-field-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  color: #2f6fed;
+}
+.icon-field-icon svg {
+  width: 100%;
+  height: 100%;
+}
+.icon-field input {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding-left: 0 !important;
 }
 .captcha-label {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  color: #6b7280;
+  color: #64748b;
   font-size: 0.85rem;
 }
 .captcha-image {
@@ -893,12 +1224,12 @@ onUnmounted(() => {
   height: 56px;
   align-self: center;
   border-radius: 12px;
-  border: 1px solid #e3e5f2;
+  border: 1px solid #e3e9f7;
 }
 .link-btn {
   background: none;
   border: none;
-  color: #6c5dd3;
+  color: #2f6fed;
   font-size: 0.82rem;
   cursor: pointer;
   text-decoration: underline;
@@ -912,17 +1243,17 @@ onUnmounted(() => {
   width: 42px;
   height: 52px;
   border-radius: 12px;
-  border: 1px solid #e3e5f2;
-  background: #f3f4fb;
-  color: #1c1b3a;
+  border: 1px solid #e3e9f7;
+  background: #f4f8ff;
+  color: #14213d;
   font-size: 1.3rem;
   font-weight: 700;
   text-align: center;
 }
 .otp-box:focus {
   outline: none;
-  border-color: #6c5dd3;
-  box-shadow: 0 0 0 3px rgba(108, 93, 211, 0.18);
+  border-color: #2f6fed;
+  box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.18);
 }
 .carousel-wrap {
   display: flex;
@@ -946,46 +1277,12 @@ onUnmounted(() => {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  border: 1px solid #e3e5f2;
+  border: 1px solid #e3e9f7;
   background: #fff;
-  color: #4b39ef;
+  color: #2f6fed;
   font-size: 1.1rem;
   cursor: pointer;
-  box-shadow: 0 4px 10px rgba(43, 33, 111, 0.12);
-}
-.wallet-card {
-  flex: 0 0 45%;
-  scroll-snap-align: center;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  padding: 14px;
-  border-radius: 16px;
-  border: 1px solid #e3e5f2;
-  background: #f8f8fd;
-  color: #1c1b3a;
-  cursor: pointer;
-  text-align: left;
-}
-.wallet-card.selected {
-  border-color: #6c5dd3;
-  background: rgba(108, 93, 211, 0.08);
-  box-shadow: 0 8px 20px -8px rgba(75, 57, 239, 0.45);
-}
-.wallet-card-type {
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #6b7280;
-}
-.wallet-card-balance {
-  font-size: 1.15rem;
-  font-weight: 700;
-}
-.wallet-card-currency {
-  font-size: 0.72rem;
-  color: #9294ab;
+  box-shadow: 0 4px 10px rgba(20, 60, 140, 0.12);
 }
 
 .site-footer {
@@ -993,8 +1290,8 @@ onUnmounted(() => {
   text-align: center;
   padding: 1rem;
   font-size: 0.75rem;
-  color: #9294ab;
-  border-top: 1px solid #e3e5f2;
+  color: #94a3b8;
+  border-top: 1px solid #e3e9f7;
   background: rgba(255, 255, 255, 0.6);
 }
 .site-footer p {

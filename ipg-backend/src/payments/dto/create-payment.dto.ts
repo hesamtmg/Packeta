@@ -21,4 +21,24 @@ export class CreatePaymentDto {
   @IsInt()
   @Min(30)
   timeoutSeconds?: number;
+
+  @IsOptional()
+  @IsString()
+  terminalId?: string;
+
+  @IsOptional()
+  @IsString()
+  acceptorCode?: string;
+
+  @IsOptional()
+  @IsString()
+  storeSite?: string;
+
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  @IsOptional()
+  @IsString()
+  subCategory?: string;
 }

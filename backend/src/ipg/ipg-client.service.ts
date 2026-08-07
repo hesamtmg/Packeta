@@ -7,6 +7,11 @@ export interface CreateIpgPaymentInput {
   displayAmount: string;
   callbackUrl: string;
   timeoutSeconds: number;
+  terminalId?: string | null;
+  acceptorCode?: string | null;
+  storeSite?: string | null;
+  category?: string | null;
+  subCategory?: string | null;
 }
 
 export interface IpgVerifyResult {
@@ -31,6 +36,11 @@ export class IpgClientService {
       displayAmount: input.displayAmount,
       callbackUrl: input.callbackUrl,
       timeoutSeconds: input.timeoutSeconds,
+      terminalId: input.terminalId ?? undefined,
+      acceptorCode: input.acceptorCode ?? undefined,
+      storeSite: input.storeSite ?? undefined,
+      category: input.category ?? undefined,
+      subCategory: input.subCategory ?? undefined,
     });
   }
 

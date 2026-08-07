@@ -39,7 +39,9 @@ export class WalletsController {
 
   @Get()
   async list(@CurrentUser() user: AuthenticatedUser) {
-    const wallets = await this.walletsService.listForUser(user.userId);
+    const wallets = (await this.walletsService.listForUser(user.userId)).filter(
+      (wallet) => !wallet.walletType.hiddenFromCustomer,
+    );
     return Promise.all(
       wallets.map(async (wallet) => {
         const settlementAccounts = await this.settlementService.findForWallet(

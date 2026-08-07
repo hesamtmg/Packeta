@@ -2338,3 +2338,347 @@ describe('TransactionsService offboarding (quit-customer) methods', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 });
+
+describe('TransactionsService.getHistory', () => {
+  function buildHistoryService(wallets: WalletFixture[]) {
+    const walletsService = {
+      listForUser: jest.fn(async () => wallets),
+      getById: jest.fn(async (_userId: string, walletId: string) => {
+        const wallet = wallets.find((w) => w.id === walletId);
+        if (!wallet) throw new NotFoundException('Wallet not found');
+        return wallet;
+      }),
+    };
+    const transactionsRepository = { find: jest.fn(async () => []) };
+    const service = new TransactionsService(
+      {} as any,
+      walletsService as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      transactionsRepository as any,
+    );
+    return { service, transactionsRepository };
+  }
+
+  it('excludes wallets whose type is hiddenFromCustomer when listing every wallet', async () => {
+    const visible: WalletFixture = {
+      id: 'w-visible',
+      balance: '0',
+      walletType: walletType({ hiddenFromCustomer: false } as any),
+    };
+    const hidden: WalletFixture = {
+      id: 'w-hidden',
+      balance: '0',
+      walletType: walletType({ hiddenFromCustomer: true } as any),
+    };
+    const { service, transactionsRepository } = buildHistoryService([
+      visible,
+      hidden,
+    ]);
+
+    await service.getHistory('user-1');
+
+    expect(transactionsRepository.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: [
+          { fromWalletId: expect.objectContaining({ _value: ['w-visible'] }) },
+          { toWalletId: expect.objectContaining({ _value: ['w-visible'] }) },
+        ],
+      }),
+    );
+  });
+
+  it('still returns a specific hidden wallet\'s history when walletId is explicitly requested', async () => {
+    const hidden: WalletFixture = {
+      id: 'w-hidden',
+      balance: '0',
+      walletType: walletType({ hiddenFromCustomer: true } as any),
+    };
+    const { service, transactionsRepository } = buildHistoryService([hidden]);
+
+    await service.getHistory('user-1', 'w-hidden');
+
+    expect(transactionsRepository.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: [
+          { fromWalletId: expect.objectContaining({ _value: ['w-hidden'] }) },
+          { toWalletId: expect.objectContaining({ _value: ['w-hidden'] }) },
+        ],
+      }),
+    );
+  });
+});
+
+describe('TransactionsService.reverseTransaction', () => {
+  // Mirrors settleCreditFundedPurchase's ledger convention: the repository
+  // leg is a TRANSFER from the repository to the credit wallet, keyed
+  // deterministically by `credit-fund:${purchaseId}`.
+  function mockQueryBuilderFor(manager: any, original: any) {
+    manager.createQueryBuilder = jest.fn(() => {
+      const builder: any = {
+        setLock: () => builder,
+        where: () => builder,
+        andWhere: () => builder,
+        getOne: async () => original,
+      };
+      return builder;
+    });
+  }
+
+  function mockRepositoryLeg(manager: any, leg: any | undefined) {
+    manager.findOne = jest.fn(async (_entity: unknown, opts: any) => {
+      if (leg && opts?.where?.idempotencyKey === leg.idempotencyKey) {
+        return leg;
+      }
+      return undefined;
+    });
+  }
+
+  it('reverses a plain (non-credit) purchase by refunding the full amount to the customer', async () => {
+    const customerWallet: WalletFixture = {
+      id: 'customer-1',
+      userId: 'user-1',
+      balance: '0',
+      walletType: walletType({ allowPurchaseOut: true }),
+    };
+    const merchantWallet: WalletFixture = {
+      id: 'merchant-1',
+      balance: '500',
+      walletType: walletType({ allowPurchaseIn: true }),
+    };
+    const { service, manager } = buildService({
+      senderWallet: customerWallet,
+      recipientWallet: merchantWallet,
+    });
+    const original = {
+      id: 'purchase-1',
+      type: TransactionType.PURCHASE,
+      status: 'COMPLETED',
+      fromWalletId: customerWallet.id,
+      toWalletId: merchantWallet.id,
+      amount: '500',
+    };
+    mockQueryBuilderFor(manager, original);
+    mockRepositoryLeg(manager, undefined);
+
+    const result = await service.reverseTransaction(
+      'user-1',
+      'purchase-1',
+      'not as described',
+      'idem-reverse-1',
+    );
+
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), merchantWallet.id, {
+      balance: '0',
+    });
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), customerWallet.id, {
+      balance: '500',
+    });
+    expect(manager.update).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'repo-1',
+      expect.anything(),
+    );
+    expect(result.balance).toBe('500');
+    expect(original.status).toBe('REVERSED');
+  });
+
+  it('reverses a fully repository-funded CREDIT purchase by returning the money to the repository and restoring the ceiling, leaving the customer real balance untouched', async () => {
+    const repositoryWallet: WalletFixture = {
+      id: 'repo-1',
+      balance: '4200',
+      walletType: walletType({ name: 'Repository', allowPurchaseIn: true }),
+    };
+    const creditWallet: WalletFixture = {
+      id: 'credit-wallet-1',
+      userId: 'personnel-1',
+      balance: '0',
+      virtualAmount: '0',
+      repositoryWalletId: 'repo-1',
+      walletType: walletType({
+        code: 'CREDIT',
+        allowPurchaseOut: true,
+        allowNegativeBalance: true,
+        creditLimit: '1000',
+      }),
+    };
+    const merchantWallet: WalletFixture = {
+      id: 'merchant-wallet-1',
+      balance: '800',
+      walletType: walletType({ allowPurchaseIn: true }),
+    };
+    const { service, manager } = buildService({
+      senderWallet: creditWallet,
+      recipientWallet: merchantWallet,
+      repositoryWallet,
+    });
+    const original = {
+      id: 'purchase-2',
+      type: TransactionType.PURCHASE,
+      status: 'COMPLETED',
+      fromWalletId: creditWallet.id,
+      toWalletId: merchantWallet.id,
+      amount: '800',
+    };
+    mockQueryBuilderFor(manager, original);
+    mockRepositoryLeg(manager, {
+      id: 'fund-1',
+      fromWalletId: repositoryWallet.id,
+      toWalletId: creditWallet.id,
+      amount: '800',
+      idempotencyKey: `credit-fund:${original.id}`,
+    });
+
+    const result = await service.reverseTransaction(
+      'personnel-1',
+      'purchase-2',
+      undefined,
+      'idem-reverse-2',
+    );
+
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), merchantWallet.id, {
+      balance: '0',
+    });
+    // Fully repository-funded: no real money was ever the customer's, so
+    // the customer's real balance stays exactly where it was.
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), creditWallet.id, {
+      balance: '0',
+    });
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), repositoryWallet.id, {
+      balance: '5000',
+    });
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), creditWallet.id, {
+      virtualAmount: '800',
+    });
+    expect(result.balance).toBe('0');
+
+    const savedCalls = manager.save.mock.calls.map((call: any[]) => call[0]);
+    expect(savedCalls).toContainEqual(
+      expect.objectContaining({
+        type: TransactionType.TRANSFER,
+        fromWalletId: creditWallet.id,
+        toWalletId: repositoryWallet.id,
+        amount: '800',
+        idempotencyKey: 'credit-fund-reverse:purchase-2',
+      }),
+    );
+    expect(savedCalls).toContainEqual(
+      expect.objectContaining({
+        type: TransactionType.VIRTUAL,
+        fromWalletId: null,
+        toWalletId: creditWallet.id,
+        amount: '800',
+        idempotencyKey: 'credit-draw-reverse:purchase-2',
+        relatedPurchaseId: 'purchase-2',
+      }),
+    );
+  });
+
+  it('reverses a mixed repository+support-funded CREDIT purchase: repository gets its slice back with the ceiling restored, customer real balance only receives the support (ZarinPal) slice', async () => {
+    const repositoryWallet: WalletFixture = {
+      id: 'repo-1',
+      balance: '4300',
+      walletType: walletType({ name: 'Repository', allowPurchaseIn: true }),
+    };
+    const creditWallet: WalletFixture = {
+      id: 'credit-wallet-1',
+      userId: 'personnel-1',
+      balance: '0',
+      virtualAmount: '300',
+      repositoryWalletId: 'repo-1',
+      walletType: walletType({
+        code: 'CREDIT',
+        allowPurchaseOut: true,
+        allowNegativeBalance: true,
+        creditLimit: '1000',
+      }),
+    };
+    const merchantWallet: WalletFixture = {
+      id: 'merchant-wallet-1',
+      balance: '1000',
+      walletType: walletType({ allowPurchaseIn: true }),
+    };
+    const { service, manager } = buildService({
+      senderWallet: creditWallet,
+      recipientWallet: merchantWallet,
+      repositoryWallet,
+    });
+    const original = {
+      id: 'purchase-3',
+      type: TransactionType.PURCHASE,
+      status: 'COMPLETED',
+      fromWalletId: creditWallet.id,
+      toWalletId: merchantWallet.id,
+      amount: '1000',
+    };
+    mockQueryBuilderFor(manager, original);
+    mockRepositoryLeg(manager, {
+      id: 'fund-2',
+      fromWalletId: repositoryWallet.id,
+      toWalletId: creditWallet.id,
+      amount: '700',
+      idempotencyKey: `credit-fund:${original.id}`,
+    });
+
+    const result = await service.reverseTransaction(
+      'personnel-1',
+      'purchase-3',
+      undefined,
+      'idem-reverse-3',
+    );
+
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), merchantWallet.id, {
+      balance: '0',
+    });
+    // Only the support-funded (ZarinPal) slice — 1000 total - 700 from the
+    // repository — comes back as real balance on the credit wallet.
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), creditWallet.id, {
+      balance: '300',
+    });
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), repositoryWallet.id, {
+      balance: '5000',
+    });
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), creditWallet.id, {
+      virtualAmount: '1000',
+    });
+    expect(result.balance).toBe('300');
+  });
+
+  it('rejects reversing an already-reversed purchase', async () => {
+    const customerWallet: WalletFixture = {
+      id: 'customer-1',
+      userId: 'user-1',
+      balance: '0',
+      walletType: walletType({ allowPurchaseOut: true }),
+    };
+    const merchantWallet: WalletFixture = {
+      id: 'merchant-1',
+      balance: '500',
+      walletType: walletType({ allowPurchaseIn: true }),
+    };
+    const { service, manager } = buildService({
+      senderWallet: customerWallet,
+      recipientWallet: merchantWallet,
+    });
+    const original = {
+      id: 'purchase-4',
+      type: TransactionType.PURCHASE,
+      status: 'REVERSED',
+      fromWalletId: customerWallet.id,
+      toWalletId: merchantWallet.id,
+      amount: '500',
+    };
+    mockQueryBuilderFor(manager, original);
+
+    await expect(
+      service.reverseTransaction('user-1', 'purchase-4', undefined, 'idem-reverse-4'),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+});

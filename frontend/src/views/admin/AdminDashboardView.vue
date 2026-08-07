@@ -144,6 +144,7 @@ onMounted(load);
 
     <div class="admin-card">
       <h2>{{ t('admin.dashboard.recentTransactions') }}</h2>
+      <div class="table-scroll">
       <table class="admin-table">
         <thead>
           <tr>
@@ -174,6 +175,7 @@ onMounted(load);
           <tr v-if="!transactions.length"><td colspan="5">{{ t('admin.dashboard.noTransactions') }}</td></tr>
         </tbody>
       </table>
+      </div>
     </div>
   </AdminLayout>
 </template>
@@ -221,12 +223,13 @@ onMounted(load);
   right: 28px;
   bottom: -22px;
   display: flex;
+  flex-wrap: wrap;
   background: rgba(15, 13, 18, 0.85);
   backdrop-filter: blur(6px);
   border: 1px solid var(--card-border);
   border-radius: var(--radius-md);
   padding: 16px 20px;
-  gap: 28px;
+  gap: 16px 28px;
 }
 
 .pill {

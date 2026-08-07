@@ -7,9 +7,22 @@ export default {
   expiresIn: 'Expires in {time}',
   loading: 'Loading…',
   expiredMessage: 'This payment has expired. Ask the merchant for a new link.',
-  merchant: {
-    terminal: 'Terminal {value}',
-    acceptor: 'Acceptor {value}',
+  card: {
+    wallet: 'Wallet',
+    balance: 'Balance',
+    payTo: 'Pay to',
+    amount: 'Amount',
+  },
+  merchantInfo: {
+    company: 'Company',
+    storeSite: 'Website',
+    terminalId: 'Terminal ID',
+    acceptorCode: 'Acceptor code',
+    category: 'Category',
+    subCategory: 'Sub-category',
+  },
+  totals: {
+    label: 'You have to pay',
   },
   phone: {
     prompt: 'Enter your phone number to identify yourself and pick a wallet to pay from.',
@@ -43,7 +56,7 @@ export default {
     continueNow: 'Continue now',
   },
   pay: {
-    confirm: 'Confirm Payment',
+    confirm: 'Pay Now',
     cancel: 'Cancel',
     authorized: 'Payment authorized — returning to merchant…',
     verified: 'Payment already completed.',
