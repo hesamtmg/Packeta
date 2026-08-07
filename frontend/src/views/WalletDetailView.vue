@@ -187,11 +187,11 @@ onMounted(load);
   padding: 3px 10px;
 }
 .status-badge.completed {
-  background: rgba(122, 162, 255, 0.15);
+  background: var(--badge-tint-blue, rgba(122, 162, 255, 0.15));
   color: var(--accent-blue);
 }
 .status-badge.reversed {
-  background: rgba(255, 107, 107, 0.15);
+  background: var(--badge-tint-red, rgba(255, 107, 107, 0.15));
   color: var(--accent-red);
 }
 dl {

@@ -1,0 +1,187 @@
+/* Light blue/white theme for the customer-facing app (login/signup,
+   AppLayout + everything it wraps, purchase callback) — matches
+   ipg-frontend's PayView palette so the wallet panel and the payment
+   gateway feel like the same product. Imported *after* admin-theme.css by
+   every customer view, alongside admin-theme.css itself (still needed for
+   its @font-face rules and the many structural, colorless layout rules
+   this file doesn't repeat). The admin panel keeps importing admin-theme.css
+   alone and stays on the original dark theme untouched — customers only see
+   this file once they're inside `.customer-theme`, never `.admin-theme`. */
+
+.customer-theme {
+  --admin-bg: #eef2fb;
+  --shell-bg: #ffffff;
+  --panel-bg: #f4f8ff;
+  --card-bg: #ffffff;
+  --card-border: #e3e9f7;
+  --text: #14213d;
+  --text-dim: #64748b;
+  --text-dimmer: #94a3b8;
+  --accent-orange: #b45309;
+  --accent-orange-soft: #d97706;
+  --accent-lime: #15803d;
+  --accent-blue: #1550c9;
+  --accent-red: #c62828;
+  --divider: #edf1fb;
+  --radius-lg: 28px;
+  --radius-md: 18px;
+  --radius-sm: 10px;
+
+  /* Extra tokens admin-theme.css's structural rules don't define — used
+     only by the overrides below and by individual customer views. */
+  --input-bg: #f4f8ff;
+  --hover-tint: rgba(21, 80, 201, 0.07);
+  --badge-tint: rgba(21, 80, 201, 0.08);
+  --badge-tint-lime: rgba(21, 128, 61, 0.1);
+  --badge-tint-blue: rgba(21, 80, 201, 0.1);
+  --badge-tint-red: rgba(198, 40, 40, 0.1);
+  --brand-gradient: linear-gradient(135deg, #4f8bff 0%, #1550c9 100%);
+  --shadow-card: 0 20px 45px -22px rgba(20, 60, 140, 0.28);
+  --shadow-btn: 0 12px 24px -10px rgba(21, 80, 201, 0.5);
+  --dev-hint-bg: #fef3c7;
+  --dev-hint-text: #92400e;
+  --bg-subtle: var(--panel-bg);
+  --border: var(--card-border);
+
+  min-height: 100vh;
+  background: var(--admin-bg);
+  color: var(--text);
+  font-family:
+    'Vazirmatn', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    Helvetica, Arial, sans-serif;
+  padding: 20px;
+  box-sizing: border-box;
+  position: relative;
+  isolation: isolate;
+}
+
+.customer-theme * {
+  box-sizing: border-box;
+}
+
+/* Same soft decorative blobs as ipg-frontend's PayView, scaled for a
+   full shell layout instead of one centered card — fixed so they read as
+   page-level ambiance rather than scrolling with content. */
+.customer-theme::before,
+.customer-theme::after {
+  content: '';
+  position: fixed;
+  z-index: -1;
+  border-radius: 50%;
+  pointer-events: none;
+}
+.customer-theme::before {
+  width: 420px;
+  height: 420px;
+  top: -160px;
+  inset-inline-end: -140px;
+  background: linear-gradient(135deg, #6fa8ff, #2f6fed);
+  opacity: 0.35;
+}
+.customer-theme::after {
+  width: 520px;
+  height: 520px;
+  bottom: -220px;
+  inset-inline-start: -200px;
+  background: linear-gradient(135deg, #4f8bff, #1550c9);
+  opacity: 0.22;
+}
+
+/* --- Shell chrome: sidebar logo, nav icons, topbar avatar --- */
+.customer-theme .admin-shell {
+  background: var(--shell-bg);
+  box-shadow: var(--shadow-card);
+  border: 1px solid var(--card-border);
+}
+.customer-theme .admin-sidebar .logo {
+  background: var(--brand-gradient);
+  color: #fff;
+  border-radius: 50%;
+  box-shadow: var(--shadow-btn);
+}
+.customer-theme .admin-nav-icon:hover {
+  background: var(--hover-tint);
+  color: var(--accent-blue);
+}
+.customer-theme .admin-nav-icon.active {
+  background: var(--brand-gradient);
+  color: #fff;
+}
+.customer-theme .admin-icon-btn {
+  background: var(--hover-tint);
+  color: var(--accent-blue);
+}
+.customer-theme .admin-avatar {
+  background: var(--brand-gradient);
+  color: #fff;
+}
+
+/* --- Cards, tables, badges --- */
+.customer-theme .admin-card {
+  box-shadow: var(--shadow-card);
+}
+.customer-theme .admin-table tbody tr:hover {
+  background: var(--hover-tint);
+}
+.customer-theme .admin-badge {
+  background: var(--badge-tint);
+  color: var(--accent-blue);
+}
+
+/* --- Buttons --- */
+.customer-theme .admin-btn-primary {
+  background: var(--brand-gradient);
+  color: #fff;
+  box-shadow: var(--shadow-btn);
+}
+.customer-theme .admin-btn-ghost {
+  background: #fff;
+  color: var(--text);
+  border: 1px solid var(--card-border);
+}
+.customer-theme .admin-btn-danger {
+  background: rgba(198, 40, 40, 0.1);
+  color: var(--accent-red);
+}
+.customer-theme .admin-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* --- Inputs --- */
+.customer-theme .admin-input {
+  background: var(--input-bg);
+  border: 1px solid var(--card-border);
+}
+.customer-theme .admin-input:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(21, 80, 201, 0.15);
+}
+
+/* --- Transaction type/status badges (same pill shape, retinted) --- */
+.customer-theme .tx-type-deposit,
+.customer-theme .tx-status-completed {
+  background: rgba(21, 128, 61, 0.1);
+  color: var(--accent-lime);
+}
+.customer-theme .tx-type-withdraw,
+.customer-theme .tx-status-reversed {
+  background: rgba(198, 40, 40, 0.1);
+  color: var(--accent-red);
+}
+.customer-theme .tx-type-transfer,
+.customer-theme .tx-type-purchase {
+  background: rgba(21, 80, 201, 0.1);
+  color: var(--accent-blue);
+}
+.customer-theme .tx-type-adjustment,
+.customer-theme .tx-status-pending {
+  background: rgba(180, 83, 9, 0.1);
+  color: var(--accent-orange);
+}
+.customer-theme .tx-type-virtual {
+  background: rgba(100, 116, 139, 0.1);
+  color: var(--text-dim);
+}

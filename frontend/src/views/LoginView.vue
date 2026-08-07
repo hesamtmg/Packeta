@@ -7,6 +7,7 @@ import { apiRequest, ApiError } from '../api/client';
 import LanguageSwitcher from '../components/LanguageSwitcher.vue';
 import PhoneAuthForm from '../components/PhoneAuthForm.vue';
 import '../styles/admin-theme.css';
+import '../styles/customer-theme.css';
 
 const email = ref('');
 const password = ref('');
@@ -49,7 +50,7 @@ async function onSubmit() {
 </script>
 
 <template>
-  <div class="admin-theme auth-theme">
+  <div class="customer-theme auth-theme">
     <LanguageSwitcher class="lang-corner" />
     <div class="auth-page">
       <div class="auth-form admin-card">
@@ -128,7 +129,7 @@ async function onSubmit() {
 .method-toggle {
   display: flex;
   gap: 6px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--input-bg, #f4f8ff);
   border-radius: 999px;
   padding: 4px;
 }
@@ -146,20 +147,21 @@ async function onSubmit() {
   cursor: pointer;
 }
 .method-btn.active {
-  background: var(--text);
-  color: var(--shell-bg);
+  background: var(--brand-gradient, var(--text));
+  color: #fff;
 }
 .auth-logo {
   width: 44px;
   height: 44px;
-  border-radius: var(--radius-sm);
-  background: var(--text);
-  color: var(--shell-bg);
+  border-radius: 50%;
+  background: var(--brand-gradient, var(--text));
+  color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 700;
   margin-bottom: 4px;
+  box-shadow: var(--shadow-btn, none);
 }
 .auth-form h1 {
   margin: 0;
@@ -180,7 +182,7 @@ label {
 .admin-input {
   width: 100%;
 }
-button {
+.auth-form button {
   margin-top: 6px;
   width: 100%;
 }

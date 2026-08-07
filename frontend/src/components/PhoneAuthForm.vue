@@ -148,8 +148,8 @@ function backToPhone() {
   margin: 0;
   padding: 8px 10px;
   border-radius: var(--radius-sm);
-  background: rgba(216, 255, 92, 0.1);
-  color: var(--accent-lime);
+  background: var(--dev-hint-bg, rgba(216, 255, 92, 0.1));
+  color: var(--dev-hint-text, var(--accent-lime));
   font-size: 0.8rem;
   font-family: monospace;
 }

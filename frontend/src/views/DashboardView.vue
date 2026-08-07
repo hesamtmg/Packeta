@@ -707,7 +707,7 @@ async function onGrantCredit() {
       <div class="side-stack">
         <div class="admin-card">
           <h2>{{ t('dashboard.activityHeading') }}</h2>
-          <MiniLineChart :data="transactionsPerDay" color="#d8ff5c" :height="70" />
+          <MiniLineChart :data="transactionsPerDay" color="#2f6fed" :height="70" />
         </div>
         <div class="admin-card" v-if="latestTransaction">
           <h2>{{ t('dashboard.latestTransactionHeading') }}</h2>
@@ -1265,7 +1265,8 @@ async function onGrantCredit() {
   position: relative;
   border-radius: var(--radius-md);
   padding: 32px 28px 56px;
-  background: linear-gradient(135deg, #3a2418 0%, #1e1c25 65%);
+  background: var(--brand-gradient, linear-gradient(135deg, #4f8bff 0%, #1550c9 100%));
+  color: #fff;
   overflow: visible;
   display: flex;
   flex-direction: column;
@@ -1275,7 +1276,7 @@ async function onGrantCredit() {
 
 .hero-eyebrow {
   font-size: 0.78rem;
-  color: var(--accent-orange-soft);
+  color: rgba(255, 255, 255, 0.75);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-weight: 600;
@@ -1289,7 +1290,7 @@ async function onGrantCredit() {
 }
 
 .hero-copy p {
-  color: var(--text-dim);
+  color: rgba(255, 255, 255, 0.85);
   max-width: 440px;
   margin: 0 0 20px;
 }
@@ -1301,12 +1302,14 @@ async function onGrantCredit() {
   bottom: -22px;
   display: flex;
   flex-wrap: wrap;
-  background: rgba(15, 13, 18, 0.85);
+  background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(6px);
   border: 1px solid var(--card-border);
   border-radius: var(--radius-md);
   padding: 16px 20px;
   gap: 16px 28px;
+  color: var(--text);
+  box-shadow: var(--shadow-card, none);
 }
 
 .pill {
@@ -1357,10 +1360,10 @@ async function onGrantCredit() {
 }
 
 .installment-status-paid {
-  color: var(--accent, #4ade80);
+  color: var(--accent-lime);
 }
 .installment-status-overdue {
-  color: #f87171;
+  color: var(--accent-red);
 }
 .installment-status-pending {
   color: var(--text-dim);
@@ -1403,6 +1406,7 @@ async function onGrantCredit() {
 }
 .wallet-card-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .wallet-edit-form {

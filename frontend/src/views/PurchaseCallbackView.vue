@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import { apiRequest, ApiError } from '../api/client';
 import '../styles/admin-theme.css';
+import '../styles/customer-theme.css';
 
 const route = useRoute();
 const router = useRouter();
@@ -65,7 +66,7 @@ function goToTransaction() {
 </script>
 
 <template>
-  <div class="admin-theme callback-theme">
+  <div class="customer-theme callback-theme">
     <div class="callback-page">
       <div class="admin-card card">
         <span class="icon" :class="status">{{

@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import LanguageSwitcher from './LanguageSwitcher.vue';
 import './../styles/admin-theme.css';
+import './../styles/customer-theme.css';
 
 defineProps<{ title: string }>();
 
@@ -22,7 +23,7 @@ function logout() {
 </script>
 
 <template>
-  <div class="admin-theme">
+  <div class="customer-theme">
     <div class="admin-shell">
       <aside class="admin-sidebar">
         <div class="logo">P</div>
