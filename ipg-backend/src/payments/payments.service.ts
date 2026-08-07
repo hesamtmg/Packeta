@@ -24,6 +24,8 @@ export class PaymentsService {
       merchantName: dto.merchantName,
       amount: String(dto.amount),
       displayAmount: dto.displayAmount,
+      displayAmountWordsEn: dto.displayAmountWordsEn ?? null,
+      displayAmountWordsFa: dto.displayAmountWordsFa ?? null,
       callbackUrl: dto.callbackUrl,
       status: PaymentIntentStatus.INITIATED,
       expiresAt: new Date(Date.now() + timeoutSeconds * 1000),
@@ -47,6 +49,8 @@ export class PaymentsService {
     return {
       merchantName: intent.merchantName,
       displayAmount: intent.displayAmount,
+      displayAmountWordsEn: intent.displayAmountWordsEn,
+      displayAmountWordsFa: intent.displayAmountWordsFa,
       status,
       expiresAt: intent.expiresAt,
       terminalId: intent.terminalId,

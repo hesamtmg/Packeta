@@ -12,7 +12,7 @@ import { WalletTypeCode } from '../wallet-types/entities/wallet-type.entity';
 import { OtpService } from './otp.service';
 import { CaptchaService } from './captcha.service';
 import { serializeWallet } from '../wallets/wallet.serializer';
-import { formatAmount } from '../common/format-amount';
+import { formatAmount, formatAmountWords } from '../common/format-amount';
 import { displayIdentity } from '../common/synthetic-email';
 
 // Backs the IPG's "identify yourself" step for merchant-initiated charges:
@@ -42,6 +42,8 @@ export class PurchaseGatewayService {
     category: string | null;
     subCategory: string | null;
     displayAmount: string;
+    displayAmountWordsEn: string;
+    displayAmountWordsFa: string;
     expiresAt: Date | null;
     language: string;
   }> {
@@ -71,6 +73,16 @@ export class PurchaseGatewayService {
       displayAmount: formatAmount(
         transaction.amount,
         toWallet.walletType.currency,
+      ),
+      displayAmountWordsEn: formatAmountWords(
+        transaction.amount,
+        toWallet.walletType.currency,
+        'en',
+      ),
+      displayAmountWordsFa: formatAmountWords(
+        transaction.amount,
+        toWallet.walletType.currency,
+        'fa',
       ),
       expiresAt: transaction.expiresAt,
       language: transaction.language ?? 'en',

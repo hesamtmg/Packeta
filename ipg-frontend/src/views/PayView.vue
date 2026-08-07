@@ -4,12 +4,14 @@ import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import { apiRequest, ApiError } from '../api/client';
 import { packetaRequest } from '../api/packetaClient';
-import { formatAmount, type CurrencyInfo } from '../utils/currency';
+import { formatAmount, formatAmountWords, type CurrencyInfo } from '../utils/currency';
 import { setLocale } from '../i18n';
 
 interface PaymentInfo {
   merchantName: string;
   displayAmount: string;
+  displayAmountWordsEn?: string | null;
+  displayAmountWordsFa?: string | null;
   status: 'INITIATED' | 'AUTHORIZED' | 'VERIFIED' | 'CANCELED' | 'EXPIRED';
   expiresAt: string;
   terminalId?: string | null;
@@ -28,6 +30,8 @@ interface ChargeStatus {
   category: string | null;
   subCategory: string | null;
   displayAmount: string;
+  displayAmountWordsEn: string;
+  displayAmountWordsFa: string;
   expiresAt: string | null;
   language: string;
 }
@@ -112,6 +116,10 @@ const merchantSummary = computed(() => ({
   category: chargeInfo.value?.category ?? info.value?.category ?? null,
   subCategory: chargeInfo.value?.subCategory ?? info.value?.subCategory ?? null,
   displayAmount: chargeInfo.value?.displayAmount ?? info.value?.displayAmount ?? '',
+  displayAmountWords:
+    (locale.value === 'fa'
+      ? chargeInfo.value?.displayAmountWordsFa ?? info.value?.displayAmountWordsFa
+      : chargeInfo.value?.displayAmountWordsEn ?? info.value?.displayAmountWordsEn) ?? '',
 }));
 const hasMerchantPanel = computed(
   () =>
@@ -150,6 +158,14 @@ const activeCard = computed(() => {
         ).toString(),
         selectedWallet.value.walletType.currency,
       ),
+      subWords: formatAmountWords(
+        (
+          BigInt(selectedWallet.value.balance) +
+          BigInt(selectedWallet.value.virtualAmount || '0')
+        ).toString(),
+        selectedWallet.value.walletType.currency,
+        locale.value === 'fa' ? 'fa' : 'en',
+      ),
     };
   }
   return {
@@ -158,6 +174,7 @@ const activeCard = computed(() => {
     holderValue: merchantSummary.value.name || t('brand'),
     subLabel: t('card.amount'),
     subValue: merchantSummary.value.displayAmount,
+    subWords: merchantSummary.value.displayAmountWords,
   };
 });
 
@@ -615,6 +632,7 @@ onUnmounted(() => {
           <div class="totals-text">
             <span class="totals-label">{{ t('totals.label') }}</span>
             <strong class="totals-amount">{{ merchantSummary.displayAmount }}</strong>
+            <span v-if="merchantSummary.displayAmountWords" class="totals-amount-words">{{ merchantSummary.displayAmountWords }}</span>
           </div>
         </div>
        </div>
@@ -689,6 +707,7 @@ onUnmounted(() => {
             <div class="paycard-field paycard-field-right">
               <span class="paycard-label">{{ activeCard.subLabel }}</span>
               <span class="paycard-value">{{ activeCard.subValue }}</span>
+              <span v-if="activeCard.subWords" class="paycard-value-words">{{ activeCard.subWords }}</span>
             </div>
           </div>
         </div>
@@ -1166,6 +1185,14 @@ button.paycard.selected {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.paycard-value-words {
+  font-size: 0.62rem;
+  font-weight: 500;
+  line-height: 1.3;
+  color: rgba(255, 255, 255, 0.65);
+  white-space: normal;
+  max-width: 100%;
+}
 .paycard-brand {
   font-size: 0.72rem;
   font-weight: 800;
@@ -1240,6 +1267,11 @@ button.paycard.selected {
   font-size: 1.4rem;
   font-weight: 800;
   color: #14213d;
+}
+.totals-amount-words {
+  font-size: 0.76rem;
+  font-weight: 500;
+  color: #5b6b8c;
 }
 .status {
   color: #6b7280;
