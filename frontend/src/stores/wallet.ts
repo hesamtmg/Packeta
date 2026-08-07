@@ -136,6 +136,14 @@ interface Transaction {
   amount: string;
   note: string | null;
   createdAt: string;
+  // Present on the API response but only meaningful for grouping a single
+  // customer-facing action's sub-legs (a credit wallet purchase's funding
+  // transfer + ceiling draw-down, a reversal's restore legs, ...) back
+  // together — see DashboardView's history clustering.
+  idempotencyKey?: string;
+  relatedTransactionId?: string | null;
+  relatedPurchaseId?: string | null;
+  completesPurchaseId?: string | null;
 }
 
 // One purchase's worth of an installment's billing period, resolved back to
