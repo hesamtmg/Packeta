@@ -99,6 +99,7 @@ onMounted(load);
       <h2 v-if="thisWallet">{{ thisWallet.walletType.name }} · {{ thisWallet.walletType.currency.code }}</h2>
       <p class="hint">{{ t('dashboard.installments.hint') }}</p>
 
+      <div class="table-scroll">
       <table class="admin-table">
         <thead>
           <tr>
@@ -171,6 +172,7 @@ onMounted(load);
           <tr v-if="!monthGroups.length"><td colspan="4">{{ t('dashboard.installments.none') }}</td></tr>
         </tbody>
       </table>
+      </div>
       <p v-if="payError" class="admin-error">{{ payError }}</p>
     </div>
   </AppLayout>

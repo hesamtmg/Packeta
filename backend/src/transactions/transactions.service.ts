@@ -1954,8 +1954,20 @@ export class TransactionsService {
         }
 
         // COMPLETED: money already moved at verify time, so refund it —
-        // credit the customer (original fromWallet), debit the merchant
-        // (original toWallet).
+        // debit the merchant (original toWallet) by the full amount, then
+        // route that refund based on how the purchase was actually funded
+        // (see settleCreditFundedPurchase). A plain wallet gets the whole
+        // amount back as real balance, same as always. A credit-wallet
+        // purchase that drew on its backing REPOSITORY's real balance is
+        // different: that slice was never really "the customer's" money to
+        // hold — reversing it undoes the same two legs the forward flow
+        // created, sending the repository-funded slice back to the
+        // repository and restoring the credit wallet's ceiling
+        // (virtualAmount) by that same amount. Only the slice actually paid
+        // in real money (a support-fund top-up via ZarinPal, or the wallet's
+        // own pre-existing real balance) lands back on the credit wallet's
+        // real balance — exactly the amount genuinely sitting there if the
+        // customer tries to pay again.
         const merchantWalletRef = await this.walletsService.getByIdUnscoped(
           original.toWalletId!,
         );
@@ -1970,6 +1982,14 @@ export class TransactionsService {
         const customerWallet = locked.get(original.fromWalletId!)!;
         const merchantWallet = locked.get(original.toWalletId!)!;
 
+        const repositoryFundingLeg = await manager.findOne(Transaction, {
+          where: { idempotencyKey: `credit-fund:${original.id}` },
+        });
+        const repositoryAmount = repositoryFundingLeg
+          ? BigInt(repositoryFundingLeg.amount)
+          : 0n;
+        const customerCreditAmount = BigInt(original.amount) - repositoryAmount;
+
         const merchantFloor = merchantWalletRef.walletType.allowNegativeBalance
           ? -BigInt(merchantWalletRef.walletType.creditLimit ?? '0')
           : 0n;
@@ -1981,7 +2001,7 @@ export class TransactionsService {
           );
         }
         const newCustomerBalance =
-          BigInt(customerWallet.balance) + BigInt(original.amount);
+          BigInt(customerWallet.balance) + customerCreditAmount;
 
         await manager.update(Wallet, merchantWallet.id, {
           balance: newMerchantBalance.toString(),
@@ -1989,6 +2009,44 @@ export class TransactionsService {
         await manager.update(Wallet, customerWallet.id, {
           balance: newCustomerBalance.toString(),
         });
+
+        if (repositoryFundingLeg && repositoryAmount > 0n) {
+          const repository = await this.walletsService.lockById(
+            manager,
+            repositoryFundingLeg.fromWalletId!,
+          );
+          await manager.update(Wallet, repository.id, {
+            balance: (BigInt(repository.balance) + repositoryAmount).toString(),
+          });
+          const restoredVirtual =
+            (customerWallet.virtualAmount
+              ? BigInt(customerWallet.virtualAmount)
+              : 0n) + repositoryAmount;
+          await manager.update(Wallet, customerWallet.id, {
+            virtualAmount: restoredVirtual.toString(),
+          });
+
+          const repositoryReturn = manager.create(Transaction, {
+            type: TransactionType.TRANSFER,
+            fromWalletId: customerWallet.id,
+            toWalletId: repository.id,
+            amount: repositoryAmount.toString(),
+            idempotencyKey: `credit-fund-reverse:${original.id}`,
+            note: 'Repository-funded portion of this purchase returned on reversal',
+          });
+          await manager.save(repositoryReturn);
+
+          const ceilingRestore = manager.create(Transaction, {
+            type: TransactionType.VIRTUAL,
+            fromWalletId: null,
+            toWalletId: customerWallet.id,
+            amount: repositoryAmount.toString(),
+            idempotencyKey: `credit-draw-reverse:${original.id}`,
+            note: 'Credit wallet ceiling restored on reversal',
+            relatedPurchaseId: original.id,
+          });
+          await manager.save(ceilingRestore);
+        }
 
         original.status = TransactionStatus.REVERSED;
         await manager.save(original);
@@ -2349,7 +2407,9 @@ export class TransactionsService {
   async getHistory(userId: string, walletId?: string): Promise<Transaction[]> {
     const wallets = walletId
       ? [await this.walletsService.getById(userId, walletId)]
-      : await this.walletsService.listForUser(userId);
+      : (await this.walletsService.listForUser(userId)).filter(
+          (wallet) => !wallet.walletType.hiddenFromCustomer,
+        );
     const walletIds = wallets.map((wallet) => wallet.id);
     if (walletIds.length === 0) {
       return [];

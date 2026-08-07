@@ -1198,6 +1198,7 @@ async function onGrantCredit() {
           </select>
         </div>
       </div>
+      <div class="table-scroll">
       <table class="admin-table">
         <thead>
           <tr>
@@ -1246,6 +1247,7 @@ async function onGrantCredit() {
           <tr v-if="!historyPageItems.length"><td colspan="8">{{ t('dashboard.history.empty') }}</td></tr>
         </tbody>
       </table>
+      </div>
       <ListPagination
         :page="historyPage"
         :total-pages="historyTotalPages"
@@ -1298,12 +1300,13 @@ async function onGrantCredit() {
   right: 28px;
   bottom: -22px;
   display: flex;
+  flex-wrap: wrap;
   background: rgba(15, 13, 18, 0.85);
   backdrop-filter: blur(6px);
   border: 1px solid var(--card-border);
   border-radius: var(--radius-md);
   padding: 16px 20px;
-  gap: 28px;
+  gap: 16px 28px;
 }
 
 .pill {

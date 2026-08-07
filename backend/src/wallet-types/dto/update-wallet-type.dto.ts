@@ -67,6 +67,12 @@ export class UpdateWalletTypeDto {
   @IsBoolean()
   hasVirtualBalance?: boolean;
 
+  // Hides wallets of this type from a customer's own wallets/transactions
+  // lists (see WalletType.hiddenFromCustomer).
+  @IsOptional()
+  @IsBoolean()
+  hiddenFromCustomer?: boolean;
+
   // Credit-line fields (repository/credit wallet feature). All optional and
   // only meaningful on the CREDIT-style types this feature applies to —
   // the shared billing rules; the actual virtualAmount granted and the

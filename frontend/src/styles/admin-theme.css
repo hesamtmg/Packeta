@@ -166,6 +166,8 @@ body{
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .admin-topbar h1 {
@@ -179,6 +181,7 @@ body{
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .admin-icon-btn {
@@ -230,6 +233,16 @@ body{
 .admin-error {
   color: var(--accent-red);
   font-size: 0.9rem;
+}
+
+/* Lets a wide table scroll horizontally within its own card instead of
+   forcing the whole page (sidebar included) to scroll sideways on narrow
+   screens — the table's natural min-content width can exceed the viewport
+   even though every other element on the page wraps to fit it. */
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .admin-table {
@@ -432,7 +445,12 @@ body{
   }
   .admin-sidebar {
     flex-direction: row;
+    flex-wrap: wrap;
     width: auto;
+    justify-content: center;
+  }
+  .admin-sidebar .logo {
+    margin-bottom: 0;
   }
   .admin-grid-2,
   .admin-grid-3,

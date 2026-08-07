@@ -37,12 +37,20 @@ interface WalletType {
   allowWithdraw: boolean;
   allowP2pOut: boolean;
   allowP2pIn: boolean;
+  depositable: boolean;
   hasVirtualBalance: boolean;
 }
 
 interface Wallet {
   id: string;
+  name: string | null;
   balance: string;
+  closedAt: string | null;
+  blockedAt: string | null;
+  restrictedCounterparties: string[] | null;
+  virtualAmount: string | null;
+  repositoryWalletId: string | null;
+  railType: string | null;
   walletType: WalletType;
 }
 
@@ -57,13 +65,11 @@ const transactions = ref<AdminTransaction[]>([]);
 const walletTypes = ref<WalletType[]>([]);
 const listError = ref('');
 const detailError = ref('');
-const adjustError = ref('');
 const addWalletError = ref('');
-const busy = ref(false);
 const addWalletBusy = ref(false);
 
-const adjustAmount = ref<Record<string, string>>({});
-const adjustReason = ref<Record<string, string>>({});
+const walletError = ref('');
+const walletBusy = ref(false);
 
 const newWalletTypeId = ref('');
 const newWalletVirtualAmount = ref('');
@@ -138,7 +144,7 @@ async function loadRoles() {
 
 async function selectUser(id: string) {
   detailError.value = '';
-  adjustError.value = '';
+  walletError.value = '';
   assignError.value = '';
   assignSuccess.value = '';
   try {
@@ -173,25 +179,70 @@ async function saveAssignment() {
   }
 }
 
-async function adjust(wallet: Wallet) {
-  adjustError.value = '';
-  busy.value = true;
+async function reopenWallet(wallet: Wallet) {
+  if (!selected.value) return;
+  walletError.value = '';
+  walletBusy.value = true;
   try {
-    const amount = toMinorUnits(adjustAmount.value[wallet.id] ?? '0', wallet.walletType.currency);
-    const reason = adjustReason.value[wallet.id] ?? '';
-    await apiRequest(`/admin/wallets/${wallet.id}/adjust`, {
-      method: 'POST',
-      body: { amount, reason },
-      idempotent: true,
-    });
-    adjustAmount.value[wallet.id] = '';
-    adjustReason.value[wallet.id] = '';
-    if (selected.value) await selectUser(selected.value.id);
+    await apiRequest(`/admin/wallets/${wallet.id}/reopen`, { method: 'POST' });
+    await selectUser(selected.value.id);
   } catch (err) {
-    adjustError.value = err instanceof ApiError ? err.message : t('admin.customers.adjustFailed');
+    walletError.value = err instanceof ApiError ? err.message : t('admin.wallets.reopenFailed');
   } finally {
-    busy.value = false;
+    walletBusy.value = false;
   }
+}
+
+async function closeWallet(wallet: Wallet) {
+  if (!selected.value) return;
+  walletError.value = '';
+  walletBusy.value = true;
+  try {
+    await apiRequest(`/admin/wallets/${wallet.id}`, { method: 'DELETE' });
+    await selectUser(selected.value.id);
+  } catch (err) {
+    walletError.value = err instanceof ApiError ? err.message : t('admin.wallets.closeFailed');
+  } finally {
+    walletBusy.value = false;
+  }
+}
+
+// Mirrors DashboardView.vue's own wallet-card badges — kept identical so a
+// customer's wallets read the same way whether they're viewing them or an
+// admin is looking on their behalf.
+function badges(w: Wallet): string[] {
+  const list: string[] = [];
+  if (w.walletType.allowNegativeBalance) {
+    list.push(
+      t('dashboard.wallets.creditLimit', {
+        amount: formatAmount(w.walletType.creditLimit ?? '0', w.walletType.currency),
+      }),
+    );
+  }
+  if (!w.walletType.allowWithdraw) list.push(t('dashboard.wallets.noCashOut'));
+  if (!w.walletType.allowP2pOut && !w.walletType.allowP2pIn) {
+    list.push(t('dashboard.wallets.noTransfers'));
+  }
+  if (!w.walletType.depositable) list.push(t('dashboard.wallets.noDeposits'));
+  if (w.restrictedCounterparties?.length) list.push(t('dashboard.wallets.marketBadge'));
+  if (w.closedAt) list.push(t('dashboard.wallets.closedBadge'));
+  if (w.walletType.code === 'REPOSITORY' && w.virtualAmount !== null) {
+    list.push(
+      t('dashboard.wallets.virtualPoolBadge', {
+        amount: formatAmount(w.virtualAmount, w.walletType.currency),
+      }),
+    );
+  }
+  if (w.walletType.code === 'CREDIT' && w.virtualAmount !== null) {
+    list.push(
+      t('dashboard.wallets.creditCeilingBadge', {
+        amount: formatAmount(w.virtualAmount, w.walletType.currency),
+      }),
+    );
+  }
+  if (w.repositoryWalletId) list.push(t('dashboard.wallets.repositoryBackedBadge'));
+  if (w.blockedAt) list.push(t('dashboard.wallets.blockedBadge'));
+  return list;
 }
 
 async function onAddWallet() {
@@ -235,6 +286,7 @@ loadRoles();
         <h2>{{ t('admin.customers.heading', { count: sorted.length }) }}</h2>
         <input v-model="search" class="admin-input" :placeholder="t('admin.customers.searchPlaceholder')" />
       </div>
+      <div class="table-scroll">
       <table class="admin-table">
         <thead>
           <tr>
@@ -254,6 +306,7 @@ loadRoles();
           <tr v-if="!pageItems.length"><td colspan="4">{{ t('admin.customers.noCustomers') }}</td></tr>
         </tbody>
       </table>
+      </div>
       <ListPagination
         :page="page"
         :total-pages="totalPages"
@@ -276,7 +329,7 @@ loadRoles();
     <div v-if="selected" class="admin-card">
       <h2>{{ displayIdentity(selected) }}</h2>
       <p v-if="detailError" class="admin-error">{{ detailError }}</p>
-      <p v-if="adjustError" class="admin-error">{{ adjustError }}</p>
+      <p v-if="walletError" class="admin-error">{{ walletError }}</p>
 
       <div v-if="auth.hasSection('roles')" class="assign-block">
         <h3>{{ t('admin.customers.assignHeading') }}</h3>
@@ -296,21 +349,43 @@ loadRoles();
 
       <div class="wallets">
         <article v-for="w in selected.wallets" :key="w.id" class="wallet-card">
-          <router-link :to="{ name: 'admin-wallet-detail', params: { id: w.id } }" class="wallet-type">
-            {{ w.walletType.name }} · {{ w.walletType.currency.code }}
-          </router-link>
+          <span class="wallet-type">{{ w.walletType.name }} · {{ w.walletType.currency.code }}</span>
+          <span v-if="w.name" class="wallet-type-sub">{{ w.name }}</span>
           <span class="wallet-balance">{{ formatAmount(w.balance, w.walletType.currency) }}</span>
           <span class="mono-id">{{ w.id }}</span>
-          <div class="adjust-form">
-            <input
-              v-model="adjustAmount[w.id]"
-              type="number"
-              :step="amountStep(w.walletType.currency)"
-              class="admin-input"
-              :placeholder="t('admin.customers.amountPlaceholder')"
-            />
-            <input v-model="adjustReason[w.id]" type="text" class="admin-input" :placeholder="t('admin.customers.reasonPlaceholder')" />
-            <button class="admin-btn admin-btn-primary" :disabled="busy" @click="adjust(w)">{{ t('admin.customers.adjust') }}</button>
+          <div class="badges">
+            <span v-for="b in badges(w)" :key="b" class="admin-badge">{{ b }}</span>
+          </div>
+          <div class="wallet-card-actions">
+            <router-link :to="{ name: 'admin-wallet-detail', params: { id: w.id } }" class="admin-btn admin-btn-ghost">
+              {{ t('walletDetail.viewLink') }}
+            </router-link>
+            <router-link
+              v-if="w.walletType.code === 'CREDIT'"
+              :to="{ name: 'wallet-installments', params: { walletId: w.id } }"
+              class="admin-btn admin-btn-ghost"
+            >
+              {{ t('dashboard.installments.viewLink') }}
+            </router-link>
+            <button
+              v-if="w.closedAt"
+              type="button"
+              class="admin-btn admin-btn-ghost"
+              :disabled="walletBusy"
+              @click="reopenWallet(w)"
+            >
+              {{ t('admin.wallets.reopen') }}
+            </button>
+            <button
+              v-else
+              type="button"
+              class="admin-btn admin-btn-danger"
+              :disabled="walletBusy || w.balance !== '0'"
+              :title="w.balance !== '0' ? t('dashboard.wallets.closeRequiresZero') : ''"
+              @click="closeWallet(w)"
+            >
+              {{ t('admin.wallets.close') }}
+            </button>
           </div>
         </article>
       </div>
@@ -345,6 +420,7 @@ loadRoles();
       </form>
 
       <h3>{{ t('admin.customers.historyHeading') }}</h3>
+      <div class="table-scroll">
       <table class="admin-table">
         <thead>
           <tr>
@@ -403,6 +479,7 @@ loadRoles();
           <tr v-if="!transactions.length"><td colspan="8">{{ t('admin.customers.noTransactions') }}</td></tr>
         </tbody>
       </table>
+      </div>
     </div>
   </AdminLayout>
 </template>
@@ -417,6 +494,7 @@ loadRoles();
   justify-content: space-between;
   margin-bottom: 14px;
   gap: 12px;
+  flex-wrap: wrap;
 }
 .filter-row h2 {
   margin: 0;
@@ -467,14 +545,25 @@ h3 {
   color: var(--text-dim);
   text-transform: uppercase;
 }
+.wallet-type-sub {
+  font-size: 0.68rem;
+  color: var(--text-dimmer);
+  opacity: 0.7;
+  margin-top: -6px;
+}
 .wallet-balance {
   font-size: 1.3rem;
   font-weight: 700;
 }
-.adjust-form {
+.badges {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 6px;
+}
+.wallet-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .add-wallet-form {
   display: flex;

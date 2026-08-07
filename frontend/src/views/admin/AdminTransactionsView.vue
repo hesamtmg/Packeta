@@ -107,6 +107,7 @@ onMounted(load);
           </select>
         </div>
       </div>
+      <div class="table-scroll">
       <table class="admin-table">
         <thead>
           <tr>
@@ -165,6 +166,7 @@ onMounted(load);
           <tr v-if="!pageItems.length"><td colspan="8">{{ t('admin.transactions.noTransactions') }}</td></tr>
         </tbody>
       </table>
+      </div>
       <ListPagination
         :page="page"
         :total-pages="totalPages"
