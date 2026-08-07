@@ -517,6 +517,11 @@ export class TransactionsService {
             ),
             callbackUrl: `${frontendUrl}/purchase/${transaction.id}/callback`,
             timeoutSeconds,
+            terminalId: toWalletRef.terminalId,
+            acceptorCode: toWalletRef.acceptorCode,
+            storeSite: toWalletRef.storeSite,
+            category: toWalletRef.category,
+            subCategory: toWalletRef.subCategory,
           });
 
         transaction.ipgAuthority = authority;
@@ -1333,6 +1338,11 @@ export class TransactionsService {
             displayAmount: formatAmount(amount, currency),
             callbackUrl: `${frontendUrl}/purchase/${transaction.id}/callback`,
             timeoutSeconds,
+            terminalId: toWalletRef.terminalId,
+            acceptorCode: toWalletRef.acceptorCode,
+            storeSite: toWalletRef.storeSite,
+            category: toWalletRef.category,
+            subCategory: toWalletRef.subCategory,
           });
 
         transaction.ipgAuthority = authority;

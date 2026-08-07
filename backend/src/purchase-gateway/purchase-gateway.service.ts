@@ -39,6 +39,8 @@ export class PurchaseGatewayService {
     storeSite: string | null;
     terminalId: string | null;
     acceptorCode: string | null;
+    category: string | null;
+    subCategory: string | null;
     displayAmount: string;
     expiresAt: Date | null;
     language: string;
@@ -64,6 +66,8 @@ export class PurchaseGatewayService {
       storeSite: toWallet.storeSite,
       terminalId: toWallet.terminalId,
       acceptorCode: toWallet.acceptorCode,
+      category: toWallet.category,
+      subCategory: toWallet.subCategory,
       displayAmount: formatAmount(
         transaction.amount,
         toWallet.walletType.currency,

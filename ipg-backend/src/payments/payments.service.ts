@@ -27,6 +27,11 @@ export class PaymentsService {
       callbackUrl: dto.callbackUrl,
       status: PaymentIntentStatus.INITIATED,
       expiresAt: new Date(Date.now() + timeoutSeconds * 1000),
+      terminalId: dto.terminalId ?? null,
+      acceptorCode: dto.acceptorCode ?? null,
+      storeSite: dto.storeSite ?? null,
+      category: dto.category ?? null,
+      subCategory: dto.subCategory ?? null,
     });
     const saved = await this.paymentsRepository.save(intent);
     const frontendUrl = this.configService.get<string>('frontendUrl');
@@ -44,6 +49,11 @@ export class PaymentsService {
       displayAmount: intent.displayAmount,
       status,
       expiresAt: intent.expiresAt,
+      terminalId: intent.terminalId,
+      acceptorCode: intent.acceptorCode,
+      storeSite: intent.storeSite,
+      category: intent.category,
+      subCategory: intent.subCategory,
     };
   }
 

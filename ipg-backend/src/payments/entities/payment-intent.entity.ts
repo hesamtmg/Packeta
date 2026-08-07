@@ -40,6 +40,24 @@ export class PaymentIntent {
   @Column({ type: 'varchar', length: 500 })
   callbackUrl: string;
 
+  // Snapshot of the merchant wallet's profile at the moment this payment
+  // page was created — the pay page renders these directly, so it doesn't
+  // need a live lookup back into Packeta for merchant info to show.
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  terminalId: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  acceptorCode: string | null;
+
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  storeSite: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  category: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  subCategory: string | null;
+
   @Column({
     type: 'enum',
     enum: PaymentIntentStatus,

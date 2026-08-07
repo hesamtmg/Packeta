@@ -7,9 +7,22 @@ export default {
   expiresIn: 'انقضا تا {time}',
   loading: 'در حال بارگذاری…',
   expiredMessage: 'این لینک پرداخت منقضی شده است. از فروشنده لینک جدید بخواهید.',
-  merchant: {
-    terminal: 'ترمینال {value}',
-    acceptor: 'کد پذیرنده {value}',
+  card: {
+    wallet: 'کیف پول',
+    balance: 'موجودی',
+    payTo: 'پرداخت به',
+    amount: 'مبلغ',
+  },
+  merchantInfo: {
+    company: 'فروشنده',
+    storeSite: 'وب‌سایت',
+    terminalId: 'شناسه ترمینال',
+    acceptorCode: 'کد پذیرنده',
+    category: 'دسته‌بندی',
+    subCategory: 'زیردسته',
+  },
+  totals: {
+    label: 'مبلغ قابل پرداخت',
   },
   phone: {
     prompt: 'شماره تلفن خود را وارد کنید تا شناسایی شوید و کیف پول پرداخت را انتخاب کنید.',
@@ -43,7 +56,7 @@ export default {
     continueNow: 'اکنون ادامه بده',
   },
   pay: {
-    confirm: 'تأیید پرداخت',
+    confirm: 'پرداخت کنید',
     cancel: 'لغو',
     authorized: 'پرداخت تأیید شد — در حال بازگشت به فروشنده…',
     verified: 'پرداخت قبلاً تکمیل شده است.',
