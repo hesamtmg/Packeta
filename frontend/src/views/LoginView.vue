@@ -13,7 +13,7 @@ const email = ref('');
 const password = ref('');
 const error = ref('');
 const loading = ref(false);
-const method = ref<'email' | 'phone'>('email');
+const method = ref<'email' | 'phone'>('phone');
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -58,38 +58,29 @@ async function onSubmit() {
         <h1>{{ t('auth.login.title') }}</h1>
         <p class="auth-sub">{{ t('auth.login.subtitle') }}</p>
 
-        <div class="method-toggle">
-          <button
-            type="button"
-            class="method-btn"
-            :class="{ active: method === 'email' }"
-            @click="method = 'email'"
-          >
-            {{ t('auth.methodEmail') }}
+        <template v-if="method === 'phone'">
+          <PhoneAuthForm :eyebrow="t('auth.login.phoneEyebrow')" @success="completeAuth" />
+          <button type="button" class="method-link" @click="method = 'email'">
+            {{ t('auth.useEmailInstead') }}
           </button>
-          <button
-            type="button"
-            class="method-btn"
-            :class="{ active: method === 'phone' }"
-            @click="method = 'phone'"
-          >
-            {{ t('auth.methodPhone') }}
+        </template>
+        <template v-else>
+          <form @submit.prevent="onSubmit">
+            <label>
+              {{ t('auth.login.email') }}
+              <input v-model="email" type="text" autocomplete="username" class="admin-input" required />
+            </label>
+            <label>
+              {{ t('auth.login.password') }}
+              <input v-model="password" type="password" class="admin-input" required />
+            </label>
+            <p v-if="error" class="admin-error">{{ error }}</p>
+            <button type="submit" class="admin-btn admin-btn-primary" :disabled="loading">{{ t('auth.login.submit') }}</button>
+          </form>
+          <button type="button" class="method-link" @click="method = 'phone'">
+            {{ t('auth.usePhoneInstead') }}
           </button>
-        </div>
-
-        <form v-if="method === 'email'" @submit.prevent="onSubmit">
-          <label>
-            {{ t('auth.login.email') }}
-            <input v-model="email" type="email" class="admin-input" required />
-          </label>
-          <label>
-            {{ t('auth.login.password') }}
-            <input v-model="password" type="password" class="admin-input" required />
-          </label>
-          <p v-if="error" class="admin-error">{{ error }}</p>
-          <button type="submit" class="admin-btn admin-btn-primary" :disabled="loading">{{ t('auth.login.submit') }}</button>
-        </form>
-        <PhoneAuthForm v-else @success="completeAuth" />
+        </template>
 
         <router-link :to="{ name: 'signup' }" class="auth-link">{{ t('auth.login.noAccount') }}</router-link>
       </div>
@@ -126,29 +117,19 @@ async function onSubmit() {
   flex-direction: column;
   gap: 12px;
 }
-.method-toggle {
-  display: flex;
-  gap: 6px;
-  background: var(--input-bg, #f4f8ff);
-  border-radius: 999px;
-  padding: 4px;
-}
-.method-btn {
-  flex: 1;
+.auth-form .method-link {
   width: auto;
+  align-self: center;
   margin-top: 0;
   border: none;
   background: transparent;
   color: var(--text-dim);
-  border-radius: 999px;
-  padding: 7px 0;
-  font-size: 0.82rem;
-  font-weight: 600;
+  font-size: 0.8rem;
+  text-decoration: underline;
   cursor: pointer;
 }
-.method-btn.active {
-  background: var(--brand-gradient, var(--text));
-  color: #fff;
+.auth-form .method-link:hover {
+  color: var(--text);
 }
 .auth-logo {
   width: 44px;

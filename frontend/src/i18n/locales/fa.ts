@@ -41,12 +41,16 @@ export default {
     purchaseAction: 'خرید',
   },
   auth: {
-    methodEmail: 'ایمیل',
+    methodEmail: 'ایمیل یا نام کاربری',
     methodPhone: 'شماره تلفن',
+    recommended: 'توصیه‌شده',
+    useEmailInstead: 'استفاده از ایمیل یا نام کاربری',
+    usePhoneInstead: 'استفاده از شماره تلفن',
     login: {
       title: 'خوش آمدید',
       subtitle: 'وارد کیف پول پاکتا خود شوید',
-      email: 'ایمیل',
+      phoneEyebrow: 'سریع و امن — بدون نیاز به رمز عبور',
+      email: 'ایمیل یا نام کاربری',
       password: 'رمز عبور',
       submit: 'ورود',
       noAccount: 'حساب کاربری ندارید؟ ثبت‌نام کنید',
@@ -55,7 +59,8 @@ export default {
     signup: {
       title: 'ساخت حساب کاربری',
       subtitle: 'مدیریت کیف‌پول‌های خود را در پاکتا شروع کنید',
-      email: 'ایمیل',
+      phoneEyebrow: 'با یک لمس، با شماره تلفن — بدون نیاز به تعیین رمز',
+      email: 'ایمیل یا نام کاربری',
       password: 'رمز عبور (حداقل ۸ کاراکتر)',
       submit: 'ساخت حساب',
       haveAccount: 'قبلاً حساب دارید؟ وارد شوید',
@@ -63,7 +68,7 @@ export default {
     },
     phone: {
       phoneLabel: 'شماره تلفن',
-      captchaLabel: 'کد نمایش داده‌شده در تصویر را وارد کنید',
+      captchaLabel: 'ارقام نمایش داده‌شده در تصویر را وارد کنید',
       sendCode: 'ارسال کد',
       codeSentTo: 'کد ارسال‌شده به {phone} را وارد کنید',
       devHint: 'حالت آزمایشی — کد شما {code} است (پیامکی ارسال نمی‌شود)',
