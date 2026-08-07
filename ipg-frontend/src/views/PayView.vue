@@ -579,12 +579,12 @@ onUnmounted(() => {
        </div>
 
        <div class="form-column">
-        <!-- No wallet is known yet on the very first (phone) step, so there's
-             nothing meaningful to put on a card — it only appears from the
-             next step onward. Wallet step shows every eligible wallet as its
-             own selectable card; every later step shows one static summary
-             card (the selected wallet once known, otherwise the transaction
-             itself). -->
+        <!-- No wallet is known yet on the phone/OTP identification steps, so
+             there's nothing meaningful to put on a card — it only appears
+             from the wallet step onward. That step shows every eligible
+             wallet as its own selectable card; every later step shows one
+             static summary card (the selected wallet once known, otherwise
+             the transaction itself). -->
         <div v-if="step === 'wallet' && eligibleWallets.length" class="carousel-wrap">
           <button class="carousel-nav" type="button" @click="scrollCarousel(-1)">‹</button>
           <div ref="carousel" class="carousel">
@@ -623,7 +623,11 @@ onUnmounted(() => {
           <button class="carousel-nav" type="button" @click="scrollCarousel(1)">›</button>
         </div>
 
-        <div v-else-if="step !== 'loading' && step !== 'phone'" class="paycard paycard-static" aria-hidden="false">
+        <div
+          v-else-if="step !== 'loading' && step !== 'phone' && step !== 'otp'"
+          class="paycard paycard-static"
+          aria-hidden="false"
+        >
           <div class="paycard-top">
             <span class="paycard-chip" aria-hidden="true">
               <svg viewBox="0 0 32 24" fill="none"><rect x="1" y="1" width="30" height="22" rx="4" fill="currentColor" opacity="0.9"/><path d="M1 9h30M1 15h30M11 1v22M21 1v22" stroke="#fff" stroke-width="1"/></svg>
