@@ -37,6 +37,15 @@ export class PaymentIntent {
   @Column({ type: 'varchar', length: 50 })
   displayAmount: string;
 
+  // Same amount spelled out in words, pre-formatted by the merchant in both
+  // languages so the pay page can switch between them on its language
+  // toggle without a currency table of its own to recompute from.
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  displayAmountWordsEn: string | null;
+
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  displayAmountWordsFa: string | null;
+
   @Column({ type: 'varchar', length: 500 })
   callbackUrl: string;
 

@@ -13,6 +13,14 @@ export class CreatePaymentDto {
   @IsString()
   displayAmount: string;
 
+  @IsOptional()
+  @IsString()
+  displayAmountWordsEn?: string;
+
+  @IsOptional()
+  @IsString()
+  displayAmountWordsFa?: string;
+
   @IsUrl({ require_tld: false })
   callbackUrl: string;
 

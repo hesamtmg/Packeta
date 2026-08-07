@@ -28,7 +28,7 @@ import { serializeWallet } from '../wallets/wallet.serializer';
 import { IpgClientService } from '../ipg/ipg-client.service';
 import { ZarinpalClientService } from '../ipg/zarinpal-client.service';
 import { CurrenciesService } from '../currencies/currencies.service';
-import { formatAmount } from '../common/format-amount';
+import { formatAmount, formatAmountWords } from '../common/format-amount';
 import { displayIdentity } from '../common/synthetic-email';
 import { SettlementService } from '../settlement/settlement.service';
 import { SettlementSplitDto } from '../settlement/dto/settlement-split.dto';
@@ -514,6 +514,16 @@ export class TransactionsService {
             displayAmount: formatAmount(
               amount,
               fromWalletRef.walletType.currency,
+            ),
+            displayAmountWordsEn: formatAmountWords(
+              amount,
+              fromWalletRef.walletType.currency,
+              'en',
+            ),
+            displayAmountWordsFa: formatAmountWords(
+              amount,
+              fromWalletRef.walletType.currency,
+              'fa',
             ),
             callbackUrl: `${frontendUrl}/purchase/${transaction.id}/callback`,
             timeoutSeconds,
@@ -1336,6 +1346,8 @@ export class TransactionsService {
             merchantName: displayIdentity(merchant!),
             amount: transaction.amount,
             displayAmount: formatAmount(amount, currency),
+            displayAmountWordsEn: formatAmountWords(amount, currency, 'en'),
+            displayAmountWordsFa: formatAmountWords(amount, currency, 'fa'),
             callbackUrl: `${frontendUrl}/purchase/${transaction.id}/callback`,
             timeoutSeconds,
             terminalId: toWalletRef.terminalId,
