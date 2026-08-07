@@ -251,6 +251,8 @@ export default {
       externalDestination: 'خارجی (خروج از سامانه)',
       otherWallet: 'کیف پول دیگر',
       empty: 'هنوز تراکنشی وجود ندارد.',
+      groupCount: '{count} تراکنش',
+      openFullPage: 'مشاهده جزئیات کامل',
     },
   },
   profile: {

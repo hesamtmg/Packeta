@@ -11,8 +11,6 @@ import { walletDisplayName } from '../utils/wallet-name';
 import { useListControls } from '../composables/useListControls';
 import AppLayout from '../components/AppLayout.vue';
 import MiniLineChart from '../components/admin/MiniLineChart.vue';
-import SortableTh from '../components/admin/SortableTh.vue';
-import ListPagination from '../components/admin/ListPagination.vue';
 
 const wallet = useWalletStore();
 const auth = useAuthStore();
@@ -253,13 +251,7 @@ function isIncoming(tx: (typeof wallet.transactions)[number]): boolean {
   return !!tx.toWalletId && walletsById.value.has(tx.toWalletId);
 }
 
-const historyTypeFilter = ref('');
-
-const historyByType = computed(() =>
-  historyTypeFilter.value
-    ? wallet.transactions.filter((tx) => tx.type === historyTypeFilter.value)
-    : wallet.transactions,
-);
+const historySource = computed(() => wallet.transactions);
 
 function historySearchText(tx: (typeof wallet.transactions)[number]): (string | null)[] {
   const fromMine = tx.fromWalletId ? walletsById.value.get(tx.fromWalletId) : null;
@@ -273,28 +265,53 @@ function historySearchText(tx: (typeof wallet.transactions)[number]): (string | 
   ];
 }
 
-const {
-  search: historySearch,
-  sortKey: historySortKey,
-  sortDir: historySortDir,
-  pageItems: historyPageItems,
-  sorted: historySorted,
-  page: historyPage,
-  pageSize: historyPageSize,
-  totalPages: historyTotalPages,
-  toggleSort: historyToggleSort,
-  goToPage: historyGoToPage,
-} = useListControls(historyByType, {
+const { search: historySearch, sorted: historySorted } = useListControls(historySource, {
   searchFields: historySearchText,
   sortAccessors: {
-    type: (tx) => tx.type,
-    status: (tx) => tx.status,
-    amount: (tx) => Number(tx.amount),
     date: (tx) => new Date(tx.createdAt).getTime(),
   },
   defaultSort: { key: 'date', dir: 'desc' },
-  pageSize: 25,
 });
+
+// Grouped by "what caused it" (deposit, withdraw, transfer, purchase, ...)
+// so the list reads as a handful of recognizable categories instead of one
+// long undifferentiated table — this fixed order keeps groups from
+// reshuffling as new transactions land.
+const HISTORY_TYPE_ORDER = ['DEPOSIT', 'WITHDRAW', 'TRANSFER', 'PURCHASE', 'ADJUSTMENT', 'VIRTUAL'] as const;
+
+const historyGroups = computed(() => {
+  const byType = new Map<string, (typeof wallet.transactions)>();
+  for (const tx of historySorted.value) {
+    const list = byType.get(tx.type);
+    if (list) list.push(tx);
+    else byType.set(tx.type, [tx]);
+  }
+  return HISTORY_TYPE_ORDER.filter((type) => byType.has(type)).map((type) => ({
+    type,
+    items: byType.get(type)!,
+  }));
+});
+
+const expandedGroups = ref(new Set<string>());
+function toggleGroup(type: string) {
+  const next = new Set(expandedGroups.value);
+  if (next.has(type)) next.delete(type);
+  else next.add(type);
+  expandedGroups.value = next;
+}
+// Searching narrows a group down to the matches worth seeing, so there's no
+// reason to make the user also click it open.
+function isGroupOpen(type: string): boolean {
+  return !!historySearch.value.trim() || expandedGroups.value.has(type);
+}
+
+const expandedTx = ref(new Set<string>());
+function toggleTx(id: string) {
+  const next = new Set(expandedTx.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  expandedTx.value = next;
+}
 
 const currencyCount = computed(
   () => new Set(wallet.wallets.map((w) => w.walletType.currency.code)).size,
@@ -1185,77 +1202,95 @@ async function onGrantCredit() {
     <div class="admin-card">
       <div class="filter-row">
         <h2>{{ t('dashboard.history.allTransactions', { count: historySorted.length }) }}</h2>
-        <div class="list-controls-row">
-          <input v-model="historySearch" class="admin-input" :placeholder="t('dashboard.history.searchPlaceholder')" />
-          <select v-model="historyTypeFilter" class="admin-input">
-            <option value="">{{ t('dashboard.history.allTypes') }}</option>
-            <option value="DEPOSIT">{{ t('dashboard.history.deposit') }}</option>
-            <option value="WITHDRAW">{{ t('dashboard.history.withdraw') }}</option>
-            <option value="TRANSFER">{{ t('dashboard.history.transfer') }}</option>
-            <option value="PURCHASE">{{ t('dashboard.history.purchase') }}</option>
-            <option value="ADJUSTMENT">{{ t('dashboard.history.adjustment') }}</option>
-            <option value="VIRTUAL">{{ t('dashboard.history.virtual') }}</option>
-          </select>
+        <input v-model="historySearch" class="admin-input" :placeholder="t('dashboard.history.searchPlaceholder')" />
+      </div>
+
+      <div class="history-groups">
+        <div v-for="group in historyGroups" :key="group.type" class="history-group">
+          <button type="button" class="history-group-header" @click="toggleGroup(group.type)">
+            <span class="history-group-icon" :class="transactionTypeClass(group.type)">
+              <svg v-if="group.type === 'DEPOSIT'" viewBox="0 0 24 24" fill="none"><path d="M12 4v11m0 0 4-4m-4 4-4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              <svg v-else-if="group.type === 'WITHDRAW'" viewBox="0 0 24 24" fill="none"><path d="M12 15V4m0 0-4 4m4-4 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              <svg v-else-if="group.type === 'TRANSFER'" viewBox="0 0 24 24" fill="none"><path d="M4 8h13m0 0-3.5-3.5M17 8l-3.5 3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 16H7m0 0 3.5-3.5M7 16l3.5 3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <svg v-else-if="group.type === 'PURCHASE'" viewBox="0 0 24 24" fill="none"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2V2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 8h6M9 12h6M9 16h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              <svg v-else-if="group.type === 'ADJUSTMENT'" viewBox="0 0 24 24" fill="none"><path d="M4 6h9m-9 6h16M4 18h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="16" cy="6" r="2.2" fill="currentColor"/><circle cx="8" cy="18" r="2.2" fill="currentColor"/></svg>
+              <svg v-else viewBox="0 0 24 24" fill="none"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </span>
+            <span class="history-group-label">{{ t(`dashboard.history.${group.type.toLowerCase()}`) }}</span>
+            <span class="history-group-count">{{ t('dashboard.history.groupCount', { count: group.items.length }) }}</span>
+            <span class="history-group-chevron" :class="{ open: isGroupOpen(group.type) }" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
+          </button>
+
+          <div v-if="isGroupOpen(group.type)" class="history-group-body">
+            <div v-for="tx in group.items" :key="tx.id" class="history-row-wrap">
+              <button type="button" class="history-row" @click="toggleTx(tx.id)">
+                <span class="history-row-main">
+                  <span class="history-row-desc">{{ describeTransaction(tx) }}</span>
+                  <span class="history-row-date">{{ formatDateTime(tx.createdAt) }}</span>
+                </span>
+                <span class="history-row-amount" :class="isIncoming(tx) ? 'money-in' : 'money-out'">
+                  {{ isIncoming(tx) ? '+' : '−' }} {{ formatTransactionAmount(tx) }}
+                </span>
+                <span class="admin-badge" :class="transactionStatusClass(tx.status)">{{ t(`dashboard.history.status${tx.status}`) }}</span>
+              </button>
+
+              <div v-if="expandedTx.has(tx.id)" class="history-detail">
+                <div v-if="tx.fromWalletId && findWallet(tx.fromWalletId)" class="history-detail-row">
+                  <span>{{ t('transaction.fromWallet') }}</span>
+                  <div class="party-cell">
+                    <span class="party-label">{{ walletDisplayName(findWallet(tx.fromWalletId)!) }} ({{ findWallet(tx.fromWalletId)!.walletType.currency.code }})</span>
+                    <span class="money-chip money-out">− {{ formatTransactionAmount(tx) }}</span>
+                  </div>
+                </div>
+                <div v-else-if="tx.fromWalletId" class="history-detail-row">
+                  <span>{{ t('transaction.fromWallet') }}</span>
+                  <span>{{ tx.type === 'PURCHASE' ? t('transaction.direction.merchant') : t('dashboard.history.otherWallet') }}</span>
+                </div>
+                <div v-else class="history-detail-row">
+                  <span>{{ t('transaction.fromWallet') }}</span>
+                  <span>{{ t('dashboard.history.externalSource') }}</span>
+                </div>
+
+                <div v-if="tx.toWalletId && findWallet(tx.toWalletId)" class="history-detail-row">
+                  <span>{{ t('transaction.toWallet') }}</span>
+                  <div class="party-cell">
+                    <span class="party-label">{{ walletDisplayName(findWallet(tx.toWalletId)!) }} ({{ findWallet(tx.toWalletId)!.walletType.currency.code }})</span>
+                    <span class="money-chip money-in">+ {{ formatTransactionAmount(tx) }}</span>
+                  </div>
+                </div>
+                <div v-else-if="tx.toWalletId" class="history-detail-row">
+                  <span>{{ t('transaction.toWallet') }}</span>
+                  <span>{{ tx.type === 'PURCHASE' ? t('transaction.direction.merchant') : t('dashboard.history.otherWallet') }}</span>
+                </div>
+                <div v-else class="history-detail-row">
+                  <span>{{ t('transaction.toWallet') }}</span>
+                  <span>{{ t('dashboard.history.externalDestination') }}</span>
+                </div>
+
+                <div v-if="formatTransactionAmountWords(tx)" class="history-detail-row">
+                  <span>{{ t('dashboard.history.tableAmount') }}</span>
+                  <span>{{ formatTransactionAmount(tx) }} · {{ formatTransactionAmountWords(tx) }}</span>
+                </div>
+                <div class="history-detail-row">
+                  <span>{{ t('transaction.note') }}</span>
+                  <span>{{ tx.note ?? t('common.none') }}</span>
+                </div>
+                <div class="history-detail-row">
+                  <span>{{ t('transaction.transactionId') }}</span>
+                  <span class="mono-id">{{ tx.id }}</span>
+                </div>
+                <router-link :to="{ name: 'transaction-detail', params: { id: tx.id } }" class="history-detail-link">
+                  {{ t('dashboard.history.openFullPage') }}
+                </router-link>
+              </div>
+            </div>
+          </div>
         </div>
+
+        <p v-if="!historyGroups.length" class="history-empty">{{ t('dashboard.history.empty') }}</p>
       </div>
-      <div class="table-scroll">
-      <table class="admin-table">
-        <thead>
-          <tr>
-            <SortableTh :label="t('dashboard.history.tableType')" col-key="type" :active-key="historySortKey" :dir="historySortDir" @sort="historyToggleSort" />
-            <SortableTh :label="t('dashboard.history.tableStatus')" col-key="status" :active-key="historySortKey" :dir="historySortDir" @sort="historyToggleSort" />
-            <SortableTh :label="t('dashboard.history.tableAmount')" col-key="amount" :active-key="historySortKey" :dir="historySortDir" @sort="historyToggleSort" />
-            <th>{{ t('dashboard.history.tableFrom') }}</th>
-            <th>{{ t('dashboard.history.tableTo') }}</th>
-            <th>{{ t('dashboard.history.tableNote') }}</th>
-            <th>{{ t('dashboard.history.tableId') }}</th>
-            <SortableTh :label="t('dashboard.history.tableDate')" col-key="date" :active-key="historySortKey" :dir="historySortDir" @sort="historyToggleSort" />
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="tx in historyPageItems"
-            :key="tx.id"
-            class="tx-row-clickable"
-            @click="$router.push({ name: 'transaction-detail', params: { id: tx.id } })"
-          >
-            <td><span class="admin-badge" :class="transactionTypeClass(tx.type)">{{ t(`dashboard.history.${tx.type.toLowerCase()}`) }}</span></td>
-            <td><span class="admin-badge" :class="transactionStatusClass(tx.status)">{{ t(`dashboard.history.status${tx.status}`) }}</span></td>
-            <td>{{ formatTransactionAmount(tx) }}</td>
-            <td>
-              <div v-if="tx.fromWalletId && findWallet(tx.fromWalletId)" class="party-cell">
-                <span class="party-label">{{ walletDisplayName(findWallet(tx.fromWalletId)!) }} ({{ findWallet(tx.fromWalletId)!.walletType.currency.code }})</span>
-                <span class="party-owner">{{ t('common.you') }}</span>
-                <span class="money-chip money-out">− {{ formatTransactionAmount(tx) }}</span>
-              </div>
-              <span v-else-if="tx.fromWalletId" class="party-empty">{{ tx.type === 'PURCHASE' ? t('transaction.direction.merchant') : t('dashboard.history.otherWallet') }}</span>
-              <span v-else class="party-empty">{{ t('dashboard.history.externalSource') }}</span>
-            </td>
-            <td>
-              <div v-if="tx.toWalletId && findWallet(tx.toWalletId)" class="party-cell">
-                <span class="party-label">{{ walletDisplayName(findWallet(tx.toWalletId)!) }} ({{ findWallet(tx.toWalletId)!.walletType.currency.code }})</span>
-                <span class="party-owner">{{ t('common.you') }}</span>
-                <span class="money-chip money-in">+ {{ formatTransactionAmount(tx) }}</span>
-              </div>
-              <span v-else-if="tx.toWalletId" class="party-empty">{{ tx.type === 'PURCHASE' ? t('transaction.direction.merchant') : t('dashboard.history.otherWallet') }}</span>
-              <span v-else class="party-empty">{{ t('dashboard.history.externalDestination') }}</span>
-            </td>
-            <td>{{ tx.note ?? t('common.none') }}</td>
-            <td class="mono-id">{{ tx.id }}</td>
-            <td>{{ formatDateTime(tx.createdAt) }}</td>
-          </tr>
-          <tr v-if="!historyPageItems.length"><td colspan="8">{{ t('dashboard.history.empty') }}</td></tr>
-        </tbody>
-      </table>
-      </div>
-      <ListPagination
-        :page="historyPage"
-        :total-pages="historyTotalPages"
-        :total="historySorted.length"
-        :page-size="historyPageSize"
-        @update:page="historyGoToPage"
-        @update:page-size="historyPageSize = $event"
-      />
     </div>
   </AppLayout>
 </template>
@@ -1463,9 +1498,6 @@ async function onGrantCredit() {
   flex-direction: column;
   gap: 10px;
 }
-.tx-row-clickable {
-  cursor: pointer;
-}
 .filter-row {
   display: flex;
   align-items: center;
@@ -1477,6 +1509,144 @@ async function onGrantCredit() {
 .filter-row h2 {
   margin: 0;
   white-space: nowrap;
+}
+
+.history-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.history-group {
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.history-group-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: start;
+  color: var(--text);
+  font: inherit;
+}
+.history-group-header:hover {
+  background: var(--hover-tint, rgba(127, 127, 127, 0.06));
+}
+.history-group-icon {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.history-group-icon svg {
+  width: 18px;
+  height: 18px;
+}
+.history-group-label {
+  font-weight: 600;
+}
+.history-group-count {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+}
+.history-group-chevron {
+  margin-inline-start: auto;
+  display: flex;
+  color: var(--text-dimmer);
+  transition: transform 0.15s ease;
+}
+.history-group-chevron svg {
+  width: 18px;
+  height: 18px;
+}
+.history-group-chevron.open {
+  transform: rotate(180deg);
+}
+.history-group-body {
+  border-top: 1px solid var(--divider);
+  display: flex;
+  flex-direction: column;
+}
+.history-row-wrap {
+  border-bottom: 1px solid var(--divider);
+}
+.history-row-wrap:last-child {
+  border-bottom: none;
+}
+.history-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: start;
+  color: var(--text);
+  font: inherit;
+}
+.history-row:hover {
+  background: var(--hover-tint, rgba(127, 127, 127, 0.06));
+}
+.history-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.history-row-desc {
+  font-size: 0.88rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-row-date {
+  font-size: 0.74rem;
+  color: var(--text-dimmer);
+}
+.history-row-amount {
+  flex: none;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+.history-detail {
+  padding: 4px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--panel-bg, transparent);
+}
+.history-detail-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.84rem;
+}
+.history-detail-row > span:first-child {
+  color: var(--text-dim);
+  flex: none;
+}
+.history-detail-link {
+  align-self: flex-start;
+  font-size: 0.82rem;
+  color: var(--accent-blue);
+  text-decoration: underline;
+}
+.history-empty {
+  color: var(--text-dim);
+  text-align: center;
+  padding: 20px 0;
 }
 .charge-form {
   display: flex;

@@ -251,6 +251,8 @@ export default {
       externalDestination: 'External (out of the system)',
       otherWallet: 'Other wallet',
       empty: 'No transactions yet.',
+      groupCount: '{count} transactions',
+      openFullPage: 'Open full details',
     },
   },
   profile: {
