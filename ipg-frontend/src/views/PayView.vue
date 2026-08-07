@@ -185,6 +185,43 @@ const countdownLabel = computed(() => {
   return `${m}:${s}`;
 });
 
+// Split-flap "flip clock" digits, one tile per character (minutes tens/ones,
+// seconds tens/ones). flipDisplay is what's actually painted on each tile —
+// it lags one animation cycle behind countdownDigits on purpose, so the old
+// value stays visible while a tile is mid-flip and only swaps at the
+// halfway point of the CSS flip animation (see .flip-digit.flipping below).
+const countdownDigits = computed(() => {
+  if (secondsLeft.value === null) return null;
+  const m = String(Math.min(Math.floor(secondsLeft.value / 60), 99)).padStart(2, '0');
+  const s = String(secondsLeft.value % 60).padStart(2, '0');
+  return { mt: m[0], mo: m[1], st: s[0], so: s[1] };
+});
+type FlipKey = 'mt' | 'mo' | 'st' | 'so';
+const flipDisplay = ref<Record<FlipKey, string>>({ mt: '0', mo: '0', st: '0', so: '0' });
+const flipAnimating = ref<Record<FlipKey, boolean>>({
+  mt: false,
+  mo: false,
+  st: false,
+  so: false,
+});
+watch(countdownDigits, (val, oldVal) => {
+  if (!val) return;
+  if (!oldVal) {
+    flipDisplay.value = { ...val };
+    return;
+  }
+  (Object.keys(val) as FlipKey[]).forEach((key) => {
+    if (val[key] === flipDisplay.value[key]) return;
+    flipAnimating.value[key] = true;
+    setTimeout(() => {
+      flipDisplay.value[key] = val[key];
+    }, 260);
+    setTimeout(() => {
+      flipAnimating.value[key] = false;
+    }, 560);
+  });
+});
+
 const isActionable = computed(
   () => info.value?.status === 'INITIATED' && !isExpired.value,
 );
@@ -519,18 +556,6 @@ onUnmounted(() => {
       </div>
       <div class="nav-actions">
         <button type="button" class="lang-toggle" @click="toggleLocale">{{ locale === 'fa' ? 'EN' : 'فارسی' }}</button>
-        <div
-          v-if="secondsLeft !== null && step !== 'redirecting' && step !== 'loading'"
-          class="timer-chip"
-          :class="{ expiring: secondsLeft < 60 }"
-        >
-          <svg class="timer-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <circle cx="12" cy="13" r="8" stroke="currentColor" stroke-width="2" />
-            <path d="M12 9v4l2.5 2.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-            <path d="M10 2h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-          </svg>
-          <span>{{ isExpired ? t('expired') : countdownLabel }}</span>
-        </div>
       </div>
     </header>
 
@@ -540,6 +565,22 @@ onUnmounted(() => {
 
       <div class="card">
        <div class="merchant-column">
+        <div
+          v-if="countdownDigits && step !== 'redirecting' && step !== 'loading'"
+          class="flipclock"
+          :class="{ expiring: isExpired }"
+        >
+          <div class="flip-group">
+            <div class="flip-digit" :class="{ flipping: flipAnimating.mt }">{{ flipDisplay.mt }}</div>
+            <div class="flip-digit" :class="{ flipping: flipAnimating.mo }">{{ flipDisplay.mo }}</div>
+          </div>
+          <div class="flip-colon"><span></span><span></span></div>
+          <div class="flip-group">
+            <div class="flip-digit" :class="{ flipping: flipAnimating.st }">{{ flipDisplay.st }}</div>
+            <div class="flip-digit" :class="{ flipping: flipAnimating.so }">{{ flipDisplay.so }}</div>
+          </div>
+        </div>
+
         <div v-if="hasMerchantPanel" class="merchant-panel">
           <div class="merchant-panel-row merchant-panel-title">
             <span class="merchant-panel-label">{{ t('merchantInfo.company') }}</span>
@@ -866,43 +907,92 @@ onUnmounted(() => {
   font-weight: 700;
   cursor: pointer;
 }
-.timer-chip {
+/* Split-flap "flip clock" countdown, top of the merchant-info column —
+   each digit is its own dark tile with a seam across the middle; when a
+   digit changes, that one tile rotates through its edge (rotateX) and the
+   new digit is swapped in right at the invisible 90°-turned midpoint, the
+   same illusion a real mechanical flip clock relies on. */
+.flipclock {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.45rem 0.9rem;
-  border-radius: 999px;
-  background: #fff;
-  color: #2f6fed;
-  font-weight: 700;
-  font-size: 0.9rem;
+  gap: 7px;
+  margin-bottom: 0.25rem;
+  /* Minutes:seconds always reads left-to-right, even inside the Farsi/RTL
+     layout — same reasoning as the card number staying LTR. */
+  direction: ltr;
+}
+.flip-group {
+  display: flex;
+  gap: 4px;
+  perspective: 240px;
+}
+.flip-digit {
+  position: relative;
+  width: 34px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #232f52, #131c37);
+  color: #fff;
+  border-radius: 8px;
+  font-size: 1.3rem;
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
-  box-shadow:
-    0 6px 16px rgba(47, 111, 237, 0.18),
-    0 1px 2px rgba(20, 33, 61, 0.06);
-  border: 1px solid #dce6fb;
+  box-shadow: 0 6px 14px -4px rgba(15, 24, 48, 0.5);
+  transform-style: preserve-3d;
 }
-.timer-icon {
-  width: 16px;
-  height: 16px;
+.flip-digit::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  background: rgba(0, 0, 0, 0.35);
+  transform: translateY(-1px);
 }
-.timer-chip.expiring {
-  color: #c62828;
-  background: #fdecec;
-  border-color: #f6c9c9;
+.flip-digit.flipping {
+  animation: flipTile 0.56s ease-in-out;
+}
+@keyframes flipTile {
+  0% {
+    transform: rotateX(0deg);
+  }
+  50% {
+    transform: rotateX(-90deg);
+  }
+  100% {
+    transform: rotateX(0deg);
+  }
+}
+.flip-colon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+.flip-colon span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #232f52;
+}
+.flipclock.expiring .flip-digit {
+  background: linear-gradient(180deg, #b5342f, #7a1f1c);
   animation: pulse 1s ease-in-out infinite;
+}
+.flipclock.expiring .flip-colon span {
+  background: #b5342f;
 }
 @keyframes pulse {
   0%,
   100% {
-    box-shadow:
-      0 6px 16px rgba(198, 40, 40, 0.18),
-      0 1px 2px rgba(28, 27, 58, 0.06);
+    box-shadow: 0 6px 14px -4px rgba(181, 52, 47, 0.45);
   }
   50% {
-    box-shadow:
-      0 6px 22px rgba(198, 40, 40, 0.32),
-      0 1px 2px rgba(28, 27, 58, 0.06);
+    box-shadow: 0 8px 20px -4px rgba(181, 52, 47, 0.7);
   }
 }
 
