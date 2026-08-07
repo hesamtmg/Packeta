@@ -26,7 +26,7 @@ export default {
   },
   phone: {
     prompt: 'شماره تلفن خود را وارد کنید تا شناسایی شوید و کیف پول پرداخت را انتخاب کنید.',
-    placeholder: '+15551234567',
+    placeholder: '09123456789',
     captchaPrefix: 'کد نمایش داده‌شده در تصویر را وارد کنید',
     answerPlaceholder: 'پاسخ',
     sendCode: 'ارسال کد',

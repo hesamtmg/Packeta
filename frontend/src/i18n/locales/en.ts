@@ -273,7 +273,7 @@ export default {
     phone: {
       title: 'Phone number',
       hint: 'Used so customers can identify themselves by phone + code at the payment page when you charge them.',
-      placeholder: '+15551234567',
+      placeholder: '09123456789',
       save: 'Save',
       current: 'Current: {phone}',
       saved: 'Saved.',

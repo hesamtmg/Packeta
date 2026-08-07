@@ -156,7 +156,8 @@ function backToPhone() {
         v-model="phoneNumber"
         type="tel"
         class="admin-input"
-        placeholder="+15551234567"
+        placeholder="09123456789"
+        style="width: 100%;"
         required
       />
     </label>
@@ -183,7 +184,7 @@ function backToPhone() {
   <div v-else class="phone-auth-form">
     <p class="hint">{{ t('auth.phone.codeSentTo', { phone: phoneNumber }) }}</p>
     <p v-if="devCodeHint" class="dev-hint">{{ t('auth.phone.devHint', { code: devCodeHint }) }}</p>
-    <div class="otp-boxes" :class="{ busy }" @paste="onOtpPaste">
+    <div style="direction: ltr !important;" class="otp-boxes" :class="{ busy }" @paste="onOtpPaste">
       <input
         v-for="(d, i) in otpDigits"
         :key="i"
