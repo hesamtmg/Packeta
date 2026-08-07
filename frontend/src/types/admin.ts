@@ -76,6 +76,7 @@ export interface AdminWallet {
   walletType: AdminWalletType;
   createdAt: string;
   closedAt: string | null;
+  blockedAt: string | null;
   ownerId: string;
   ownerEmail: string;
   ownerPhoneNumber: string | null;
