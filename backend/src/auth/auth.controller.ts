@@ -27,8 +27,8 @@ export class AuthController {
     return this.authService.login(dto);
   }
 
-  // Same math captcha used by the IPG's own phone+OTP step — gates
-  // request-otp against scripted phone-number enumeration.
+  // Same captcha used by the IPG's own phone+OTP step — gates request-otp
+  // against scripted phone-number enumeration.
   @Get('phone/captcha')
   requestPhoneCaptcha() {
     return this.authService.requestPhoneCaptcha();

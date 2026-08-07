@@ -5,6 +5,7 @@ export interface CreateIpgPaymentInput {
   merchantName: string;
   amount: string;
   displayAmount: string;
+  displayAmountFa?: string;
   displayAmountWordsEn?: string;
   displayAmountWordsFa?: string;
   callbackUrl: string;
@@ -36,6 +37,7 @@ export class IpgClientService {
       merchantName: input.merchantName,
       amount: Number(input.amount),
       displayAmount: input.displayAmount,
+      displayAmountFa: input.displayAmountFa ?? undefined,
       displayAmountWordsEn: input.displayAmountWordsEn ?? undefined,
       displayAmountWordsFa: input.displayAmountWordsFa ?? undefined,
       callbackUrl: input.callbackUrl,

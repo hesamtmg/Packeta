@@ -24,6 +24,7 @@ export class PaymentsService {
       merchantName: dto.merchantName,
       amount: String(dto.amount),
       displayAmount: dto.displayAmount,
+      displayAmountFa: dto.displayAmountFa ?? null,
       displayAmountWordsEn: dto.displayAmountWordsEn ?? null,
       displayAmountWordsFa: dto.displayAmountWordsFa ?? null,
       callbackUrl: dto.callbackUrl,
@@ -49,6 +50,7 @@ export class PaymentsService {
     return {
       merchantName: intent.merchantName,
       displayAmount: intent.displayAmount,
+      displayAmountFa: intent.displayAmountFa,
       displayAmountWordsEn: intent.displayAmountWordsEn,
       displayAmountWordsFa: intent.displayAmountWordsFa,
       status,

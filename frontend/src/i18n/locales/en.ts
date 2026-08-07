@@ -41,12 +41,16 @@ export default {
     purchaseAction: 'Purchase',
   },
   auth: {
-    methodEmail: 'Email',
-    methodPhone: 'Phone',
+    methodEmail: 'Email or username',
+    methodPhone: 'Phone number',
+    recommended: 'Recommended',
+    useEmailInstead: 'Use email or username instead',
+    usePhoneInstead: 'Use phone number instead',
     login: {
       title: 'Welcome back',
       subtitle: 'Log in to your Packeta wallet',
-      email: 'Email',
+      phoneEyebrow: 'Fast & secure — no password to remember',
+      email: 'Email or username',
       password: 'Password',
       submit: 'Log in',
       noAccount: 'Need an account? Sign up',
@@ -55,7 +59,8 @@ export default {
     signup: {
       title: 'Create your account',
       subtitle: 'Start managing your wallets on Packeta',
-      email: 'Email',
+      phoneEyebrow: 'One tap with your phone — no password to set',
+      email: 'Email or username',
       password: 'Password (min 8 characters)',
       submit: 'Create account',
       haveAccount: 'Already have an account? Log in',
@@ -63,7 +68,7 @@ export default {
     },
     phone: {
       phoneLabel: 'Phone number',
-      captchaLabel: 'Enter the code shown in the image',
+      captchaLabel: 'Enter the digits shown in the image',
       sendCode: 'Send code',
       codeSentTo: 'Enter the code sent to {phone}',
       devHint: 'Sandbox — your code is {code} (no SMS is actually sent)',

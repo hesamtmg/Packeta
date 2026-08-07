@@ -28,7 +28,11 @@ import { serializeWallet } from '../wallets/wallet.serializer';
 import { IpgClientService } from '../ipg/ipg-client.service';
 import { ZarinpalClientService } from '../ipg/zarinpal-client.service';
 import { CurrenciesService } from '../currencies/currencies.service';
-import { formatAmount, formatAmountWords } from '../common/format-amount';
+import {
+  formatAmount,
+  formatAmountFarsi,
+  formatAmountWords,
+} from '../common/format-amount';
 import { displayIdentity } from '../common/synthetic-email';
 import { SettlementService } from '../settlement/settlement.service';
 import { SettlementSplitDto } from '../settlement/dto/settlement-split.dto';
@@ -512,6 +516,10 @@ export class TransactionsService {
             merchantName: merchant.email,
             amount: transaction.amount,
             displayAmount: formatAmount(
+              amount,
+              fromWalletRef.walletType.currency,
+            ),
+            displayAmountFa: formatAmountFarsi(
               amount,
               fromWalletRef.walletType.currency,
             ),
@@ -1346,6 +1354,7 @@ export class TransactionsService {
             merchantName: displayIdentity(merchant!),
             amount: transaction.amount,
             displayAmount: formatAmount(amount, currency),
+            displayAmountFa: formatAmountFarsi(amount, currency),
             displayAmountWordsEn: formatAmountWords(amount, currency, 'en'),
             displayAmountWordsFa: formatAmountWords(amount, currency, 'fa'),
             callbackUrl: `${frontendUrl}/purchase/${transaction.id}/callback`,

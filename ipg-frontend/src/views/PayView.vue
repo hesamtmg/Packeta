@@ -10,6 +10,7 @@ import { setLocale } from '../i18n';
 interface PaymentInfo {
   merchantName: string;
   displayAmount: string;
+  displayAmountFa?: string | null;
   displayAmountWordsEn?: string | null;
   displayAmountWordsFa?: string | null;
   status: 'INITIATED' | 'AUTHORIZED' | 'VERIFIED' | 'CANCELED' | 'EXPIRED';
@@ -30,6 +31,7 @@ interface ChargeStatus {
   category: string | null;
   subCategory: string | null;
   displayAmount: string;
+  displayAmountFa: string;
   displayAmountWordsEn: string;
   displayAmountWordsFa: string;
   expiresAt: string | null;
@@ -115,7 +117,13 @@ const merchantSummary = computed(() => ({
   acceptorCode: chargeInfo.value?.acceptorCode ?? info.value?.acceptorCode ?? null,
   category: chargeInfo.value?.category ?? info.value?.category ?? null,
   subCategory: chargeInfo.value?.subCategory ?? info.value?.subCategory ?? null,
-  displayAmount: chargeInfo.value?.displayAmount ?? info.value?.displayAmount ?? '',
+  displayAmount:
+    (locale.value === 'fa'
+      ? chargeInfo.value?.displayAmountFa ?? info.value?.displayAmountFa
+      : undefined) ??
+    chargeInfo.value?.displayAmount ??
+    info.value?.displayAmount ??
+    '',
   displayAmountWords:
     (locale.value === 'fa'
       ? chargeInfo.value?.displayAmountWordsFa ?? info.value?.displayAmountWordsFa
