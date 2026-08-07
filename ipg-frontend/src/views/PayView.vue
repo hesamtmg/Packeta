@@ -606,6 +606,16 @@ onUnmounted(() => {
           </div>
         </div>
 
+       <div v-if="step !== 'loading' && merchantSummary.displayAmount" class="totals-bar">
+          <span class="totals-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2V2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 8h6M9 12h6M9 16h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </span>
+          <div class="totals-text">
+            <span class="totals-label">{{ t('totals.label') }}</span>
+            <strong class="totals-amount">{{ merchantSummary.displayAmount }}</strong>
+            <span v-if="merchantSummary.displayAmountWords" class="totals-amount-words">{{ merchantSummary.displayAmountWords }}</span>
+          </div>
+        </div>
         <div v-if="hasMerchantPanel" class="merchant-panel">
           <div class="merchant-panel-row merchant-panel-title">
             <span class="merchant-panel-label">{{ t('merchantInfo.company') }}</span>
@@ -633,16 +643,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div v-if="step !== 'loading' && merchantSummary.displayAmount" class="totals-bar">
-          <span class="totals-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2V2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 8h6M9 12h6M9 16h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-          </span>
-          <div class="totals-text">
-            <span class="totals-label">{{ t('totals.label') }}</span>
-            <strong class="totals-amount">{{ merchantSummary.displayAmount }}</strong>
-            <span v-if="merchantSummary.displayAmountWords" class="totals-amount-words">{{ merchantSummary.displayAmountWords }}</span>
-          </div>
-        </div>
+      
        </div>
 
        <div class="form-column">
