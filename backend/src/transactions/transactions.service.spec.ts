@@ -2395,7 +2395,7 @@ describe('TransactionsService.getHistory', () => {
     );
   });
 
-  it('still returns a specific hidden wallet\'s history when walletId is explicitly requested', async () => {
+  it("still returns a specific hidden wallet's history when walletId is explicitly requested", async () => {
     const hidden: WalletFixture = {
       id: 'w-hidden',
       balance: '0',
@@ -2475,12 +2475,20 @@ describe('TransactionsService.reverseTransaction', () => {
       'idem-reverse-1',
     );
 
-    expect(manager.update).toHaveBeenCalledWith(expect.anything(), merchantWallet.id, {
-      balance: '0',
-    });
-    expect(manager.update).toHaveBeenCalledWith(expect.anything(), customerWallet.id, {
-      balance: '500',
-    });
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      merchantWallet.id,
+      {
+        balance: '0',
+      },
+    );
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      customerWallet.id,
+      {
+        balance: '500',
+      },
+    );
     expect(manager.update).not.toHaveBeenCalledWith(
       expect.anything(),
       'repo-1',
@@ -2543,20 +2551,36 @@ describe('TransactionsService.reverseTransaction', () => {
       'idem-reverse-2',
     );
 
-    expect(manager.update).toHaveBeenCalledWith(expect.anything(), merchantWallet.id, {
-      balance: '0',
-    });
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      merchantWallet.id,
+      {
+        balance: '0',
+      },
+    );
     // Fully repository-funded: no real money was ever the customer's, so
     // the customer's real balance stays exactly where it was.
-    expect(manager.update).toHaveBeenCalledWith(expect.anything(), creditWallet.id, {
-      balance: '0',
-    });
-    expect(manager.update).toHaveBeenCalledWith(expect.anything(), repositoryWallet.id, {
-      balance: '5000',
-    });
-    expect(manager.update).toHaveBeenCalledWith(expect.anything(), creditWallet.id, {
-      virtualAmount: '800',
-    });
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      creditWallet.id,
+      {
+        balance: '0',
+      },
+    );
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      repositoryWallet.id,
+      {
+        balance: '5000',
+      },
+    );
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      creditWallet.id,
+      {
+        virtualAmount: '800',
+      },
+    );
     expect(result.balance).toBe('0');
 
     const savedCalls = manager.save.mock.calls.map((call: any[]) => call[0]);
@@ -2634,20 +2658,36 @@ describe('TransactionsService.reverseTransaction', () => {
       'idem-reverse-3',
     );
 
-    expect(manager.update).toHaveBeenCalledWith(expect.anything(), merchantWallet.id, {
-      balance: '0',
-    });
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      merchantWallet.id,
+      {
+        balance: '0',
+      },
+    );
     // Only the support-funded (ZarinPal) slice — 1000 total - 700 from the
     // repository — comes back as real balance on the credit wallet.
-    expect(manager.update).toHaveBeenCalledWith(expect.anything(), creditWallet.id, {
-      balance: '300',
-    });
-    expect(manager.update).toHaveBeenCalledWith(expect.anything(), repositoryWallet.id, {
-      balance: '5000',
-    });
-    expect(manager.update).toHaveBeenCalledWith(expect.anything(), creditWallet.id, {
-      virtualAmount: '1000',
-    });
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      creditWallet.id,
+      {
+        balance: '300',
+      },
+    );
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      repositoryWallet.id,
+      {
+        balance: '5000',
+      },
+    );
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      creditWallet.id,
+      {
+        virtualAmount: '1000',
+      },
+    );
     expect(result.balance).toBe('300');
   });
 
@@ -2678,7 +2718,12 @@ describe('TransactionsService.reverseTransaction', () => {
     mockQueryBuilderFor(manager, original);
 
     await expect(
-      service.reverseTransaction('user-1', 'purchase-4', undefined, 'idem-reverse-4'),
+      service.reverseTransaction(
+        'user-1',
+        'purchase-4',
+        undefined,
+        'idem-reverse-4',
+      ),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 });

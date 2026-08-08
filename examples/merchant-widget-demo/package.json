@@ -1,0 +1,13 @@
+{
+  "name": "merchant-widget-demo",
+  "private": true,
+  "version": "1.0.0",
+  "description": "A minimal 'merchant host' site that embeds the Packeta wallet-viewing widget, for manual testing and as a second reference implementation.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

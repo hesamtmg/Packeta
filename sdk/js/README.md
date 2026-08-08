@@ -104,3 +104,157 @@ fully custom, embedded payment UI instead of a redirect, that's possible
 too (see §7, "Building a custom pay page," in the integration guide) — but
 it needs real frontend engineering, which is exactly what this drop-in
 avoids.
+
+## Show a customer's account inline
+
+A second, separate widget: if your site already has its own logged-in
+customer and you want to show *their* Packeta account inline — wallets,
+transactions (with detail), installments, plus letting them deposit into a
+wallet or pay an installment — use **`wallet-widget.js`** instead. Same idea
+as the pay button — the actual UI is hosted by Packeta inside a sandboxed
+iframe, and your page's JS never sees a phone number, an OTP code, or any
+Packeta credential. Deposits and installment payments go through ZarinPal,
+a real external gateway, so those two specific actions do briefly leave
+your page (see "Returning from a deposit or installment payment" below) —
+everything else (browsing wallets/transactions/installments) stays fully
+inline.
+
+This only works for a **MERCHANT**-type wallet with the widget feature
+turned on for its wallet type (an admin toggles this on the Wallet Types
+page — see `allowWidget` / `widgetRequiresOtp`). `widgetRequiresOtp`
+controls how the customer is identified inside the iframe:
+
+- **On (default):** the customer types their phone number (or confirms one
+  you pre-supplied) and completes a live OTP challenge, same as the pay
+  flow's phone/OTP step.
+- **Off:** you assert the phone number yourself when you mint the session
+  (because your own site already verified who this customer is) and the
+  widget skips straight to the wallet list — no code, no live challenge.
+  Only turn this on for a merchant you actually trust to assert phone
+  numbers correctly, since it removes the live verification step.
+
+### 1. Wire up the server endpoint
+
+Same `server-example.js` file as above adds one more route:
+
+- `POST /api/packeta/widget-session` — mints a session for a given
+  `walletId` (the merchant wallet you want to show, from your admin panel's
+  Wallet detail page). Add `phoneNumber` to the request body too if
+  `widgetRequiresOtp` is off for that wallet type.
+
+### 2. Add the widget to your page
+
+```html
+<div
+  data-packeta-wallet
+  data-wallet-id="0f27...-your-merchant-wallet-id"
+  data-proxy-url="/api/packeta/widget-session"
+></div>
+<script src="/wallet-widget.js"></script>
+```
+
+That's it — the script finds the `div`, asks your proxy for a session, and
+embeds the widget iframe in its place, resizing itself automatically as the
+customer moves through phone/OTP/wallet-list steps.
+
+Your wallet's own detail page in the Packeta admin panel has this exact
+snippet pre-filled with your `walletId`, ready to copy.
+
+### 3. (If you'd rather call it yourself)
+
+```html
+<div id="packeta-wallet"></div>
+<script src="/wallet-widget.js"></script>
+<script>
+  fetch('/api/packeta/widget-session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ walletId: 'your-merchant-wallet-id' }),
+  })
+    .then(function (res) { return res.json(); })
+    .then(function (session) {
+      PacketaWallet.init({
+        sessionToken: session.sessionToken,
+        widgetUrl: session.widgetUrl,
+        target: '#packeta-wallet',
+      });
+    });
+</script>
+```
+
+### Returning from a deposit or installment payment
+
+ZarinPal can't render inside the widget's iframe, so clicking Deposit or
+Pay on an installment breaks out to a full-page redirect for that one step,
+then lands back on a small Packeta result page. To send the customer back
+to *your* page automatically instead of leaving them there, add
+`data-return-url` (declarative) or pass `returnUrl` (programmatic) — it
+defaults to the current page's own URL if you don't set it:
+
+```html
+<div
+  data-packeta-wallet
+  data-wallet-id="0f27...-your-merchant-wallet-id"
+  data-proxy-url="/api/packeta/widget-session"
+  data-return-url="https://yoursite.example.com/account"
+></div>
+<script src="/wallet-widget.js"></script>
+```
+
+Nothing here is stored anywhere — it's carried through purely as a URL,
+the same way the rest of the deposit/payment redirect chain already works.
+
+## Pay inline (no redirect)
+
+A third widget, **`pay-widget.js`** — an embeddable version of the pay
+button above. Same charge underneath (your server still calls the exact
+same `/api/packeta/charge` proxy from the Quickstart), but instead of
+redirecting your whole page to Packeta's hosted pay page, it shows the
+phone/OTP/wallet/confirm steps inline and tells you when the purchase
+settles — nothing about your page navigates away, with one unavoidable
+exception (see below).
+
+If you already have `packeta.js`'s Pay button wired up, you need **zero new
+server code** to also use this — same endpoint, same response shape, just
+handed to a different init function.
+
+```html
+<div
+  data-packeta-pay-widget
+  data-proxy-url="/api/packeta/charge"
+  data-amount="125000"
+  data-currency="USD"
+></div>
+<script src="/pay-widget.js"></script>
+```
+
+Or programmatically, with an `onComplete` callback:
+
+```html
+<script src="/pay-widget.js"></script>
+<script>
+  fetch('/api/packeta/charge', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ amount: cartTotalInCents, currency: 'USD' }),
+  })
+    .then(function (res) { return res.json(); })
+    .then(function (charge) {
+      PacketaPay.init({
+        redirectUrl: charge.redirectUrl,
+        target: '#packeta-checkout',
+        onComplete: function (result) {
+          // result: { transactionId, status: 'COMPLETED' | 'FAILED' }
+          markOrderPaid(result.transactionId, result.status);
+        },
+      });
+    });
+</script>
+```
+
+The one exception: if the customer pays from a CREDIT wallet whose balance
+falls short, covering the difference is a real card payment through
+ZarinPal — a genuine external gateway that refuses to render inside any
+iframe. That one click briefly leaves your page; the customer lands back
+wherever your Packeta wallet's own `callbackUrl` points once it completes
+(the same setting the full-page pay flow already uses).

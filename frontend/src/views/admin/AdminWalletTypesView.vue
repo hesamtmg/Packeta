@@ -30,6 +30,10 @@ interface WalletType {
   // Hides wallets of this type from a customer's own wallets/transactions
   // lists — the admin panel is unaffected.
   hiddenFromCustomer: boolean;
+  // Wallet-viewing widget feature (see sdk/js/wallet-widget.js) — only
+  // meaningful on MERCHANT-code types, enforced server-side.
+  allowWidget: boolean;
+  widgetRequiresOtp: boolean;
   // Credit-line / installment fields (repository/credit wallet feature) —
   // shared billing rules for every wallet of this type.
   installmentDate: number | null;
@@ -124,6 +128,8 @@ const newType = reactive({
   depositable: true,
   hasVirtualBalance: false,
   hiddenFromCustomer: false,
+  allowWidget: false,
+  widgetRequiresOtp: true,
   enableCreditLine: false,
   installmentDate: '',
   paymentDeadlineDate: '',
@@ -222,6 +228,8 @@ async function save(type: WalletType) {
         depositable: type.depositable,
         hasVirtualBalance: type.hasVirtualBalance,
         hiddenFromCustomer: type.hiddenFromCustomer,
+        allowWidget: type.allowWidget,
+        widgetRequiresOtp: type.widgetRequiresOtp,
         installmentDate: type.enableCreditLine ? type.installmentDate ?? undefined : undefined,
         paymentDeadlineDate: type.enableCreditLine
           ? type.paymentDeadlineDate ?? undefined
@@ -298,6 +306,8 @@ async function createType() {
         depositable: newType.depositable,
         hasVirtualBalance: newType.hasVirtualBalance,
         hiddenFromCustomer: newType.hiddenFromCustomer,
+        allowWidget: newType.allowWidget,
+        widgetRequiresOtp: newType.widgetRequiresOtp,
         installmentDate:
           newType.enableCreditLine && newType.installmentDate
             ? Number(newType.installmentDate)
@@ -355,6 +365,8 @@ async function createType() {
     newType.depositable = true;
     newType.hasVirtualBalance = false;
     newType.hiddenFromCustomer = false;
+    newType.allowWidget = false;
+    newType.widgetRequiresOtp = true;
     newType.enableCreditLine = false;
     newType.installmentDate = '';
     newType.paymentDeadlineDate = '';
@@ -420,6 +432,8 @@ loadTypes();
           <label class="checkbox-label"><input v-model="wt.depositable" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.depositableLabel') }}</label>
           <label class="checkbox-label"><input v-model="wt.hasVirtualBalance" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.hasVirtualBalanceLabel') }}</label>
           <label class="checkbox-label"><input v-model="wt.hiddenFromCustomer" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.hiddenFromCustomerLabel') }}</label>
+          <label class="checkbox-label"><input v-model="wt.allowWidget" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.allowWidgetLabel') }}</label>
+          <label v-if="wt.allowWidget" class="checkbox-label"><input v-model="wt.widgetRequiresOtp" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.widgetRequiresOtpLabel') }}</label>
 
           <span class="section-label">{{ t('admin.walletTypes.creditLineHeading') }}</span>
           <label class="checkbox-label">
@@ -534,6 +548,8 @@ loadTypes();
       <label class="checkbox-label"><input v-model="newType.depositable" type="checkbox" /> {{ t('admin.walletTypes.depositableLabel') }}</label>
       <label class="checkbox-label"><input v-model="newType.hasVirtualBalance" type="checkbox" /> {{ t('admin.walletTypes.hasVirtualBalanceLabel') }}</label>
       <label class="checkbox-label"><input v-model="newType.hiddenFromCustomer" type="checkbox" /> {{ t('admin.walletTypes.hiddenFromCustomerLabel') }}</label>
+      <label class="checkbox-label"><input v-model="newType.allowWidget" type="checkbox" /> {{ t('admin.walletTypes.allowWidgetLabel') }}</label>
+      <label v-if="newType.allowWidget" class="checkbox-label"><input v-model="newType.widgetRequiresOtp" type="checkbox" /> {{ t('admin.walletTypes.widgetRequiresOtpLabel') }}</label>
 
       <span class="section-label">{{ t('admin.walletTypes.creditLineHeading') }}</span>
       <label class="checkbox-label">

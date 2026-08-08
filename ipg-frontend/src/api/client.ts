@@ -10,11 +10,15 @@ export class ApiError extends Error {
 export function createApiClient(baseUrl: string) {
   return async function apiRequest<T>(
     path: string,
-    options: { method?: string; body?: unknown } = {},
+    options: {
+      method?: string;
+      body?: unknown;
+      headers?: Record<string, string>;
+    } = {},
   ): Promise<T> {
     const response = await fetch(`${baseUrl}${path}`, {
       method: options.method ?? 'GET',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...options.headers },
       body: options.body ? JSON.stringify(options.body) : undefined,
     });
 

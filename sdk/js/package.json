@@ -1,0 +1,9 @@
+{
+  "name": "packeta-js-sdk-reference",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Reference server-side companion (server-example.js) for packeta.js and wallet-widget.js. Not a package to install — copy server-example.js into your own backend, which already has express.",
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

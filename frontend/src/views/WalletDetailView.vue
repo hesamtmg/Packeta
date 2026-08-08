@@ -13,6 +13,35 @@ const { t } = useI18n();
 const route = useRoute();
 const wallet = ref<Wallet | null>(null);
 const error = ref('');
+const copied = ref(false);
+
+// The merchant self-hosts wallet-widget.js (same "drop-in script" convention
+// as sdk/js/packeta.js) and their own /api/packeta/widget-session proxy —
+// see sdk/js/README.md. The script auto-discovers this container by its
+// data-packeta-wallet attribute, same auto-wire pattern packeta.js already
+// uses for its data-packeta-pay button.
+const widgetSnippet = computed(() => {
+  if (!wallet.value) return '';
+  return [
+    '<div',
+    '  data-packeta-wallet',
+    `  data-wallet-id="${wallet.value.id}"`,
+    '  data-proxy-url="/api/packeta/widget-session"',
+    '></div>',
+    '<script src="/wallet-widget.js"><\/script>',
+  ].join('\n');
+});
+
+async function copyWidgetSnippet() {
+  try {
+    await navigator.clipboard.writeText(widgetSnippet.value);
+    copied.value = true;
+    setTimeout(() => (copied.value = false), 2000);
+  } catch {
+    // Clipboard API unavailable (e.g. insecure context) — the snippet is
+    // still visible and selectable, so this is a silent no-op.
+  }
+}
 
 const amountWords = computed(() =>
   wallet.value ? formatAmountWords(wallet.value.balance, wallet.value.walletType.currency) : '',
@@ -157,6 +186,16 @@ onMounted(load);
       >
         {{ t('dashboard.installments.viewLink') }}
       </router-link>
+
+      <div v-if="wallet.walletType.code === 'MERCHANT' && wallet.walletType.allowWidget" class="widget-section">
+        <h3>{{ t('walletDetail.widget.heading') }}</h3>
+        <p class="widget-hint">{{ t('walletDetail.widget.hint') }}</p>
+        <pre class="widget-snippet">{{ widgetSnippet }}</pre>
+        <button type="button" class="admin-btn admin-btn-ghost" @click="copyWidgetSnippet">
+          {{ copied ? t('walletDetail.widget.copied') : t('walletDetail.widget.copy') }}
+        </button>
+        <p class="widget-hint">{{ t('walletDetail.widget.docsHint', { path: 'sdk/js/README.md' }) }}</p>
+      </div>
     </section>
   </AppLayout>
 </template>
@@ -216,5 +255,36 @@ dd {
 .detail-card > .admin-btn {
   align-self: flex-start;
   margin-top: 10px;
+}
+.widget-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--card-border);
+}
+.widget-section h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+.widget-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-dimmer);
+}
+.widget-snippet {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--input-bg, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--card-border);
+  font-family: monospace;
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.widget-section > .admin-btn {
+  align-self: flex-start;
 }
 </style>

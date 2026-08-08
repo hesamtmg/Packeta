@@ -101,6 +101,7 @@ export class TransactionsService {
     walletId: string,
     amount: number,
     idempotencyKey: string,
+    buildCallbackUrl?: (transactionId: string) => string,
   ): Promise<PurchaseInitiateResult> {
     return this.run(
       'deposit',
@@ -134,12 +135,16 @@ export class TransactionsService {
         await manager.save(transaction);
 
         const frontendUrl = this.configService.get<string>('frontendUrl');
+        const callbackUrl = (
+          buildCallbackUrl ??
+          ((id: string) => `${frontendUrl}/purchase/${id}/callback`)
+        )(transaction.id);
         const { authority, paymentUrl } =
           await this.zarinpalClientService.createPayment({
             merchantName: 'Deposit',
             amount: transaction.amount,
             displayAmount: formatAmount(amount, walletRef.walletType.currency),
-            callbackUrl: `${frontendUrl}/purchase/${transaction.id}/callback`,
+            callbackUrl,
             timeoutSeconds,
           });
 
@@ -572,6 +577,7 @@ export class TransactionsService {
     userId: string,
     installmentId: string,
     idempotencyKey: string,
+    buildCallbackUrl?: (transactionId: string) => string,
   ): Promise<PurchaseInitiateResult> {
     return this.run(
       'installment_pay',
@@ -626,6 +632,10 @@ export class TransactionsService {
         await manager.save(transaction);
 
         const frontendUrl = this.configService.get<string>('frontendUrl');
+        const callbackUrl = (
+          buildCallbackUrl ??
+          ((id: string) => `${frontendUrl}/purchase/${id}/callback`)
+        )(transaction.id);
         const { authority, paymentUrl } =
           await this.zarinpalClientService.createPayment({
             merchantName: 'Installment repayment',
@@ -634,7 +644,7 @@ export class TransactionsService {
               chargeAmount.toString(),
               repository.walletType.currency,
             ),
-            callbackUrl: `${frontendUrl}/purchase/${transaction.id}/callback`,
+            callbackUrl,
             timeoutSeconds,
           });
 

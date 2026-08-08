@@ -67,6 +67,7 @@ export interface AdminWalletType {
   allowWithdraw: boolean;
   allowP2pOut: boolean;
   allowP2pIn: boolean;
+  allowWidget: boolean;
 }
 
 export interface AdminWallet {

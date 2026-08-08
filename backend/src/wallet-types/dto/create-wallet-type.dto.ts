@@ -80,6 +80,15 @@ export class CreateWalletTypeDto {
   @IsBoolean()
   hiddenFromCustomer?: boolean;
 
+  // Wallet-viewing widget feature (see WalletType.allowWidget/widgetRequiresOtp).
+  @IsOptional()
+  @IsBoolean()
+  allowWidget?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  widgetRequiresOtp?: boolean;
+
   // Credit-line fields (repository/credit wallet feature). All optional and
   // only meaningful on the CREDIT-style types this feature applies to —
   // the shared billing rules; the actual virtualAmount granted and the

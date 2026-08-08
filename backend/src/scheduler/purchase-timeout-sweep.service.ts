@@ -18,7 +18,7 @@ export class PurchaseTimeoutSweepService {
 
   @Interval(30_000)
   async sweep(): Promise<void> {
-    console.log("PurchaseTimeoutSweepService")
+    console.log('PurchaseTimeoutSweepService');
     const expired =
       await this.transactionsService.findExpiredPendingPurchases();
     for (const transaction of expired) {

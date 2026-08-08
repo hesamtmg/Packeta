@@ -15,6 +15,7 @@ import { SettlementSplit } from './settlement/entities/settlement-split.entity';
 import { Installment } from './installments/entities/installment.entity';
 import { RailSettlement } from './rail-settlements/entities/rail-settlement.entity';
 import { PanelRole } from './panel-roles/entities/panel-role.entity';
+import { WidgetSession } from './widget/entities/widget-session.entity';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { WalletsModule } from './wallets/wallets.module';
@@ -29,6 +30,7 @@ import { PurchaseGatewayModule } from './purchase-gateway/purchase-gateway.modul
 import { SettlementModule } from './settlement/settlement.module';
 import { RailSettlementsModule } from './rail-settlements/rail-settlements.module';
 import { PanelRolesModule } from './panel-roles/panel-roles.module';
+import { WidgetModule } from './widget/widget.module';
 
 @Module({
   imports: [
@@ -57,6 +59,7 @@ import { PanelRolesModule } from './panel-roles/panel-roles.module';
           Installment,
           RailSettlement,
           PanelRole,
+          WidgetSession,
         ],
         synchronize: false,
       }),
@@ -81,6 +84,7 @@ import { PanelRolesModule } from './panel-roles/panel-roles.module';
     SettlementModule,
     RailSettlementsModule,
     PanelRolesModule,
+    WidgetModule,
   ],
 })
 export class AppModule {}
