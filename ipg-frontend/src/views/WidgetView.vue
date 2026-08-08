@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import { ApiError } from '../api/client';
 import { packetaRequest } from '../api/packetaClient';
-import { formatAmount, type CurrencyInfo } from '../utils/currency';
+import { formatAmount, formatAmountWords, type CurrencyInfo } from '../utils/currency';
 import { setLocale } from '../i18n';
 
 interface WidgetStatus {
@@ -29,7 +29,7 @@ interface WidgetWallet {
 
 const route = useRoute();
 const token = route.params.token as string;
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 // Same steps PayView's phone/OTP identification uses, minus everything
 // purchase-specific (no wallet-select-to-pay, no confirm/cancel, no
@@ -52,6 +52,20 @@ const wallets = ref<WidgetWallet[]>([]);
 const gatewayError = ref('');
 const gatewayBusy = ref(false);
 
+// Masks a wallet id into a card-number-style group of dots ending in the
+// last 4 characters — purely cosmetic, matching PayView's own maskId, so a
+// wallet "card" here reads the same way a payment card does elsewhere in
+// Packeta.
+function maskId(id: string): string {
+  const clean = id.replace(/-/g, '').toUpperCase();
+  const last4 = clean.slice(-4);
+  return `•••• •••• •••• ${last4}`;
+}
+
+function walletTotal(w: WidgetWallet): string {
+  return (BigInt(w.balance) + BigInt(w.virtualAmount || '0')).toString();
+}
+
 // The embedding page sizes its iframe off this — see sdk/js/wallet-widget.js
 // — so any step change that could change content height posts a fresh one.
 function postResize() {
@@ -63,6 +77,7 @@ function postResize() {
   });
 }
 watch(step, postResize);
+watch(wallets, postResize);
 
 async function loadCaptcha() {
   try {
@@ -224,7 +239,18 @@ onMounted(async () => {
 <template>
   <div class="widget-shell">
     <div class="widget-card">
-      <div v-if="status?.merchantName" class="widget-merchant">{{ status.merchantName }}</div>
+      <header class="widget-nav">
+        <span class="logo-mark">P</span>
+        <span class="logo-text">{{ t('brand') }}</span>
+        <span class="secure-badge">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 2 4 5v6c0 5 3.4 8.7 8 9 4.6-.3 8-4 8-9V5l-8-3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m9 12 2 2 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+      </header>
+
+      <div v-if="status?.merchantName" class="merchant-panel">
+        <span class="merchant-panel-label">{{ t('merchantInfo.company') }}</span>
+        <span class="merchant-panel-value">{{ status.merchantName }}</span>
+      </div>
 
       <template v-if="step === 'loading' || step === 'authenticating'">
         <p class="status">{{ t('widget.loading') }}</p>
@@ -242,6 +268,9 @@ onMounted(async () => {
         <p class="status">{{ t('widget.phone.prompt') }}</p>
         <form class="gateway-form" @submit.prevent="onRequestOtp">
           <label v-if="!status?.phoneNumber" class="icon-field">
+            <span class="icon-field-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M6.5 2h3l2 5-2.3 1.6a13 13 0 0 0 6.2 6.2L17 12.5l5 2v3a2 2 0 0 1-2.2 2A18 18 0 0 1 4.5 4.2 2 2 0 0 1 6.5 2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+            </span>
             <input v-model="phoneNumber" type="tel" :placeholder="t('widget.phone.placeholder')" required />
           </label>
           <p v-else class="phone-prebound">{{ status.phoneNumber }}</p>
@@ -249,6 +278,9 @@ onMounted(async () => {
             {{ t('widget.phone.captchaPrefix') }}
             <img :src="captchaImage" :alt="t('widget.phone.captchaPrefix')" class="captcha-image" />
             <span class="icon-field">
+              <span class="icon-field-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 2 4 5v6c0 5 3.4 8.7 8 9 4.6-.3 8-4 8-9V5l-8-3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="m9 12 2 2 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
               <input v-model="captchaAnswer" type="text" inputmode="numeric" :placeholder="t('widget.phone.answerPlaceholder')" required />
             </span>
           </label>
@@ -283,15 +315,31 @@ onMounted(async () => {
       <template v-else-if="step === 'wallets'">
         <p class="status">{{ t('widget.wallets.heading') }}</p>
         <p v-if="!wallets.length" class="status">{{ t('widget.wallets.none') }}</p>
-        <ul v-else class="wallet-list">
-          <li v-for="w in wallets" :key="w.id" class="wallet-row">
-            <span class="wallet-name">{{ w.name || w.walletType.name }}</span>
-            <span class="wallet-balance">
-              {{ formatAmount((BigInt(w.balance) + BigInt(w.virtualAmount || '0')).toString(), w.walletType.currency) }}
-            </span>
-          </li>
-        </ul>
+        <div v-else class="wallet-list">
+          <div v-for="w in wallets" :key="w.id" class="paycard">
+            <div class="paycard-top">
+              <span class="paycard-chip" aria-hidden="true">
+                <svg viewBox="0 0 32 24" fill="none"><rect x="1" y="1" width="30" height="22" rx="4" fill="currentColor" opacity="0.9"/><path d="M1 9h30M1 15h30M11 1v22M21 1v22" stroke="#fff" stroke-width="1"/></svg>
+              </span>
+              <span class="paycard-brand">{{ t('brand') }}</span>
+            </div>
+            <div class="paycard-number">{{ maskId(w.id) }}</div>
+            <div class="paycard-bottom">
+              <div class="paycard-field">
+                <span class="paycard-label">{{ t('card.wallet') }}</span>
+                <span class="paycard-value">{{ w.name || w.walletType.name }}</span>
+              </div>
+              <div class="paycard-field paycard-field-right">
+                <span class="paycard-label">{{ t('card.balance') }}</span>
+                <span class="paycard-value">{{ formatAmount(walletTotal(w), w.walletType.currency) }}</span>
+                <span class="paycard-value-words">{{ formatAmountWords(walletTotal(w), w.walletType.currency, locale === 'fa' ? 'fa' : 'en') }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </template>
+
+      <footer class="widget-footer">{{ t('footer') }}</footer>
     </div>
   </div>
 </template>
@@ -305,18 +353,70 @@ onMounted(async () => {
     'Vazirmatn', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
     Helvetica, Arial, sans-serif;
   padding: 1rem;
+  background: #eef3ff;
 }
 .widget-card {
-  max-width: 360px;
+  max-width: 380px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.85rem;
 }
-.widget-merchant {
-  font-size: 0.95rem;
+.widget-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.logo-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #4f8bff, #2f6fed);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.85rem;
+  flex: 0 0 auto;
+}
+.logo-text {
+  font-weight: 800;
+  font-size: 0.92rem;
+  color: #14213d;
+}
+.secure-badge {
+  margin-inline-start: auto;
+  width: 18px;
+  height: 18px;
+  color: #2f6fed;
+  opacity: 0.75;
+}
+.secure-badge svg {
+  width: 100%;
+  height: 100%;
+}
+.merchant-panel {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 14px;
+  background: #f4f8ff;
+  border: 1px solid #e3e9f7;
+}
+.merchant-panel-label {
+  font-size: 0.72rem;
+  color: #64748b;
+  white-space: nowrap;
+}
+.merchant-panel-value {
+  font-size: 0.85rem;
   font-weight: 800;
   color: #14213d;
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 .status {
   color: #6b7280;
@@ -345,6 +445,7 @@ onMounted(async () => {
 .icon-field {
   display: flex;
   align-items: center;
+  gap: 0.5rem;
   padding: 0 0.7rem;
   border-radius: 12px;
   border: 1px solid #e3e9f7;
@@ -353,6 +454,16 @@ onMounted(async () => {
 .icon-field:focus-within {
   border-color: #2f6fed;
   box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.18);
+}
+.icon-field-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  color: #2f6fed;
+}
+.icon-field-icon svg {
+  width: 100%;
+  height: 100%;
 }
 .icon-field input {
   width: 100%;
@@ -436,31 +547,96 @@ onMounted(async () => {
   box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.18);
 }
 .wallet-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.65rem;
 }
-.wallet-row {
+/* Same "physical card" visual PayView uses for a wallet — a read-only
+   stack of them here instead of a selectable carousel, since there's
+   nothing to pick, just wallets to look at. */
+.paycard {
+  position: relative;
+  border-radius: 16px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #fff;
+  background: linear-gradient(135deg, #2f6fed 0%, #1550c9 60%, #103e9e 100%);
+  box-shadow: 0 14px 28px -14px rgba(21, 80, 201, 0.55);
+}
+.paycard-top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.6rem;
-  padding: 0.7rem 0.85rem;
-  border-radius: 14px;
-  background: #f4f8ff;
-  border: 1px solid #e3e9f7;
+  gap: 8px;
 }
-.wallet-name {
-  font-size: 0.88rem;
-  font-weight: 700;
-  color: #14213d;
+.paycard-chip {
+  width: 28px;
+  height: 20px;
+  color: rgba(255, 255, 255, 0.85);
 }
-.wallet-balance {
-  font-size: 0.9rem;
+.paycard-chip svg {
+  width: 100%;
+  height: 100%;
+}
+.paycard-brand {
+  margin-inline-start: auto;
+  font-size: 0.68rem;
   font-weight: 800;
-  color: #1550c9;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.85);
+}
+.paycard-number {
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  direction: ltr;
+  text-align: left;
+}
+.paycard-bottom {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+}
+.paycard-field {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.paycard-field-right {
+  text-align: right;
+  align-items: flex-end;
+}
+.paycard-label {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.65);
+}
+.paycard-value {
+  font-size: 0.85rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.paycard-value-words {
+  font-size: 0.6rem;
+  font-weight: 500;
+  line-height: 1.3;
+  color: rgba(255, 255, 255, 0.65);
+  white-space: normal;
+  max-width: 100%;
+}
+.widget-footer {
+  margin: 0;
+  padding-top: 0.4rem;
+  text-align: center;
+  font-size: 0.68rem;
+  color: #94a3b8;
 }
 </style>
