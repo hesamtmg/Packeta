@@ -11,6 +11,12 @@ data and (b) accept a payment. It covers two integration shapes:
 Everything below is expressed in terms of the real endpoints, request/response
 shapes, and field names as implemented — not a simplified sketch.
 
+> **No frontend engineer on your team?** You don't need one — Packeta hosts
+> the entire payment UI (phone entry, OTP, wallet picker, confirm). See
+> [`../sdk/js/`](../sdk/js/) for a drop-in `<script>` + a small server
+> snippet that gets you a working "Pay with Packeta" button with zero
+> custom payment screens.
+
 ---
 
 ## 0. Base URLs
