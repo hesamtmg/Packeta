@@ -129,6 +129,8 @@ export class WalletTypesService {
       depositable: dto.depositable ?? true,
       hasVirtualBalance: dto.hasVirtualBalance ?? false,
       hiddenFromCustomer: dto.hiddenFromCustomer ?? false,
+      allowWidget: dto.allowWidget ?? false,
+      widgetRequiresOtp: dto.widgetRequiresOtp ?? true,
       installmentDate: dto.installmentDate ?? null,
       paymentDeadlineDate: dto.paymentDeadlineDate ?? null,
       feePercent: dto.feePercent !== undefined ? String(dto.feePercent) : null,
@@ -245,6 +247,12 @@ export class WalletTypesService {
     }
     if (dto.hiddenFromCustomer !== undefined) {
       type.hiddenFromCustomer = dto.hiddenFromCustomer;
+    }
+    if (dto.allowWidget !== undefined) {
+      type.allowWidget = dto.allowWidget;
+    }
+    if (dto.widgetRequiresOtp !== undefined) {
+      type.widgetRequiresOtp = dto.widgetRequiresOtp;
     }
     if (dto.installmentDate !== undefined) {
       type.installmentDate = dto.installmentDate;

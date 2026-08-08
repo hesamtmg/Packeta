@@ -1,12 +1,14 @@
 /**
  * server-example.js — the server half of the "no UI engineer" Packeta
- * integration. packeta.js (the browser script) never talks to Packeta
- * directly — it talks to this, because your Packeta account credentials
- * must never reach the browser.
+ * integration. Neither browser script in this folder (packeta.js for
+ * payments, wallet-widget.js for the inline wallet widget) ever talks to
+ * Packeta directly — they talk to this, because your Packeta account
+ * credentials must never reach the browser.
  *
  * This is a working reference in Express, but it's genuinely ~20 lines of
- * logic: fetch a token, cache it, POST to /transactions/purchase/charge,
- * hand back the redirectUrl. The same shape works in any backend language.
+ * logic per endpoint: fetch a token, cache it, POST to the relevant Packeta
+ * endpoint, hand back only what the browser needs. The same shape works in
+ * any backend language.
  *
  * Wire it in with:
  *   const packeta = require('./server-example');
@@ -96,6 +98,47 @@ router.post('/api/packeta/charge', async (req, res) => {
     res.json({
       redirectUrl: data.redirectUrl,
       transactionId: data.transactionId,
+      expiresAt: data.expiresAt,
+    });
+  } catch (err) {
+    res.status(502).json({ message: 'Could not reach Packeta', detail: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------
+// POST /api/packeta/widget-session — what wallet-widget.js's auto-wired
+// container calls. Mints a short-lived, wallet-scoped session token
+// server-to-server (your real Packeta login never reaches the browser,
+// same reasoning as the charge endpoint above) and hands back just enough
+// for the browser to embed the widget iframe.
+// ---------------------------------------------------------------------
+router.post('/api/packeta/widget-session', async (req, res) => {
+  const { walletId, phoneNumber } = req.body || {};
+  if (!walletId) {
+    return res.status(400).json({ message: 'walletId is required' });
+  }
+
+  try {
+    const token = await getToken();
+    const sessionRes = await fetch(`${PACKETA_API_URL}/widget/sessions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      // phoneNumber is only meaningful (and required) when the wallet
+      // type's widgetRequiresOtp is off — see the "non-OTP" mode in
+      // README.md. Harmless to always forward it: Packeta ignores it for
+      // OTP-mode wallets.
+      body: JSON.stringify({ walletId, phoneNumber }),
+    });
+    const data = await sessionRes.json();
+    if (!sessionRes.ok) {
+      return res.status(sessionRes.status).json(data);
+    }
+    res.json({
+      sessionToken: data.sessionToken,
+      widgetUrl: data.widgetUrl,
       expiresAt: data.expiresAt,
     });
   } catch (err) {

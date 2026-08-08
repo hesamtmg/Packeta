@@ -104,3 +104,75 @@ fully custom, embedded payment UI instead of a redirect, that's possible
 too (see §7, "Building a custom pay page," in the integration guide) — but
 it needs real frontend engineering, which is exactly what this drop-in
 avoids.
+
+## Show a customer's wallets inline
+
+A second, separate widget: if your site already has its own logged-in
+customer and you want to show *their* Packeta wallets and balances inline
+(not process a payment), use **`wallet-widget.js`** instead. Same idea as
+the pay button — the actual UI is hosted by Packeta inside a sandboxed
+iframe, and your page's JS never sees a phone number, an OTP code, or any
+Packeta credential.
+
+This only works for a **MERCHANT**-type wallet with the widget feature
+turned on for its wallet type (an admin toggles this on the Wallet Types
+page — see `allowWidget` / `widgetRequiresOtp`). `widgetRequiresOtp`
+controls how the customer is identified inside the iframe:
+
+- **On (default):** the customer types their phone number (or confirms one
+  you pre-supplied) and completes a live OTP challenge, same as the pay
+  flow's phone/OTP step.
+- **Off:** you assert the phone number yourself when you mint the session
+  (because your own site already verified who this customer is) and the
+  widget skips straight to the wallet list — no code, no live challenge.
+  Only turn this on for a merchant you actually trust to assert phone
+  numbers correctly, since it removes the live verification step.
+
+### 1. Wire up the server endpoint
+
+Same `server-example.js` file as above adds one more route:
+
+- `POST /api/packeta/widget-session` — mints a session for a given
+  `walletId` (the merchant wallet you want to show, from your admin panel's
+  Wallet detail page). Add `phoneNumber` to the request body too if
+  `widgetRequiresOtp` is off for that wallet type.
+
+### 2. Add the widget to your page
+
+```html
+<div
+  data-packeta-wallet
+  data-wallet-id="0f27...-your-merchant-wallet-id"
+  data-proxy-url="/api/packeta/widget-session"
+></div>
+<script src="/wallet-widget.js"></script>
+```
+
+That's it — the script finds the `div`, asks your proxy for a session, and
+embeds the widget iframe in its place, resizing itself automatically as the
+customer moves through phone/OTP/wallet-list steps.
+
+Your wallet's own detail page in the Packeta admin panel has this exact
+snippet pre-filled with your `walletId`, ready to copy.
+
+### 3. (If you'd rather call it yourself)
+
+```html
+<div id="packeta-wallet"></div>
+<script src="/wallet-widget.js"></script>
+<script>
+  fetch('/api/packeta/widget-session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ walletId: 'your-merchant-wallet-id' }),
+  })
+    .then(function (res) { return res.json(); })
+    .then(function (session) {
+      PacketaWallet.init({
+        sessionToken: session.sessionToken,
+        widgetUrl: session.widgetUrl,
+        target: '#packeta-wallet',
+      });
+    });
+</script>
+```

@@ -354,6 +354,13 @@ export default {
     closedAt: 'Closed at',
     blockedAt: 'Blocked at',
     createdAt: 'Created at',
+    widget: {
+      heading: 'Wallet-viewing widget',
+      hint: 'Copy this into your site to show a logged-in customer their own wallets, hosted inside a Packeta iframe — your site never handles OTP codes or Packeta credentials.',
+      copy: 'Copy snippet',
+      copied: 'Copied',
+      docsHint: 'Full setup instructions: {path}',
+    },
   },
   callback: {
     finalizing: 'Finalizing your payment…',
@@ -577,6 +584,8 @@ export default {
       depositableLabel: 'Accepts deposits',
       hasVirtualBalanceLabel: 'Has a virtual balance (set manually at creation)',
       hiddenFromCustomerLabel: 'Hide from customer wallets/transactions lists (admin panel unaffected)',
+      allowWidgetLabel: 'Allow wallet-viewing widget (MERCHANT wallets only)',
+      widgetRequiresOtpLabel: 'Widget requires a live OTP challenge (off trusts the host-supplied phone number)',
       creditLineHeading: 'Credit-line / installment settings (optional)',
       enableCreditLineLabel: 'Enable credit-line / installments',
       installmentDateLabel: 'Installment generation day (1-31)',

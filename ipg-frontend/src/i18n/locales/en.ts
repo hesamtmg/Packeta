@@ -71,4 +71,33 @@ export default {
     walletSelectFailed: 'Failed to select wallet',
     topUpFailed: 'Failed to start the top-up payment',
   },
+  widget: {
+    loading: 'Loading…',
+    expired: 'This session has expired. Reload the page to try again.',
+    phone: {
+      prompt: 'Enter your phone number to view your wallets.',
+      placeholder: '09123456789',
+      captchaPrefix: 'Enter the code shown in the image',
+      answerPlaceholder: 'Answer',
+      sendCode: 'Send code',
+    },
+    otp: {
+      prompt: 'Enter the code sent to {phone}.',
+      devHint: 'Sandbox code (no real SMS sent): {code}',
+      verify: 'Verify',
+      resend: 'Resend code',
+    },
+    wallets: {
+      heading: 'Your wallets',
+      none: 'No wallets to show.',
+    },
+    errors: {
+      generic: 'Something went wrong.',
+      sessionNotFound: 'This session could not be found.',
+      sendCodeFailed: 'Failed to send code',
+      invalidCode: 'Invalid or expired code',
+      loadWalletsFailed: 'Failed to load wallets',
+      authenticateFailed: 'Failed to identify you',
+    },
+  },
 };

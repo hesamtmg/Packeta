@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron } from '@nestjs/schedule';
 import { InstallmentsService } from '../installments/installments.service';
 import { LoggingService } from '../logging/logging.service';
 import { Interval } from '@nestjs/schedule';
@@ -18,7 +17,7 @@ export class InstallmentSweepService {
 
   @Interval(30_000)
   async sweep(): Promise<void> {
-          console.log("InstallmentSweepService")
+    console.log('InstallmentSweepService');
     const generated = await this.installmentsService.generateDue();
     if (generated.length) {
       this.logger.log(`Generated ${generated.length} installment(s)`);

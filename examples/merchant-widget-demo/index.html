@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Acme Store — My Account</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      max-width: 640px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+      color: #1c1b3a;
+    }
+    h1 { font-size: 1.4rem; }
+    p.lede { color: #64748b; }
+    .setup {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+      padding: 1rem;
+      border: 1px solid #e3e9f7;
+      border-radius: 12px;
+      background: #f8faff;
+      margin-bottom: 1.5rem;
+    }
+    label { font-size: 0.85rem; color: #475569; display: flex; flex-direction: column; gap: 0.3rem; }
+    input {
+      padding: 0.55rem 0.7rem;
+      border-radius: 8px;
+      border: 1px solid #cbd5e1;
+      font-size: 0.9rem;
+    }
+    button {
+      align-self: flex-start;
+      padding: 0.6rem 1.1rem;
+      border-radius: 999px;
+      border: none;
+      background: #2f6fed;
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    #packeta-wallet {
+      min-height: 40px;
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    #packeta-wallet:empty::before {
+      content: 'Wallet widget will appear here.';
+      color: #94a3b8;
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Acme Store — My Account</h1>
+  <p class="lede">
+    This page pretends to be a merchant's own logged-in "My Account" page.
+    It never handles a phone number, an OTP code, or a Packeta credential —
+    everything below the button is Packeta's own hosted widget in an iframe.
+  </p>
+
+  <div class="setup">
+    <label>
+      Wallet ID (a MERCHANT-type wallet with the widget feature turned on)
+      <input id="wallet-id" type="text" placeholder="0f27....-....-....-............" />
+    </label>
+    <label>
+      Phone number (only used if that wallet type's "requires OTP" is off)
+      <input id="phone-number" type="tel" placeholder="09123456789" />
+    </label>
+    <button id="load-btn" type="button">Show my wallets</button>
+  </div>
+
+  <div id="packeta-wallet"></div>
+
+  <script src="/wallet-widget.js"></script>
+  <script>
+    document.getElementById('load-btn').addEventListener('click', function () {
+      var walletId = document.getElementById('wallet-id').value.trim();
+      var phoneNumber = document.getElementById('phone-number').value.trim();
+      var container = document.getElementById('packeta-wallet');
+      if (!walletId) {
+        container.textContent = 'Enter a wallet ID first.';
+        return;
+      }
+      container.textContent = 'Loading…';
+
+      fetch('/api/packeta/widget-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ walletId: walletId, phoneNumber: phoneNumber || undefined }),
+      })
+        .then(function (res) {
+          return res.json().then(function (data) {
+            if (!res.ok) throw new Error(data.message || 'Request failed');
+            return data;
+          });
+        })
+        .then(function (session) {
+          PacketaWallet.init({
+            sessionToken: session.sessionToken,
+            widgetUrl: session.widgetUrl,
+            target: container,
+          });
+        })
+        .catch(function (err) {
+          container.textContent = err.message;
+        });
+    });
+  </script>
+</body>
+</html>

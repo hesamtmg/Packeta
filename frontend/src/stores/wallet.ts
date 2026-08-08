@@ -20,6 +20,9 @@ export interface WalletType {
   // Whether wallets of this type may carry a manually-set virtual balance at
   // creation (see the "Add wallet" form's virtual-amount field).
   hasVirtualBalance: boolean;
+  // Wallet-viewing widget feature (see sdk/js/wallet-widget.js) — only
+  // meaningful on MERCHANT-code types.
+  allowWidget: boolean;
   // Credit-line fields (repository/credit wallet feature) — shared billing
   // rules for every wallet of this type.
   installmentDate: number | null;

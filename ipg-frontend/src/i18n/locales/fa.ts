@@ -71,4 +71,33 @@ export default {
     walletSelectFailed: 'انتخاب کیف پول ناموفق بود',
     topUpFailed: 'شروع پرداخت تکمیلی ناموفق بود',
   },
+  widget: {
+    loading: 'در حال بارگذاری…',
+    expired: 'این نشست منقضی شده است. برای تلاش دوباره صفحه را دوباره بارگذاری کنید.',
+    phone: {
+      prompt: 'برای مشاهده کیف‌پول‌های خود شماره تلفن‌تان را وارد کنید.',
+      placeholder: '09123456789',
+      captchaPrefix: 'کد نمایش داده‌شده در تصویر را وارد کنید',
+      answerPlaceholder: 'پاسخ',
+      sendCode: 'ارسال کد',
+    },
+    otp: {
+      prompt: 'کد ارسال‌شده به {phone} را وارد کنید.',
+      devHint: 'کد آزمایشی (بدون ارسال پیامک واقعی): {code}',
+      verify: 'تأیید',
+      resend: 'ارسال مجدد کد',
+    },
+    wallets: {
+      heading: 'کیف‌پول‌های شما',
+      none: 'کیف پولی برای نمایش وجود ندارد.',
+    },
+    errors: {
+      generic: 'خطایی رخ داد.',
+      sessionNotFound: 'این نشست یافت نشد.',
+      sendCodeFailed: 'ارسال کد ناموفق بود',
+      invalidCode: 'کد نامعتبر یا منقضی شده است',
+      loadWalletsFailed: 'بارگذاری کیف‌پول‌ها ناموفق بود',
+      authenticateFailed: 'شناسایی شما ناموفق بود',
+    },
+  },
 };

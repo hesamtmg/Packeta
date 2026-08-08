@@ -192,6 +192,20 @@ export class WalletType {
   @Column({ type: 'boolean', default: false })
   hiddenFromCustomer: boolean;
 
+  // Wallet-viewing widget feature (see backend/src/widget). Only meaningful
+  // on MERCHANT-code types — enforced server-side in WidgetService rather
+  // than in this form, same as every other type-code restriction in this
+  // codebase. Off by default.
+  @Column({ type: 'boolean', default: false })
+  allowWidget: boolean;
+
+  // When allowWidget is true: whether a widget session must complete a live
+  // OTP challenge before showing wallets, or trusts the host's own
+  // phone-number assertion outright (see WidgetService.authenticate). On by
+  // default — a merchant has to deliberately opt into the weaker guarantee.
+  @Column({ type: 'boolean', default: true })
+  widgetRequiresOtp: boolean;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
