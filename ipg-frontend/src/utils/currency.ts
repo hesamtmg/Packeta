@@ -27,6 +27,17 @@ function groupThousands(formatted: string): string {
   return fracPart ? `${grouped}.${fracPart}` : grouped;
 }
 
+// The inverse of formatAmount: a major-unit string typed into an <input> ->
+// minor units for the ledger. Mirrors frontend/src/utils/currency.ts.
+export function toMinorUnits(amount: string, currency: CurrencyInfo): number {
+  return Math.round(parseFloat(amount || '0') * 10 ** currency.decimalPlaces);
+}
+
+// Input step for an <input type="number"> editing this currency's amounts.
+export function amountStep(currency: CurrencyInfo): string {
+  return (10 ** -currency.decimalPlaces).toString();
+}
+
 // amount is in the currency's minor units, matching Packeta's own ledger.
 export function formatAmount(amount: string | number, currency: CurrencyInfo): string {
   const value = Number(amount) / 10 ** currency.decimalPlaces;

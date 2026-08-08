@@ -41,7 +41,8 @@
       font-weight: 700;
       cursor: pointer;
     }
-    #packeta-wallet {
+    #packeta-wallet,
+    #packeta-checkout {
       min-height: 40px;
       border-radius: 16px;
       overflow: hidden;
@@ -51,6 +52,21 @@
       color: #94a3b8;
       font-size: 0.85rem;
     }
+    #packeta-checkout:empty::before {
+      content: 'Checkout widget will appear here.';
+      color: #94a3b8;
+      font-size: 0.85rem;
+    }
+    #checkout-result {
+      font-size: 0.85rem;
+      color: #15803d;
+      font-weight: 600;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #e3e9f7;
+      margin: 2rem 0;
+    }
   </style>
 </head>
 <body>
@@ -59,6 +75,9 @@
     This page pretends to be a merchant's own logged-in "My Account" page.
     It never handles a phone number, an OTP code, or a Packeta credential —
     everything below the button is Packeta's own hosted widget in an iframe.
+    Once identified, the widget itself also lets the customer view
+    transactions/installments and deposit or pay an installment (both go
+    through ZarinPal, so those two actions briefly leave this page).
   </p>
 
   <div class="setup">
@@ -70,7 +89,7 @@
       Phone number (only used if that wallet type's "requires OTP" is off)
       <input id="phone-number" type="tel" placeholder="09123456789" />
     </label>
-    <button id="load-btn" type="button">Show my wallets</button>
+    <button id="load-btn" type="button">Show my account</button>
   </div>
 
   <div id="packeta-wallet"></div>
@@ -103,6 +122,67 @@
             sessionToken: session.sessionToken,
             widgetUrl: session.widgetUrl,
             target: container,
+            returnUrl: window.location.href,
+          });
+        })
+        .catch(function (err) {
+          container.textContent = err.message;
+        });
+    });
+  </script>
+
+  <hr />
+
+  <h1>Checkout</h1>
+  <p class="lede">
+    A second, unrelated widget: the inline "Pay with Packeta" checkout,
+    same charge your server already knows how to open — just embedded
+    instead of redirecting this whole page.
+  </p>
+
+  <div class="setup">
+    <label>
+      Amount (minor units — cents for USD)
+      <input id="checkout-amount" type="number" value="125000" />
+    </label>
+    <label>
+      Currency
+      <input id="checkout-currency" type="text" value="USD" />
+    </label>
+    <button id="checkout-btn" type="button">Start checkout</button>
+  </div>
+
+  <div id="packeta-checkout"></div>
+  <p id="checkout-result"></p>
+
+  <script src="/pay-widget.js"></script>
+  <script>
+    document.getElementById('checkout-btn').addEventListener('click', function () {
+      var amount = Number(document.getElementById('checkout-amount').value);
+      var currency = document.getElementById('checkout-currency').value.trim();
+      var container = document.getElementById('packeta-checkout');
+      var result = document.getElementById('checkout-result');
+      result.textContent = '';
+      container.textContent = 'Loading…';
+
+      fetch('/api/packeta/charge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: amount, currency: currency }),
+      })
+        .then(function (res) {
+          return res.json().then(function (data) {
+            if (!res.ok) throw new Error(data.message || 'Request failed');
+            return data;
+          });
+        })
+        .then(function (charge) {
+          PacketaPay.init({
+            redirectUrl: charge.redirectUrl,
+            target: container,
+            onComplete: function (r) {
+              result.textContent = 'Purchase ' + r.status + ' (transaction ' + r.transactionId + ')';
+            },
           });
         })
         .catch(function (err) {

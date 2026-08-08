@@ -4,7 +4,14 @@ import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import { ApiError } from '../api/client';
 import { packetaRequest } from '../api/packetaClient';
-import { formatAmount, formatAmountWords, type CurrencyInfo } from '../utils/currency';
+import {
+  amountStep,
+  formatAmount,
+  formatAmountWords,
+  toMinorUnits,
+  type CurrencyInfo,
+} from '../utils/currency';
+import { formatCalendarDate, formatDateTime } from '../utils/date';
 import { setLocale } from '../i18n';
 
 interface WidgetStatus {
@@ -24,20 +31,63 @@ interface WidgetWallet {
     name: string;
     code: string;
     currency: CurrencyInfo;
+    depositable: boolean;
   };
+}
+
+interface WidgetTransaction {
+  id: string;
+  type: 'DEPOSIT' | 'WITHDRAW' | 'TRANSFER' | 'ADJUSTMENT' | 'PURCHASE' | 'VIRTUAL';
+  status: 'PENDING' | 'COMPLETED' | 'REVERSED';
+  fromWalletId: string | null;
+  toWalletId: string | null;
+  amount: string;
+  createdAt: string;
+}
+
+interface WidgetTransactionDetail {
+  id: string;
+  type: string;
+  amount: string;
+  note: string | null;
+  fromWallet: { id: string; name: string | null; walletType: { name: string; code: string; currency: CurrencyInfo } } | null;
+  toWallet: { id: string; name: string | null; walletType: { name: string; code: string; currency: CurrencyInfo } } | null;
+  direction: 'IN' | 'OUT' | 'BOTH';
+  status: string;
+  createdAt: string;
+}
+
+interface WidgetInstallment {
+  id: string;
+  walletId: string;
+  sequenceNumber: number;
+  amount: string;
+  principalAmount: string;
+  dueDate: string;
+  deadlineDate: string;
+  status: 'PENDING' | 'OVERDUE' | 'PAID';
+  paidAt: string | null;
 }
 
 const route = useRoute();
 const token = route.params.token as string;
 const { t, locale } = useI18n();
 
+// Where to send the browser back to once a deposit/installment-pay's
+// ZarinPal leg completes (see WidgetCallbackView.vue) — round-tripped
+// straight through, never stored anywhere on this page.
+const returnUrl = route.query.returnUrl as string | undefined;
+
 // Same steps PayView's phone/OTP identification uses, minus everything
 // purchase-specific (no wallet-select-to-pay, no confirm/cancel, no
-// redirect) — this only ever shows a read-only wallet list once
-// authenticated. 'authenticating' covers the non-OTP path's automatic
-// server round trip with nothing for the customer to do but wait a beat.
-type Step = 'loading' | 'phone' | 'otp' | 'authenticating' | 'wallets' | 'error' | 'expired';
+// redirect). 'authenticating' covers the non-OTP path's automatic server
+// round trip with nothing for the customer to do but wait a beat.
+// 'account' is the authenticated state — a tab bar (see activeTab) picks
+// between wallets/transactions/installments from there.
+type Step = 'loading' | 'phone' | 'otp' | 'authenticating' | 'account' | 'error' | 'expired';
 const step = ref<Step>('loading');
+type Tab = 'wallets' | 'transactions' | 'installments';
+const activeTab = ref<Tab>('wallets');
 
 const status = ref<WidgetStatus | null>(null);
 const phoneNumber = ref('');
@@ -51,6 +101,17 @@ const devCodeHint = ref('');
 const wallets = ref<WidgetWallet[]>([]);
 const gatewayError = ref('');
 const gatewayBusy = ref(false);
+
+const walletCurrencyMap = computed(
+  () => new Map(wallets.value.map((w) => [w.id, w.walletType.currency])),
+);
+function currencyForTx(tx: WidgetTransaction): CurrencyInfo | null {
+  return (
+    (tx.toWalletId && walletCurrencyMap.value.get(tx.toWalletId)) ||
+    (tx.fromWalletId && walletCurrencyMap.value.get(tx.fromWalletId)) ||
+    null
+  );
+}
 
 // Masks a wallet id into a card-number-style group of dots ending in the
 // last 4 characters — purely cosmetic, matching PayView's own maskId, so a
@@ -67,7 +128,8 @@ function walletTotal(w: WidgetWallet): string {
 }
 
 // The embedding page sizes its iframe off this — see sdk/js/wallet-widget.js
-// — so any step change that could change content height posts a fresh one.
+// — so any step/tab/data change that could change content height posts a
+// fresh one.
 function postResize() {
   nextTick(() => {
     window.parent?.postMessage(
@@ -77,6 +139,7 @@ function postResize() {
   });
 }
 watch(step, postResize);
+watch(activeTab, postResize);
 watch(wallets, postResize);
 
 async function loadCaptcha() {
@@ -177,7 +240,7 @@ async function onVerifyOtp() {
 async function loadWallets() {
   try {
     wallets.value = await packetaRequest<WidgetWallet[]>(`/widget/sessions/${token}/wallets`);
-    step.value = 'wallets';
+    step.value = 'account';
   } catch (err) {
     gatewayError.value = err instanceof ApiError ? err.message : t('widget.errors.loadWalletsFailed');
     step.value = 'error';
@@ -201,6 +264,129 @@ async function authenticateTrusted() {
 async function goToPhoneStep() {
   step.value = 'phone';
   await loadCaptcha();
+}
+
+// ---------------------------------------------------------------------
+// Deposit — one form open at a time, toggled per wallet.
+// ---------------------------------------------------------------------
+const depositingWalletId = ref<string | null>(null);
+const depositAmount = ref('');
+const depositBusy = ref(false);
+const depositError = ref('');
+
+function toggleDeposit(walletId: string) {
+  depositError.value = '';
+  depositAmount.value = '';
+  depositingWalletId.value = depositingWalletId.value === walletId ? null : walletId;
+}
+
+async function onDeposit(wallet: WidgetWallet) {
+  depositError.value = '';
+  const minorAmount = toMinorUnits(depositAmount.value, wallet.walletType.currency);
+  if (!minorAmount || minorAmount < 1) {
+    depositError.value = t('widget.deposit.invalidAmount');
+    return;
+  }
+  depositBusy.value = true;
+  try {
+    const result = await packetaRequest<{ redirectUrl: string }>(
+      `/widget/sessions/${token}/deposit`,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': crypto.randomUUID() },
+        body: { walletId: wallet.id, amount: minorAmount, returnUrl },
+      },
+    );
+    // ZarinPal is a real external gateway — it cannot run inside this
+    // sandboxed iframe, so the click that got us here carries the transient
+    // user-activation allow-top-navigation-by-user-activation needs (see
+    // sdk/js/wallet-widget.js's iframe sandbox).
+    window.top!.location.href = result.redirectUrl;
+  } catch (err) {
+    depositError.value = err instanceof ApiError ? err.message : t('widget.deposit.failed');
+    depositBusy.value = false;
+  }
+}
+
+// ---------------------------------------------------------------------
+// Transactions — lazy-loaded on first tab activation.
+// ---------------------------------------------------------------------
+const transactions = ref<WidgetTransaction[]>([]);
+const transactionsLoaded = ref(false);
+const transactionsError = ref('');
+const selectedTransaction = ref<WidgetTransactionDetail | null>(null);
+const transactionDetailBusy = ref(false);
+
+async function loadTransactions() {
+  if (transactionsLoaded.value) return;
+  transactionsError.value = '';
+  try {
+    transactions.value = await packetaRequest<WidgetTransaction[]>(
+      `/widget/sessions/${token}/transactions`,
+    );
+    transactionsLoaded.value = true;
+  } catch (err) {
+    transactionsError.value = err instanceof ApiError ? err.message : t('widget.transactions.loadFailed');
+  }
+}
+
+async function openTransaction(id: string) {
+  transactionDetailBusy.value = true;
+  try {
+    selectedTransaction.value = await packetaRequest<WidgetTransactionDetail>(
+      `/widget/sessions/${token}/transactions/${id}`,
+    );
+  } catch (err) {
+    transactionsError.value = err instanceof ApiError ? err.message : t('widget.transactions.loadFailed');
+  } finally {
+    transactionDetailBusy.value = false;
+  }
+}
+
+// ---------------------------------------------------------------------
+// Installments — lazy-loaded on first tab activation.
+// ---------------------------------------------------------------------
+const installments = ref<WidgetInstallment[]>([]);
+const installmentsLoaded = ref(false);
+const installmentsError = ref('');
+const payingInstallmentId = ref<string | null>(null);
+
+async function loadInstallments() {
+  if (installmentsLoaded.value) return;
+  installmentsError.value = '';
+  try {
+    installments.value = await packetaRequest<WidgetInstallment[]>(
+      `/widget/sessions/${token}/installments`,
+    );
+    installmentsLoaded.value = true;
+  } catch (err) {
+    installmentsError.value = err instanceof ApiError ? err.message : t('widget.installments.loadFailed');
+  }
+}
+
+async function onPayInstallment(installment: WidgetInstallment) {
+  installmentsError.value = '';
+  payingInstallmentId.value = installment.id;
+  try {
+    const result = await packetaRequest<{ redirectUrl: string }>(
+      `/widget/sessions/${token}/installments/${installment.id}/pay`,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': crypto.randomUUID() },
+        body: { returnUrl },
+      },
+    );
+    window.top!.location.href = result.redirectUrl;
+  } catch (err) {
+    installmentsError.value = err instanceof ApiError ? err.message : t('widget.installments.payFailed');
+    payingInstallmentId.value = null;
+  }
+}
+
+function selectTab(tab: Tab) {
+  activeTab.value = tab;
+  if (tab === 'transactions') loadTransactions();
+  if (tab === 'installments') loadInstallments();
 }
 
 onMounted(async () => {
@@ -312,30 +498,139 @@ onMounted(async () => {
         <p v-if="gatewayError" class="error">{{ gatewayError }}</p>
       </template>
 
-      <template v-else-if="step === 'wallets'">
-        <p class="status">{{ t('widget.wallets.heading') }}</p>
-        <p v-if="!wallets.length" class="status">{{ t('widget.wallets.none') }}</p>
-        <div v-else class="wallet-list">
-          <div v-for="w in wallets" :key="w.id" class="paycard">
-            <div class="paycard-top">
-              <span class="paycard-chip" aria-hidden="true">
-                <svg viewBox="0 0 32 24" fill="none"><rect x="1" y="1" width="30" height="22" rx="4" fill="currentColor" opacity="0.9"/><path d="M1 9h30M1 15h30M11 1v22M21 1v22" stroke="#fff" stroke-width="1"/></svg>
-              </span>
-              <span class="paycard-brand">{{ t('brand') }}</span>
-            </div>
-            <div class="paycard-number">{{ maskId(w.id) }}</div>
-            <div class="paycard-bottom">
-              <div class="paycard-field">
-                <span class="paycard-label">{{ t('card.wallet') }}</span>
-                <span class="paycard-value">{{ w.name || w.walletType.name }}</span>
+      <template v-else-if="step === 'account'">
+        <div class="tab-bar">
+          <button type="button" class="tab" :class="{ active: activeTab === 'wallets' }" @click="selectTab('wallets')">{{ t('widget.tabs.wallets') }}</button>
+          <button type="button" class="tab" :class="{ active: activeTab === 'transactions' }" @click="selectTab('transactions')">{{ t('widget.tabs.transactions') }}</button>
+          <button type="button" class="tab" :class="{ active: activeTab === 'installments' }" @click="selectTab('installments')">{{ t('widget.tabs.installments') }}</button>
+        </div>
+
+        <div v-if="activeTab === 'wallets'">
+          <p v-if="!wallets.length" class="status">{{ t('widget.wallets.none') }}</p>
+          <div v-else class="wallet-list">
+            <div v-for="w in wallets" :key="w.id" class="paycard-wrap">
+              <div class="paycard">
+                <div class="paycard-top">
+                  <span class="paycard-chip" aria-hidden="true">
+                    <svg viewBox="0 0 32 24" fill="none"><rect x="1" y="1" width="30" height="22" rx="4" fill="currentColor" opacity="0.9"/><path d="M1 9h30M1 15h30M11 1v22M21 1v22" stroke="#fff" stroke-width="1"/></svg>
+                  </span>
+                  <span class="paycard-brand">{{ t('brand') }}</span>
+                </div>
+                <div class="paycard-number">{{ maskId(w.id) }}</div>
+                <div class="paycard-bottom">
+                  <div class="paycard-field">
+                    <span class="paycard-label">{{ t('card.wallet') }}</span>
+                    <span class="paycard-value">{{ w.name || w.walletType.name }}</span>
+                  </div>
+                  <div class="paycard-field paycard-field-right">
+                    <span class="paycard-label">{{ t('card.balance') }}</span>
+                    <span class="paycard-value">{{ formatAmount(walletTotal(w), w.walletType.currency) }}</span>
+                    <span class="paycard-value-words">{{ formatAmountWords(walletTotal(w), w.walletType.currency, locale === 'fa' ? 'fa' : 'en') }}</span>
+                  </div>
+                </div>
               </div>
-              <div class="paycard-field paycard-field-right">
-                <span class="paycard-label">{{ t('card.balance') }}</span>
-                <span class="paycard-value">{{ formatAmount(walletTotal(w), w.walletType.currency) }}</span>
-                <span class="paycard-value-words">{{ formatAmountWords(walletTotal(w), w.walletType.currency, locale === 'fa' ? 'fa' : 'en') }}</span>
-              </div>
+              <button
+                v-if="w.walletType.depositable"
+                type="button"
+                class="link-btn wallet-action"
+                @click="toggleDeposit(w.id)"
+              >
+                {{ depositingWalletId === w.id ? t('widget.deposit.cancel') : t('widget.deposit.action') }}
+              </button>
+              <form
+                v-if="depositingWalletId === w.id"
+                class="gateway-form deposit-form"
+                @submit.prevent="onDeposit(w)"
+              >
+                <label class="icon-field">
+                  <input
+                    v-model="depositAmount"
+                    type="number"
+                    min="0"
+                    :step="amountStep(w.walletType.currency)"
+                    :placeholder="t('widget.deposit.amountPlaceholder', { code: w.walletType.currency.code })"
+                    required
+                  />
+                </label>
+                <button class="confirm" type="submit" :disabled="depositBusy">{{ t('widget.deposit.submit') }}</button>
+                <p v-if="depositError" class="error">{{ depositError }}</p>
+              </form>
             </div>
           </div>
+        </div>
+
+        <div v-else-if="activeTab === 'transactions'">
+          <p v-if="transactionsError" class="error">{{ transactionsError }}</p>
+          <p v-else-if="!transactionsLoaded" class="status">{{ t('widget.loading') }}</p>
+          <p v-else-if="!transactions.length" class="status">{{ t('widget.transactions.none') }}</p>
+          <ul v-else class="row-list">
+            <li v-for="tx in transactions" :key="tx.id" class="row-item" @click="openTransaction(tx.id)">
+              <div class="row-main">
+                <span class="row-title">{{ t(`widget.transactions.type.${tx.type}`) }}</span>
+                <span class="row-sub">{{ formatDateTime(tx.createdAt) }}</span>
+              </div>
+              <div class="row-side">
+                <span class="row-amount">{{ currencyForTx(tx) ? formatAmount(tx.amount, currencyForTx(tx)!) : tx.amount }}</span>
+                <span class="badge" :class="`badge-${tx.status.toLowerCase()}`">{{ t(`widget.transactions.status.${tx.status}`) }}</span>
+              </div>
+            </li>
+          </ul>
+
+          <div v-if="selectedTransaction || transactionDetailBusy" class="detail-overlay" @click.self="selectedTransaction = null">
+            <div class="detail-card">
+              <button type="button" class="link-btn detail-close" @click="selectedTransaction = null">{{ t('widget.transactions.close') }}</button>
+              <p v-if="transactionDetailBusy" class="status">{{ t('widget.loading') }}</p>
+              <template v-else-if="selectedTransaction">
+                <h3 class="detail-heading">{{ t(`widget.transactions.type.${selectedTransaction.type}`) }}</h3>
+                <span class="badge" :class="`badge-${selectedTransaction.status.toLowerCase()}`">{{ t(`widget.transactions.status.${selectedTransaction.status}`) }}</span>
+                <dl class="detail-list">
+                  <dt>{{ t('widget.transactions.amount') }}</dt>
+                  <dd>{{ selectedTransaction.toWallet ? formatAmount(selectedTransaction.amount, selectedTransaction.toWallet.walletType.currency) : (selectedTransaction.fromWallet ? formatAmount(selectedTransaction.amount, selectedTransaction.fromWallet.walletType.currency) : selectedTransaction.amount) }}</dd>
+                  <template v-if="selectedTransaction.fromWallet">
+                    <dt>{{ t('widget.transactions.from') }}</dt>
+                    <dd>{{ selectedTransaction.fromWallet.name || selectedTransaction.fromWallet.walletType.name }}</dd>
+                  </template>
+                  <template v-if="selectedTransaction.toWallet">
+                    <dt>{{ t('widget.transactions.to') }}</dt>
+                    <dd>{{ selectedTransaction.toWallet.name || selectedTransaction.toWallet.walletType.name }}</dd>
+                  </template>
+                  <dt>{{ t('widget.transactions.date') }}</dt>
+                  <dd>{{ formatDateTime(selectedTransaction.createdAt) }}</dd>
+                  <template v-if="selectedTransaction.note">
+                    <dt>{{ t('widget.transactions.note') }}</dt>
+                    <dd>{{ selectedTransaction.note }}</dd>
+                  </template>
+                </dl>
+              </template>
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="activeTab === 'installments'">
+          <p v-if="installmentsError" class="error">{{ installmentsError }}</p>
+          <p v-else-if="!installmentsLoaded" class="status">{{ t('widget.loading') }}</p>
+          <p v-else-if="!installments.length" class="status">{{ t('widget.installments.none') }}</p>
+          <ul v-else class="row-list">
+            <li v-for="inst in installments" :key="inst.id" class="row-item row-item-static">
+              <div class="row-main">
+                <span class="row-title">{{ t('widget.installments.sequence', { n: inst.sequenceNumber }) }}</span>
+                <span class="row-sub">{{ t('widget.installments.due') }}: {{ formatCalendarDate(inst.deadlineDate) }}</span>
+              </div>
+              <div class="row-side">
+                <span class="row-amount">{{ walletCurrencyMap.get(inst.walletId) ? formatAmount(inst.amount, walletCurrencyMap.get(inst.walletId)!) : inst.amount }}</span>
+                <span class="badge" :class="`badge-${inst.status.toLowerCase()}`">{{ t(`widget.installments.status.${inst.status}`) }}</span>
+                <button
+                  v-if="inst.status !== 'PAID'"
+                  type="button"
+                  class="confirm pay-btn"
+                  :disabled="payingInstallmentId === inst.id"
+                  @click="onPayInstallment(inst)"
+                >
+                  {{ t('widget.installments.pay') }}
+                </button>
+              </div>
+            </li>
+          </ul>
         </div>
       </template>
 
@@ -546,10 +841,47 @@ onMounted(async () => {
   border-color: #2f6fed;
   box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.18);
 }
+.tab-bar {
+  display: flex;
+  gap: 0.4rem;
+  padding: 3px;
+  border-radius: 999px;
+  background: #f4f8ff;
+  border: 1px solid #e3e9f7;
+}
+.tab {
+  flex: 1;
+  padding: 0.5rem 0.4rem;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.tab.active {
+  background: linear-gradient(135deg, #4f8bff, #1550c9);
+  color: #fff;
+}
 .wallet-list {
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
+}
+.paycard-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.wallet-action {
+  align-self: flex-start;
+}
+.deposit-form {
+  padding: 0.6rem;
+  border-radius: 12px;
+  background: #f4f8ff;
+  border: 1px solid #e3e9f7;
 }
 /* Same "physical card" visual PayView uses for a wallet — a read-only
    stack of them here instead of a selectable carousel, since there's
@@ -631,6 +963,126 @@ onMounted(async () => {
   color: rgba(255, 255, 255, 0.65);
   white-space: normal;
   max-width: 100%;
+}
+.row-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.row-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 14px;
+  background: #f4f8ff;
+  border: 1px solid #e3e9f7;
+  cursor: pointer;
+}
+.row-item-static {
+  cursor: default;
+  flex-wrap: wrap;
+}
+.row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.row-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #14213d;
+}
+.row-sub {
+  font-size: 0.72rem;
+  color: #64748b;
+}
+.row-side {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.row-amount {
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: #1550c9;
+}
+.badge {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.badge-completed,
+.badge-paid {
+  background: rgba(34, 197, 94, 0.15);
+  color: #15803d;
+}
+.badge-pending {
+  background: rgba(234, 179, 8, 0.18);
+  color: #92610a;
+}
+.badge-reversed,
+.badge-overdue {
+  background: rgba(220, 38, 38, 0.15);
+  color: #b91c1c;
+}
+.pay-btn {
+  padding: 0.4rem 0.9rem;
+  font-size: 0.78rem;
+}
+.detail-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 33, 61, 0.45);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 10;
+}
+.detail-card {
+  width: 100%;
+  max-width: 380px;
+  background: #fff;
+  border-radius: 16px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.detail-close {
+  align-self: flex-end;
+}
+.detail-heading {
+  margin: 0;
+  font-size: 1rem;
+  color: #14213d;
+}
+.detail-list {
+  margin: 0.4rem 0 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 0.75rem;
+}
+.detail-list dt {
+  font-size: 0.72rem;
+  color: #64748b;
+}
+.detail-list dd {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #14213d;
+  text-align: right;
 }
 .widget-footer {
   margin: 0;

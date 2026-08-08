@@ -19,6 +19,13 @@ import { serializeWallet } from '../wallets/wallet.serializer';
 import { OtpService } from '../purchase-gateway/otp.service';
 import { CaptchaService } from '../purchase-gateway/captcha.service';
 import { displayIdentity } from '../common/synthetic-email';
+import {
+  TransactionsService,
+  PurchaseInitiateResult,
+} from '../transactions/transactions.service';
+import { InstallmentsService } from '../installments/installments.service';
+import { serializeInstallment } from '../installments/installment.serializer';
+import { WidgetDepositDto } from './dto/widget-deposit.dto';
 
 const SESSION_TTL_MS = 10 * 60 * 1000;
 
@@ -54,6 +61,8 @@ export class WidgetService {
     private readonly otpService: OtpService,
     private readonly captchaService: CaptchaService,
     private readonly configService: ConfigService,
+    private readonly transactionsService: TransactionsService,
+    private readonly installmentsService: InstallmentsService,
   ) {}
 
   async createSession(
@@ -194,6 +203,106 @@ export class WidgetService {
   }
 
   async getWallets(token: string) {
+    const session = await this.requireAuthenticated(token);
+    const wallets = (
+      await this.walletsService.listForUser(session.userId!)
+    ).filter((wallet) => !wallet.walletType.hiddenFromCustomer);
+    return wallets.map((wallet) => serializeWallet(wallet));
+  }
+
+  async getTransactions(token: string, walletId?: string) {
+    const session = await this.requireAuthenticated(token);
+    return this.transactionsService.getHistory(session.userId!, walletId);
+  }
+
+  async getTransaction(token: string, transactionId: string) {
+    const session = await this.requireAuthenticated(token);
+    return this.transactionsService.getById(session.userId!, transactionId);
+  }
+
+  async getInstallments(token: string) {
+    const session = await this.requireAuthenticated(token);
+    const installments = await this.installmentsService.findAllForUser(
+      session.userId!,
+    );
+    const breakdowns =
+      await this.installmentsService.getSpendBreakdownsFor(installments);
+    return installments.map((installment) =>
+      serializeInstallment(installment, breakdowns.get(installment.id)),
+    );
+  }
+
+  // Widget deposits skip TransactionsController entirely (WidgetService
+  // calls TransactionsService directly), which means the normal
+  // CustomerActionGuard/@RequireCustomerAction('deposit') gate never runs —
+  // replicated by hand here so a customer's restricted staff sub-account
+  // (assigned a Panel Role that doesn't grant 'deposit') can't use the
+  // widget to bypass a permission the dashboard itself would enforce.
+  // payInstallment's controller route has no equivalent gate today, so no
+  // check is replicated for that one below.
+  async deposit(
+    token: string,
+    dto: WidgetDepositDto,
+    idempotencyKey: string,
+  ): Promise<PurchaseInitiateResult> {
+    const session = await this.requireAuthenticated(token);
+    const user = await this.usersService.findById(session.userId!);
+    if (user?.panelRoleId) {
+      const granted = user.panelRole?.permissions ?? [];
+      if (!granted.includes('deposit')) {
+        throw new ForbiddenException(
+          'You do not have permission to perform this action',
+        );
+      }
+    }
+    return this.transactionsService.deposit(
+      session.userId!,
+      dto.walletId,
+      dto.amount,
+      idempotencyKey,
+      (transactionId) =>
+        this.buildWidgetCallbackUrl(token, transactionId, dto.returnUrl),
+    );
+  }
+
+  async payInstallment(
+    token: string,
+    installmentId: string,
+    returnUrl: string | undefined,
+    idempotencyKey: string,
+  ): Promise<PurchaseInitiateResult> {
+    const session = await this.requireAuthenticated(token);
+    return this.transactionsService.payInstallment(
+      session.userId!,
+      installmentId,
+      idempotencyKey,
+      (transactionId) =>
+        this.buildWidgetCallbackUrl(token, transactionId, returnUrl),
+    );
+  }
+
+  // returnUrl is never persisted anywhere — it round-trips purely as a
+  // query string on the ZarinPal callback URL, the same trick
+  // TransactionsService.initiateSupportTopUp already uses for
+  // ?topupTxnId=. ZarinPal appends its own Authority/Status params on top
+  // of whatever callbackUrl it's given, so this survives the round trip
+  // unmodified.
+  private buildWidgetCallbackUrl(
+    token: string,
+    transactionId: string,
+    returnUrl?: string,
+  ): string {
+    const ipgFrontendUrl = this.configService.get<string>('ipgFrontendUrl');
+    const base = `${ipgFrontendUrl}/widget/${token}/callback/${transactionId}`;
+    return returnUrl
+      ? `${base}?returnUrl=${encodeURIComponent(returnUrl)}`
+      : base;
+  }
+
+  // Shared by every endpoint scoped to an authenticated customer (wallets,
+  // transactions, installments, deposit, pay-installment) — mirrors what
+  // getWallets used to do inline.
+  private async requireAuthenticated(token: string): Promise<WidgetSession> {
     const session = await this.getPendingOrAuthenticated(token);
     if (
       session.status !== WidgetSessionStatus.AUTHENTICATED ||
@@ -201,10 +310,7 @@ export class WidgetService {
     ) {
       throw new ForbiddenException('This session has not authenticated yet');
     }
-    const wallets = (
-      await this.walletsService.listForUser(session.userId)
-    ).filter((wallet) => !wallet.walletType.hiddenFromCustomer);
-    return wallets.map((wallet) => serializeWallet(wallet));
+    return session;
   }
 
   private async getPendingOrAuthenticated(

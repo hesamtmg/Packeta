@@ -22,6 +22,12 @@
  * phone number it already trusts, instead of a live OTP challenge) — it's
  * ignored otherwise.
  *
+ * Add data-return-url="https://yoursite.example.com/account" to control
+ * where the browser lands after a deposit or installment payment's ZarinPal
+ * leg completes (a real external gateway — it can't run inside this
+ * iframe, so that one click genuinely leaves your page and comes back).
+ * Defaults to the current page's own URL if omitted.
+ *
  * Programmatic usage (if you already have a session token from your own
  * server, e.g. because you fetched it as part of a larger page load):
  *
@@ -46,7 +52,14 @@
   // iframe — allow-same-origin is needed only so the iframe (served by
   // Packeta's own ipg-frontend origin) can read/write its own storage for
   // its normal app operation, not so this host page can reach into it.
-  var IFRAME_SANDBOX = 'allow-scripts allow-forms allow-same-origin';
+  // allow-top-navigation-by-user-activation lets a real click inside the
+  // iframe (Deposit / Pay installment) send the *top-level* browser tab to
+  // ZarinPal — a genuine external payment gateway that refuses to render
+  // inside any iframe. Gated on transient user activation, so a script
+  // can't trigger it on its own; this is deliberate, not a sandbox-escape
+  // oversight.
+  var IFRAME_SANDBOX =
+    'allow-scripts allow-forms allow-same-origin allow-top-navigation-by-user-activation';
 
   function init(options) {
     options = options || {};
@@ -65,6 +78,13 @@
       }
       widgetUrl = options.baseUrl.replace(/\/$/, '') + '/widget/' + options.sessionToken;
     }
+
+    // Never stored anywhere — just carried through as a query param on the
+    // ZarinPal callback URL a deposit/installment payment builds server-side
+    // (see backend WidgetService.buildWidgetCallbackUrl), so the widget can
+    // send the browser back here once that leg completes.
+    var returnUrl = options.returnUrl || window.location.href;
+    widgetUrl += (widgetUrl.indexOf('?') === -1 ? '?' : '&') + 'returnUrl=' + encodeURIComponent(returnUrl);
 
     var iframe = document.createElement('iframe');
     iframe.src = widgetUrl;
@@ -125,7 +145,12 @@
           });
       })
       .then(function (data) {
-        init({ widgetUrl: data.widgetUrl, sessionToken: data.sessionToken, target: el });
+        init({
+          widgetUrl: data.widgetUrl,
+          sessionToken: data.sessionToken,
+          target: el,
+          returnUrl: el.getAttribute('data-return-url') || undefined,
+        });
       })
       .catch(function (err) {
         el.textContent = err.message;
