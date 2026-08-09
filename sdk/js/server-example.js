@@ -147,8 +147,18 @@ router.post('/api/packeta/widget-session', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------
-// POST /webhooks/packeta — Packeta calls this when a charge settles.
-// Point your merchant wallet's callbackUrl at this route.
+// Confirmed-status store, keyed by transactionId. Fed two ways below:
+// pushed into by the webhook handler, or filled lazily by the polling
+// endpoint. A module-level Map is fine for a single-process demo; a real
+// deployment would persist this on the order record itself (see the
+// TODO in the webhook handler).
+// ---------------------------------------------------------------------
+const chargeStatusStore = new Map();
+
+// ---------------------------------------------------------------------
+// POST /webhooks/packeta — Packeta calls this when a charge settles
+// (the "reverse"/push confirmation: Packeta's backend calls yours). Point
+// your merchant wallet's callbackUrl at this route.
 // ---------------------------------------------------------------------
 router.post('/webhooks/packeta', express.json(), (req, res) => {
   const { transactionId, status, amount } = req.body || {};
@@ -163,7 +173,58 @@ router.post('/webhooks/packeta', express.json(), (req, res) => {
   //      means the money actually moved.
   console.log('Packeta webhook:', { transactionId, status, amount });
 
+  if (transactionId) {
+    chargeStatusStore.set(transactionId, {
+      status,
+      amount,
+      confirmedVia: 'webhook',
+    });
+  }
+
   res.sendStatus(200);
+});
+
+// ---------------------------------------------------------------------
+// GET /api/packeta/charge/:transactionId/status — the "forward"/pull
+// confirmation: your own backend asks Packeta for the ground truth,
+// using your merchant credentials, instead of trusting whatever the
+// customer's browser reports via onComplete. Never mark an order paid off
+// the browser callback alone — a tampered client could report anything;
+// this route (or the webhook above) is the only status your fulfillment
+// logic should ever act on.
+//
+// Checks the webhook store first (near-instant, no extra network call if
+// Packeta has already pushed the result); falls back to asking Packeta
+// directly for anyone who calls this before the webhook arrives, or who
+// hasn't wired a callbackUrl up at all.
+// ---------------------------------------------------------------------
+router.get('/api/packeta/charge/:transactionId/status', async (req, res) => {
+  const { transactionId } = req.params;
+
+  const cached = chargeStatusStore.get(transactionId);
+  if (cached) {
+    return res.json({ transactionId, ...cached });
+  }
+
+  try {
+    const token = await getToken();
+    const txnRes = await fetch(`${PACKETA_API_URL}/transactions/${transactionId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await txnRes.json();
+    if (!txnRes.ok) {
+      return res.status(txnRes.status).json(data);
+    }
+    const result = { status: data.status, amount: data.amount, confirmedVia: 'poll' };
+    // Only cache a terminal result — PENDING can still change, so the next
+    // call should ask again rather than getting stuck on a stale answer.
+    if (data.status !== 'PENDING') {
+      chargeStatusStore.set(transactionId, result);
+    }
+    res.json({ transactionId, ...result });
+  } catch (err) {
+    res.status(502).json({ message: 'Could not reach Packeta', detail: err.message });
+  }
 });
 
 module.exports = router;
