@@ -110,7 +110,7 @@ router.post('/api/packeta/charge', async (req, res) => {
 // container calls. Mints a short-lived, wallet-scoped session token
 // server-to-server (your real Packeta login never reaches the browser,
 // same reasoning as the charge endpoint above) and hands back just enough
-// for the browser to embed the widget iframe.
+// for the browser to mount the widget.
 // ---------------------------------------------------------------------
 router.post('/api/packeta/widget-session', async (req, res) => {
   const { walletId, phoneNumber } = req.body || {};
