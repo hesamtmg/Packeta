@@ -37,12 +37,16 @@ const packeta = require('./server-example');
 app.use(packeta);
 ```
 
-This gives you two routes:
+This gives you three routes:
 
 - `POST /api/packeta/charge` — the button below calls this.
 - `POST /webhooks/packeta` — point your Packeta merchant wallet's
   `callbackUrl` at this (see the dashboard/admin panel, or ask whoever set
-  up your wallet). This is how you find out a payment actually completed.
+  up your wallet). Packeta calls *you* when a payment settles — a push
+  confirmation.
+- `GET /api/packeta/charge/:transactionId/status` — the reverse: *you* ask
+  Packeta, using your own merchant credentials, whether a charge actually
+  went through. See "Confirming a payment" below for when to use which.
 
 ### 2. Add a button to your page
 
@@ -254,8 +258,15 @@ Or programmatically, with an `onComplete` callback:
         redirectUrl: charge.redirectUrl,
         target: '#packeta-checkout',
         onComplete: function (result) {
-          // result: { transactionId, status: 'COMPLETED' | 'FAILED' }
-          markOrderPaid(result.transactionId, result.status);
+          // result: { transactionId, status: 'COMPLETED' | 'FAILED' } — this
+          // is the *browser's* report. Don't call markOrderPaid off it
+          // directly (see "Confirming a payment" below); ask your own
+          // backend to confirm first.
+          fetch('/api/packeta/charge/' + result.transactionId + '/status')
+            .then(function (res) { return res.json(); })
+            .then(function (confirmed) {
+              markOrderPaid(confirmed.transactionId, confirmed.status);
+            });
         },
       });
     });
@@ -268,6 +279,60 @@ ZarinPal — a genuine external gateway that refuses to render inline. That
 one click briefly leaves your page; the customer lands back wherever your
 Packeta wallet's own `callbackUrl` points once it completes (the same
 setting the full-page pay flow already uses).
+
+### Presentation: inline or bottom sheet
+
+`PacketaPay.init()` takes a `presentation` option — `'inline'` (default,
+same as above) or `'bottomSheet'`:
+
+```js
+PacketaPay.init({
+  redirectUrl: charge.redirectUrl,
+  presentation: 'bottomSheet',
+  onComplete: function (result) { /* ... */ },
+});
+```
+
+`'bottomSheet'` slides the pay widget up from the bottom of the *whole
+page* over a dimmed backdrop — mounted into `document.body`, not tied to
+any particular spot in your layout, so `target` isn't required (and is
+ignored if you pass one). The customer can dismiss it via the close
+button, tapping the backdrop, or Escape; there's no programmatic close,
+since once `complete()` fires the widget's own success state is the right
+thing to keep showing. The chrome (backdrop + sheet) has its own Shadow
+DOM, same isolation guarantee as the widget itself.
+
+The declarative `data-packeta-pay-widget` form supports the same choice
+via `data-presentation="bottomSheet"` — but note that form auto-mounts on
+page load, so a bottom sheet wired that way pops up immediately rather
+than in response to a click. The programmatic form (above), called from a
+"Pay" button's click handler, is the natural fit for `bottomSheet`.
+
+## Confirming a payment (don't trust the browser)
+
+Both `packeta.js`'s full-page redirect and `pay-widget.js`'s inline
+`onComplete` eventually tell *the browser* how a charge went. Never treat
+that as fulfillment-grade truth — the page is running on a device you
+don't control, and a tampered client could report anything. Only mark an
+order paid off a status your own backend obtained directly from Packeta,
+using one of these two routes (`server-example.js` wires up both; use
+either alone, or both together like the demo does):
+
+- **Push (webhook)** — `POST /webhooks/packeta`. Point your Packeta
+  merchant wallet's `callbackUrl` at it and Packeta calls you, server to
+  server, once a charge settles. Best-effort and at-least-once — handle
+  duplicate deliveries idempotently.
+- **Pull (poll)** — `GET /api/packeta/charge/:transactionId/status`. Your
+  own backend asks Packeta directly (`GET /transactions/:id` with your
+  merchant token) for the authoritative status. Useful right after
+  `onComplete` fires — no need to wait on the webhook — or as a fallback if
+  you haven't wired a `callbackUrl` up at all. Returns `PENDING`,
+  `COMPLETED`, or `REVERSED`.
+
+`server-example.js`'s status route checks the webhook's cached result
+first and only falls back to polling Packeta directly if the webhook
+hasn't arrived yet, so calling it right after `onComplete` is cheap and
+safe either way.
 
 ## A note on `wallet-widget.js` and `pay-widget.js` as build artifacts
 

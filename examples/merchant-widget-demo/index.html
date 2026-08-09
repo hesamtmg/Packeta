@@ -136,9 +136,11 @@
 
   <h1>Checkout</h1>
   <p class="lede">
-    A second, unrelated widget: the inline "Pay with Packeta" checkout,
-    same charge your server already knows how to open — just embedded
-    instead of redirecting this whole page.
+    A second, unrelated widget: the "Pay with Packeta" checkout, same
+    charge your server already knows how to open — either embedded flat
+    into the page, or as a bottom sheet that slides up over it. Same
+    <code>PacketaPay.init()</code> call either way; just a
+    <code>presentation</code> option.
   </p>
 
   <div class="setup">
@@ -149,6 +151,13 @@
     <label>
       Currency
       <input id="checkout-currency" type="text" value="USD" />
+    </label>
+    <label>
+      Presentation
+      <select id="checkout-presentation">
+        <option value="inline">Inline (embedded in the page)</option>
+        <option value="bottomSheet">Bottom sheet (slides up over the page)</option>
+      </select>
     </label>
     <button id="checkout-btn" type="button">Start checkout</button>
   </div>
@@ -161,10 +170,14 @@
     document.getElementById('checkout-btn').addEventListener('click', function () {
       var amount = Number(document.getElementById('checkout-amount').value);
       var currency = document.getElementById('checkout-currency').value.trim();
+      var presentation = document.getElementById('checkout-presentation').value;
       var container = document.getElementById('packeta-checkout');
       var result = document.getElementById('checkout-result');
       result.textContent = '';
-      container.textContent = 'Loading…';
+      // Only the inline presentation renders into this container — a
+      // bottom sheet mounts itself into document.body instead, so it isn't
+      // tied to (or limited by) this spot in the page layout.
+      container.textContent = presentation === 'inline' ? 'Loading…' : '';
 
       fetch('/api/packeta/charge', {
         method: 'POST',
@@ -181,8 +194,13 @@
           PacketaPay.init({
             redirectUrl: charge.redirectUrl,
             target: container,
+            presentation: presentation,
+            // r.status here is only what the customer's own browser
+            // reports — never trust it directly for fulfillment. Ask our
+            // own backend to confirm against Packeta before showing (or
+            // acting on) a result.
             onComplete: function (r) {
-              result.textContent = 'Purchase ' + r.status + ' (transaction ' + r.transactionId + ')';
+              confirmChargeStatus(r.transactionId, result);
             },
           });
         })
@@ -190,6 +208,37 @@
           container.textContent = err.message;
         });
     });
+
+    // Polls our own /api/packeta/charge/:id/status (see server-example.js)
+    // until it reports a terminal status. That route itself either has the
+    // answer already (Packeta's webhook pushed it) or fetches it fresh from
+    // Packeta with our server's own credentials — either way, a
+    // backend-confirmed result, not the browser's self-report.
+    function confirmChargeStatus(transactionId, resultEl, attempt) {
+      attempt = attempt || 1;
+      resultEl.textContent = 'Confirming with server…';
+
+      fetch('/api/packeta/charge/' + transactionId + '/status')
+        .then(function (res) {
+          return res.json().then(function (data) {
+            if (!res.ok) throw new Error(data.message || 'Request failed');
+            return data;
+          });
+        })
+        .then(function (data) {
+          if (data.status === 'PENDING' && attempt < 8) {
+            setTimeout(function () {
+              confirmChargeStatus(transactionId, resultEl, attempt + 1);
+            }, 1000);
+            return;
+          }
+          resultEl.textContent =
+            'Purchase ' + data.status + ' (transaction ' + transactionId + ', confirmed via ' + data.confirmedVia + ')';
+        })
+        .catch(function (err) {
+          resultEl.textContent = 'Could not confirm with server: ' + err.message;
+        });
+    }
   </script>
 </body>
 </html>
