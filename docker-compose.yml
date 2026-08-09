@@ -28,6 +28,8 @@ services:
       POSTGRES_USER: hesamtmg
       POSTGRES_PASSWORD: Tmg@2215309
       POSTGRES_DB: postgres
+    ports:
+        - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -42,7 +44,8 @@ services:
     environment:
       POSTGRES_USER: hesamtmg
       POSTGRES_PASSWORD: Tmg@2215309
-      POSTGRES_DB: packeta_ipg
+      POSTGRES_DB: packeta-ipg
+ 
     volumes:
       - ipg_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -79,7 +82,7 @@ services:
       DB_PORT: 5432
       DB_USERNAME: hesamtmg
       DB_PASSWORD: Tmg@2215309
-      DB_DATABASE: packeta_ipg
+      DB_DATABASE: packeta-ipg
       IPG_API_KEY: ${IPG_API_KEY:-sandbox-ipg-key}
       # Browser-facing (see header note) — where a merchant's charge
       # redirects the customer to pay.

@@ -8,7 +8,7 @@ export const AppDataSource = new DataSource({
   port: parseInt(process.env.DB_PORT ?? '5433', 10),
   username: process.env.DB_USERNAME ?? 'ipg',
   password: process.env.DB_PASSWORD ?? 'ipg',
-  database: process.env.DB_DATABASE ?? 'packeta_ipg',
+  database: process.env.DB_DATABASE ?? 'packeta-ipg',
   entities: [PaymentIntent],
   migrations: [__dirname + '/migrations/*.{ts,js}'],
   synchronize: false,

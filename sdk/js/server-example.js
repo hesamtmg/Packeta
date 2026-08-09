@@ -26,8 +26,11 @@
 const express = require('express');
 const crypto = require('crypto');
 
-const { PACKETA_API_URL, PACKETA_EMAIL, PACKETA_PASSWORD } = process.env;
-
+let { PACKETA_API_URL, PACKETA_EMAIL, PACKETA_PASSWORD } = process.env;
+PACKETA_API_URL='http://localhost:3000'
+PACKETA_EMAIL='phone-989373084409@phone.internal'
+PACKETA_PASSWORD='Tmg@2215309'
+console.log(PACKETA_API_URL)
 const router = express.Router();
 router.use(express.json());
 
