@@ -280,6 +280,34 @@ one click briefly leaves your page; the customer lands back wherever your
 Packeta wallet's own `callbackUrl` points once it completes (the same
 setting the full-page pay flow already uses).
 
+### Presentation: inline or bottom sheet
+
+`PacketaPay.init()` takes a `presentation` option — `'inline'` (default,
+same as above) or `'bottomSheet'`:
+
+```js
+PacketaPay.init({
+  redirectUrl: charge.redirectUrl,
+  presentation: 'bottomSheet',
+  onComplete: function (result) { /* ... */ },
+});
+```
+
+`'bottomSheet'` slides the pay widget up from the bottom of the *whole
+page* over a dimmed backdrop — mounted into `document.body`, not tied to
+any particular spot in your layout, so `target` isn't required (and is
+ignored if you pass one). The customer can dismiss it via the close
+button, tapping the backdrop, or Escape; there's no programmatic close,
+since once `complete()` fires the widget's own success state is the right
+thing to keep showing. The chrome (backdrop + sheet) has its own Shadow
+DOM, same isolation guarantee as the widget itself.
+
+The declarative `data-packeta-pay-widget` form supports the same choice
+via `data-presentation="bottomSheet"` — but note that form auto-mounts on
+page load, so a bottom sheet wired that way pops up immediately rather
+than in response to a click. The programmatic form (above), called from a
+"Pay" button's click handler, is the natural fit for `bottomSheet`.
+
 ## Confirming a payment (don't trust the browser)
 
 Both `packeta.js`'s full-page redirect and `pay-widget.js`'s inline
