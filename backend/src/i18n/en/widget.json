@@ -1,0 +1,12 @@
+{
+  "NOT_ENABLED": "This wallet is not enabled for the wallet-viewing widget",
+  "IP_NOT_ALLOWED": "This request does not come from an allowed IP for this wallet",
+  "PHONE_REQUIRED_FOR_NON_OTP": "phoneNumber is required to create a non-OTP widget session",
+  "REQUIRES_OTP": "This wallet does not use OTP — call the authenticate endpoint instead",
+  "NOT_OTP_WALLET": "This wallet requires OTP verification",
+  "NO_PHONE_TO_TRUST": "This session was not created with a phone number to trust",
+  "PERMISSION_DENIED": "You do not have permission to perform this action",
+  "SESSION_NOT_AUTHENTICATED": "This session has not authenticated yet",
+  "SESSION_NOT_FOUND": "Widget session not found",
+  "SESSION_EXPIRED": "This widget session has expired"
+}

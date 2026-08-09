@@ -1,0 +1,6 @@
+{
+  "INVALID_CAPTCHA": "Incorrect or expired captcha answer",
+  "INVALID_OTP": "Invalid or expired code",
+  "NO_ACCOUNT_FOR_PHONE": "No account is registered with that phone number",
+  "PHONE_REQUIRED": "phoneNumber is required"
+}

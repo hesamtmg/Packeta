@@ -7,6 +7,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
+import { I18nService } from 'nestjs-i18n';
 import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
 import { WalletsService } from '../wallets/wallets.service';
@@ -29,6 +30,7 @@ export class AuthService {
     private readonly loggingService: LoggingService,
     private readonly authOtpService: AuthOtpService,
     private readonly captchaService: CaptchaService,
+    private readonly i18n: I18nService,
   ) {}
 
   async signup(dto: SignupDto): Promise<{ accessToken: string }> {
@@ -40,7 +42,7 @@ export class AuthService {
         success: false,
         metadata: { email: dto.email, reason: 'email already registered' },
       });
-      throw new ConflictException('Email already registered');
+      throw new ConflictException(this.i18n.t('auth.EMAIL_ALREADY_REGISTERED'));
     }
 
     const passwordHash = await bcrypt.hash(dto.password, SALT_ROUNDS);
@@ -83,7 +85,7 @@ export class AuthService {
         userId: user?.id,
         metadata: { email: dto.email },
       });
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException(this.i18n.t('auth.INVALID_CREDENTIALS'));
     }
 
     await this.loggingService.log({
@@ -107,7 +109,7 @@ export class AuthService {
     captchaAnswer: string,
   ): Promise<{ devCode: string }> {
     if (!this.captchaService.verify(captchaId, captchaAnswer)) {
-      throw new UnauthorizedException('Incorrect or expired captcha answer');
+      throw new UnauthorizedException(this.i18n.t('common.INVALID_CAPTCHA'));
     }
 
     const code = this.authOtpService.generateOtp(phoneNumber);
@@ -125,7 +127,7 @@ export class AuthService {
     code: string,
   ): Promise<{ accessToken: string }> {
     if (!this.authOtpService.verifyOtp(phoneNumber, code)) {
-      throw new UnauthorizedException('Invalid or expired code');
+      throw new UnauthorizedException(this.i18n.t('common.INVALID_OTP'));
     }
 
     let user = await this.usersService.findByPhoneNumber(phoneNumber);
