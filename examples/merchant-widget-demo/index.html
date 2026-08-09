@@ -74,10 +74,11 @@
   <p class="lede">
     This page pretends to be a merchant's own logged-in "My Account" page.
     It never handles a phone number, an OTP code, or a Packeta credential —
-    everything below the button is Packeta's own hosted widget in an iframe.
-    Once identified, the widget itself also lets the customer view
-    transactions/installments and deposit or pay an installment (both go
-    through ZarinPal, so those two actions briefly leave this page).
+    everything below the button is Packeta's own widget, mounted natively
+    into this page (no iframe). Once identified, the widget itself also
+    lets the customer view transactions/installments and deposit or pay an
+    installment (both go through ZarinPal, so those two actions briefly
+    leave this page).
   </p>
 
   <div class="setup">

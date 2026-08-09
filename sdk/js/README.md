@@ -111,18 +111,27 @@ A second, separate widget: if your site already has its own logged-in
 customer and you want to show *their* Packeta account inline — wallets,
 transactions (with detail), installments, plus letting them deposit into a
 wallet or pay an installment — use **`wallet-widget.js`** instead. Same idea
-as the pay button — the actual UI is hosted by Packeta inside a sandboxed
-iframe, and your page's JS never sees a phone number, an OTP code, or any
-Packeta credential. Deposits and installment payments go through ZarinPal,
-a real external gateway, so those two specific actions do briefly leave
-your page (see "Returning from a deposit or installment payment" below) —
-everything else (browsing wallets/transactions/installments) stays fully
-inline.
+as the pay button — the actual UI is Packeta's own, mounted natively into
+your page (a real Custom Element with its own Shadow DOM, not an iframe),
+so it feels like part of your page — no resize plumbing, no visible frame
+— and your page's JS never sees a phone number, an OTP code, or any
+Packeta credential typed into it. Deposits and installment payments go
+through ZarinPal, a real external gateway, so those two specific actions
+do briefly leave your page (see "Returning from a deposit or installment
+payment" below) — everything else (browsing wallets/transactions/
+installments) stays fully inline.
+
+Note on trust: Shadow DOM gives *style* isolation (the widget's CSS can't
+leak onto your page and vice versa), not the script/document sandbox an
+iframe would give. This widget's JS runs with the same page-level
+privileges as any other script you include. That's a deliberate tradeoff
+for the native feel — if you need hard script isolation instead, embed the
+routed page (`/widget/:token`) in your own `<iframe>` directly.
 
 This only works for a **MERCHANT**-type wallet with the widget feature
 turned on for its wallet type (an admin toggles this on the Wallet Types
 page — see `allowWidget` / `widgetRequiresOtp`). `widgetRequiresOtp`
-controls how the customer is identified inside the iframe:
+controls how the customer is identified inside the widget:
 
 - **On (default):** the customer types their phone number (or confirms one
   you pre-supplied) and completes a live OTP challenge, same as the pay
@@ -154,8 +163,8 @@ Same `server-example.js` file as above adds one more route:
 ```
 
 That's it — the script finds the `div`, asks your proxy for a session, and
-embeds the widget iframe in its place, resizing itself automatically as the
-customer moves through phone/OTP/wallet-list steps.
+mounts the widget in its place. It's real DOM in your page, so it grows
+and shrinks with the content naturally — no resizing to wire up.
 
 Your wallet's own detail page in the Packeta admin panel has this exact
 snippet pre-filled with your `walletId`, ready to copy.
@@ -184,7 +193,7 @@ snippet pre-filled with your `walletId`, ready to copy.
 
 ### Returning from a deposit or installment payment
 
-ZarinPal can't render inside the widget's iframe, so clicking Deposit or
+ZarinPal can't render inline, so clicking Deposit or
 Pay on an installment breaks out to a full-page redirect for that one step,
 then lands back on a small Packeta result page. To send the customer back
 to *your* page automatically instead of leaving them there, add
@@ -206,10 +215,11 @@ the same way the rest of the deposit/payment redirect chain already works.
 
 ## Pay inline (no redirect)
 
-A third widget, **`pay-widget.js`** — an embeddable version of the pay
-button above. Same charge underneath (your server still calls the exact
-same `/api/packeta/charge` proxy from the Quickstart), but instead of
-redirecting your whole page to Packeta's hosted pay page, it shows the
+A third widget, **`pay-widget.js`** — a natively-mounted version of the pay
+button above (same Custom Element / Shadow DOM approach as `wallet-widget.js`
+— see the trust note above). Same charge underneath (your server still calls
+the exact same `/api/packeta/charge` proxy from the Quickstart), but instead
+of redirecting your whole page to Packeta's hosted pay page, it shows the
 phone/OTP/wallet/confirm steps inline and tells you when the purchase
 settles — nothing about your page navigates away, with one unavoidable
 exception (see below).
@@ -254,7 +264,22 @@ Or programmatically, with an `onComplete` callback:
 
 The one exception: if the customer pays from a CREDIT wallet whose balance
 falls short, covering the difference is a real card payment through
-ZarinPal — a genuine external gateway that refuses to render inside any
-iframe. That one click briefly leaves your page; the customer lands back
-wherever your Packeta wallet's own `callbackUrl` points once it completes
-(the same setting the full-page pay flow already uses).
+ZarinPal — a genuine external gateway that refuses to render inline. That
+one click briefly leaves your page; the customer lands back wherever your
+Packeta wallet's own `callbackUrl` points once it completes (the same
+setting the full-page pay flow already uses).
+
+## A note on `wallet-widget.js` and `pay-widget.js` as build artifacts
+
+Unlike `packeta.js` and `server-example.js` (genuinely hand-written,
+zero-dependency files you can read top to bottom), `wallet-widget.js` and
+`pay-widget.js` are compiled — built from Vue source in `ipg-frontend/`
+via `npm run build:widget` — because the UI they mount is the same real
+Vue app the rest of Packeta uses, not a small hand-rolled script. This
+doesn't change your integration at all: each file is a single,
+self-contained artifact (fonts included, base64-inlined) — you still just
+copy the one `.js` file onto your site and call `init()`, no build step
+on your end. If you want to customize the
+widget's own behavior, the source lives in `ipg-frontend/src/components/`
+and `ipg-frontend/src/widget-entries/`, not in the committed `.js` file
+itself.
