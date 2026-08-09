@@ -1,15 +1,26 @@
 services:
+    postgres:
+      image: postgres:14-alpine
+      restart: unless-stopped
+      environment:
+        POSTGRES_USER: hesamtmg
+        POSTGRES_PASSWORD: Tmg@2215309
+        POSTGRES_DB: postgres
+      ports:
+        - '5432:5432'
+      volumes:
+        - postgres_data:/var/lib/postgresql/data
 
-  mongo:
-    image: mongo:7
-    restart: unless-stopped
-    ports:
-      - '27017:27017'
-    volumes:
-      - mongo_data:/data/db
+    mongo:
+      image: mongo:7
+      restart: unless-stopped
+      ports:
+        - '27017:27017'
+      volumes:
+        - mongo_data:/data/db
 
  
 volumes:
   postgres_data:
   mongo_data:
-  ipg_postgres_data:
+
