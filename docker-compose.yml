@@ -1,26 +1,157 @@
+# Brings up the whole Packeta stack: two Postgres databases (Packeta's own
+# backend, and the standalone sandbox IPG it calls out to), Mongo (Packeta's
+# transaction-log store), and all four apps (backend, ipg-backend, frontend,
+# ipg-frontend). `docker compose up --build` is enough to get everything
+# running with no manual .env setup — every value below already matches the
+# various services' .env.example defaults for local/sandbox use.
+#
+# Two things worth knowing:
+#   1. FRONTEND_URL / IPG_FRONTEND_URL (on backend and ipg-backend) and the
+#      frontends' VITE_* build args all point at http://localhost:<port>,
+#      not an internal docker-network hostname — they're used to build URLs
+#      the *customer's browser* navigates to (redirects, widget mounts,
+#      etc.), not server-to-server calls, so they have to be reachable from
+#      the host machine the browser actually runs on.
+#   2. VITE_* values are baked into the frontend bundles at *build* time
+#      (Vite inlines import.meta.env.VITE_*), so changing them requires a
+#      rebuild (`docker compose up --build`), not just a container restart.
+#
+# Real secrets (JWT_SECRET, a real ZARINPAL_MERCHANT_ID, etc.) can be
+# supplied via a .env file at the repo root — see the ${VAR:-default}
+# fallbacks below — without editing this file.
+
 services:
-    postgres:
-      image: postgres:14-alpine
-      restart: unless-stopped
-      environment:
-        POSTGRES_USER: hesamtmg
-        POSTGRES_PASSWORD: Tmg@2215309
-        POSTGRES_DB: postgres
-      ports:
-        - '5432:5432'
-      volumes:
-        - postgres_data:/var/lib/postgresql/data
+  postgres:
+    image: postgres:14-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hesamtmg
+      POSTGRES_PASSWORD: Tmg@2215309
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U packeta']
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
-    mongo:
-      image: mongo:7
-      restart: unless-stopped
-      ports:
-        - '27017:27017'
-      volumes:
-        - mongo_data:/data/db
+  ipg-postgres:
+    image: postgres:14-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hesamtmg
+      POSTGRES_PASSWORD: Tmg@2215309
+      POSTGRES_DB: packeta_ipg
+    volumes:
+      - ipg_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ipg']
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
- 
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', 'db.runCommand("ping")']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # The standalone sandbox IPG — a real external-looking payment gateway
+  # backend's PURCHASE/installment-repayment flow calls out to.
+  ipg-backend:
+    build:
+      context: ./ipg-backend
+    restart: unless-stopped
+    depends_on:
+      ipg-postgres:
+        condition: service_healthy
+    environment:
+      PORT: 4000
+      DB_HOST: ipg-postgres
+      DB_PORT: 5432
+      DB_USERNAME: hesamtmg
+      DB_PASSWORD: Tmg@2215309
+      DB_DATABASE: packeta_ipg
+      IPG_API_KEY: ${IPG_API_KEY:-sandbox-ipg-key}
+      # Browser-facing (see header note) — where a merchant's charge
+      # redirects the customer to pay.
+      IPG_FRONTEND_URL: http://localhost:5174
+    ports:
+      - '4000:4000'
+
+  # Packeta's own backend.
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    environment:
+      PORT: 3000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: hesamtmg
+      DB_PASSWORD: Tmg@2215309
+      DB_DATABASE: postgres
+      MONGO_URI: mongodb://mongo:27017/packeta_logs
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1h}
+      # Server-to-server (purchase initiate/verify) — internal docker
+      # network hostname is correct here, unlike the two below.
+      IPG_BASE_URL: http://ipg-backend:4000
+      IPG_API_KEY: ${IPG_API_KEY:-sandbox-ipg-key}
+      # ZarinPal's public sandbox — settles no real money, accepts any
+      # well-formed merchant id. Point both at production to go live.
+      ZARINPAL_BASE_URL: ${ZARINPAL_BASE_URL:-https://sandbox.zarinpal.com}
+      ZARINPAL_MERCHANT_ID: ${ZARINPAL_MERCHANT_ID:-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}
+      # Browser-facing (see header note).
+      FRONTEND_URL: http://localhost:5173
+      IPG_FRONTEND_URL: http://localhost:5174
+    ports:
+      - '3000:3000'
+    volumes:
+      - backend_uploads:/app/uploads
+
+  # Packeta's own customer/admin web app.
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Browser-facing (see header note) — baked in at build time.
+        VITE_API_URL: http://localhost:3000
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - '5173:5173'
+
+  # The sandbox IPG's own pay page + Packeta's embeddable widgets.
+  ipg-frontend:
+    build:
+      context: ./ipg-frontend
+      args:
+        VITE_API_URL: http://localhost:4000
+        VITE_PACKETA_API_URL: http://localhost:3000
+    restart: unless-stopped
+    depends_on:
+      - ipg-backend
+      - backend
+    ports:
+      - '5174:5174'
+
 volumes:
   postgres_data:
+  ipg_postgres_data:
   mongo_data:
-
+  backend_uploads:
