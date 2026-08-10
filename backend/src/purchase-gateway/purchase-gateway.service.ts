@@ -5,6 +5,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { I18nService } from 'nestjs-i18n';
 import { TransactionsService } from '../transactions/transactions.service';
 import { UsersService } from '../users/users.service';
 import { WalletsService } from '../wallets/wallets.service';
@@ -31,6 +32,7 @@ export class PurchaseGatewayService {
     private readonly walletsService: WalletsService,
     private readonly otpService: OtpService,
     private readonly captchaService: CaptchaService,
+    private readonly i18n: I18nService,
   ) {}
 
   // Also backs the persistent merchant-info + countdown header the pay page
@@ -55,7 +57,9 @@ export class PurchaseGatewayService {
     const transaction =
       await this.transactionsService.findByIpgAuthority(authority);
     if (!transaction) {
-      throw new NotFoundException('Payment not found');
+      throw new NotFoundException(
+        this.i18n.t('purchaseGateway.PAYMENT_NOT_FOUND'),
+      );
     }
 
     const toWallet = await this.walletsService.getByIdUnscoped(
@@ -111,14 +115,12 @@ export class PurchaseGatewayService {
     await this.getPendingCharge(authority);
 
     if (!this.captchaService.verify(captchaId, captchaAnswer)) {
-      throw new UnauthorizedException('Incorrect or expired captcha answer');
+      throw new UnauthorizedException(this.i18n.t('common.INVALID_CAPTCHA'));
     }
 
     const user = await this.usersService.findByPhoneNumber(phoneNumber);
     if (!user) {
-      throw new NotFoundException(
-        'No account is registered with that phone number',
-      );
+      throw new NotFoundException(this.i18n.t('common.NO_ACCOUNT_FOR_PHONE'));
     }
 
     const code = this.otpService.generateOtp(authority, user.id);
@@ -135,7 +137,7 @@ export class PurchaseGatewayService {
 
     const userId = this.otpService.verifyOtp(authority, code);
     if (!userId) {
-      throw new UnauthorizedException('Invalid or expired code');
+      throw new UnauthorizedException(this.i18n.t('common.INVALID_OTP'));
     }
 
     const toWallet = await this.walletsService.getByIdUnscoped(
@@ -212,7 +214,7 @@ export class PurchaseGatewayService {
       !wallet.repositoryWalletId
     ) {
       throw new BadRequestException(
-        'This wallet does not support a credit top-up',
+        this.i18n.t('purchaseGateway.TOPUP_NOT_SUPPORTED'),
       );
     }
 
@@ -221,7 +223,7 @@ export class PurchaseGatewayService {
     const chargeAmount = BigInt(charge.amount);
     if (chargeAmount <= availableCredit) {
       throw new BadRequestException(
-        'This wallet now has enough credit to cover the purchase — go back and continue normally',
+        this.i18n.t('purchaseGateway.TOPUP_NOT_NEEDED'),
       );
     }
 
@@ -246,7 +248,7 @@ export class PurchaseGatewayService {
     const userId = this.otpService.resolveSession(authority, sessionToken);
     if (!userId) {
       throw new UnauthorizedException(
-        'Your session has expired — request a new code',
+        this.i18n.t('purchaseGateway.SESSION_EXPIRED'),
       );
     }
 
@@ -262,7 +264,7 @@ export class PurchaseGatewayService {
       wallet.walletType.currencyId !== toWallet.walletType.currencyId
     ) {
       throw new BadRequestException(
-        'That wallet cannot be used for this purchase',
+        this.i18n.t('purchaseGateway.WALLET_NOT_USABLE'),
       );
     }
     // A wallet frozen by InstallmentsService's overdue sweep can't fund a
@@ -272,7 +274,7 @@ export class PurchaseGatewayService {
     // through that method.
     if (wallet.blockedAt) {
       throw new ForbiddenException(
-        'This wallet is blocked pending an overdue installment payment',
+        this.i18n.t('purchaseGateway.WALLET_BLOCKED'),
       );
     }
 
@@ -289,7 +291,7 @@ export class PurchaseGatewayService {
       )
     ) {
       throw new BadRequestException(
-        'This purchase is not allowed between these two wallets',
+        this.i18n.t('purchaseGateway.COUNTERPARTY_NOT_ALLOWED'),
       );
     }
     this.walletsService.assertWithinTransactionLimits(
@@ -305,7 +307,7 @@ export class PurchaseGatewayService {
       await this.transactionsService.findPendingChargeByAuthority(authority);
     if (!charge) {
       throw new NotFoundException(
-        'Payment not found, expired, or already resolved',
+        this.i18n.t('purchaseGateway.PAYMENT_NOT_FOUND_OR_RESOLVED'),
       );
     }
     return charge;

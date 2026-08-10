@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
+import { I18nService } from 'nestjs-i18n';
 import { DataSource, EntityManager, In, LessThan, Repository } from 'typeorm';
 import { Wallet } from '../wallets/entities/wallet.entity';
 import {
@@ -87,6 +88,7 @@ export class TransactionsService {
     private readonly railSettlementsService: RailSettlementsService,
     @InjectRepository(Transaction)
     private readonly transactionsRepository: Repository<Transaction>,
+    private readonly i18n: I18nService,
   ) {}
 
   // Step 1 of the two-phase, IPG-style deposit: creates a PENDING ledger row
@@ -111,11 +113,15 @@ export class TransactionsService {
       async (manager) => {
         const walletRef = await this.walletsService.getById(userId, walletId);
         if (walletRef.closedAt) {
-          throw new BadRequestException('This wallet is closed');
+          throw new BadRequestException(
+            this.i18n.t('transactions.WALLET_CLOSED'),
+          );
         }
         if (!walletRef.walletType.depositable) {
           throw new ForbiddenException(
-            `${walletRef.walletType.name} wallets do not accept deposits`,
+            this.i18n.t('transactions.NOT_DEPOSITABLE', {
+              args: { walletType: walletRef.walletType.name },
+            }),
           );
         }
         this.walletsService.assertWithinTransactionLimits(walletRef, amount);
@@ -184,17 +190,23 @@ export class TransactionsService {
       async (manager) => {
         const walletRef = await this.walletsService.getById(userId, walletId);
         if (walletRef.closedAt) {
-          throw new BadRequestException('This wallet is closed');
+          throw new BadRequestException(
+            this.i18n.t('transactions.WALLET_CLOSED'),
+          );
         }
         this.assertNotBlocked(walletRef);
         if (walletRef.walletType.supportsAutoWithdraw) {
           throw new ForbiddenException(
-            `${walletRef.walletType.name} wallets withdraw automatically on schedule — manual withdrawal is not available`,
+            this.i18n.t('transactions.AUTO_WITHDRAW_ONLY', {
+              args: { walletType: walletRef.walletType.name },
+            }),
           );
         }
         if (!walletRef.walletType.allowWithdraw) {
           throw new ForbiddenException(
-            `${walletRef.walletType.name} wallets do not support withdrawals`,
+            this.i18n.t('transactions.WITHDRAW_NOT_SUPPORTED', {
+              args: { walletType: walletRef.walletType.name },
+            }),
           );
         }
         this.walletsService.assertWithinTransactionLimits(walletRef, amount);
@@ -265,12 +277,16 @@ export class TransactionsService {
           fromWalletId,
         );
         if (fromWalletRef.closedAt) {
-          throw new BadRequestException('This wallet is closed');
+          throw new BadRequestException(
+            this.i18n.t('transactions.WALLET_CLOSED'),
+          );
         }
         this.assertNotBlocked(fromWalletRef);
         if (!fromWalletRef.walletType.allowP2pOut) {
           throw new ForbiddenException(
-            `${fromWalletRef.walletType.name} wallets cannot send transfers`,
+            this.i18n.t('transactions.TRANSFER_NOT_SUPPORTED', {
+              args: { walletType: fromWalletRef.walletType.name },
+            }),
           );
         }
 
@@ -279,10 +295,14 @@ export class TransactionsService {
           where: { email: toEmail },
         });
         if (!recipient) {
-          throw new NotFoundException('Recipient not found');
+          throw new NotFoundException(
+            this.i18n.t('transactions.RECIPIENT_NOT_FOUND'),
+          );
         }
         if (recipient.id === userId) {
-          throw new BadRequestException('Cannot transfer to your own wallet');
+          throw new BadRequestException(
+            this.i18n.t('transactions.CANNOT_TRANSFER_TO_SELF'),
+          );
         }
 
         const toWalletRef = await this.walletsService.findEligibleP2pInWallet(
@@ -292,7 +312,9 @@ export class TransactionsService {
         );
         if (!toWalletRef) {
           throw new NotFoundException(
-            `Recipient has no ${fromWalletRef.walletType.currency.code} wallet eligible to receive this transfer`,
+            this.i18n.t('transactions.RECIPIENT_NO_ELIGIBLE_WALLET', {
+              args: { currency: fromWalletRef.walletType.currency.code },
+            }),
           );
         }
         if (
@@ -304,7 +326,7 @@ export class TransactionsService {
           )
         ) {
           throw new ForbiddenException(
-            'This transfer is not allowed between these two wallets',
+            this.i18n.t('transactions.TRANSFER_NOT_ALLOWED'),
           );
         }
         this.walletsService.assertWithinTransactionLimits(
@@ -376,7 +398,9 @@ export class TransactionsService {
     idempotencyKey: string,
   ): Promise<MoneyResult> {
     if (amount === 0) {
-      throw new BadRequestException('amount must not be zero');
+      throw new BadRequestException(
+        this.i18n.t('transactions.AMOUNT_NOT_ZERO'),
+      );
     }
 
     return this.run(
@@ -387,7 +411,9 @@ export class TransactionsService {
       async (manager) => {
         const walletRef = await this.walletsService.getByIdUnscoped(walletId);
         if (walletRef.closedAt) {
-          throw new BadRequestException('This wallet is closed');
+          throw new BadRequestException(
+            this.i18n.t('transactions.WALLET_CLOSED'),
+          );
         }
         const floor = walletRef.walletType.allowNegativeBalance
           ? -BigInt(walletRef.walletType.creditLimit ?? '0')
@@ -448,12 +474,16 @@ export class TransactionsService {
           fromWalletId,
         );
         if (fromWalletRef.closedAt) {
-          throw new BadRequestException('This wallet is closed');
+          throw new BadRequestException(
+            this.i18n.t('transactions.WALLET_CLOSED'),
+          );
         }
         this.assertNotBlocked(fromWalletRef);
         if (!fromWalletRef.walletType.allowPurchaseOut) {
           throw new ForbiddenException(
-            `${fromWalletRef.walletType.name} wallets cannot make purchases`,
+            this.i18n.t('transactions.PURCHASE_NOT_SUPPORTED', {
+              args: { walletType: fromWalletRef.walletType.name },
+            }),
           );
         }
 
@@ -464,10 +494,14 @@ export class TransactionsService {
           where: { email: toEmail },
         });
         if (!merchant) {
-          throw new NotFoundException('Merchant not found');
+          throw new NotFoundException(
+            this.i18n.t('transactions.MERCHANT_NOT_FOUND'),
+          );
         }
         if (merchant.id === userId) {
-          throw new BadRequestException('Cannot purchase from yourself');
+          throw new BadRequestException(
+            this.i18n.t('transactions.CANNOT_PURCHASE_FROM_SELF'),
+          );
         }
 
         const toWalletRef =
@@ -478,7 +512,9 @@ export class TransactionsService {
           );
         if (!toWalletRef) {
           throw new NotFoundException(
-            `Merchant has no ${fromWalletRef.walletType.currency.code} wallet eligible to receive purchases`,
+            this.i18n.t('transactions.MERCHANT_NO_ELIGIBLE_WALLET', {
+              args: { currency: fromWalletRef.walletType.currency.code },
+            }),
           );
         }
         if (
@@ -490,7 +526,7 @@ export class TransactionsService {
           )
         ) {
           throw new ForbiddenException(
-            'This purchase is not allowed between these two wallets',
+            this.i18n.t('transactions.PURCHASE_NOT_ALLOWED'),
           );
         }
         this.walletsService.assertWithinTransactionLimits(
@@ -590,12 +626,14 @@ export class TransactionsService {
           installmentId,
         );
         if (installment.status === InstallmentStatus.PAID) {
-          throw new ConflictException('This installment has already been paid');
+          throw new ConflictException(
+            this.i18n.t('transactions.INSTALLMENT_ALREADY_PAID'),
+          );
         }
         const creditWallet = installment.wallet;
         if (!creditWallet.repositoryWalletId) {
           throw new BadRequestException(
-            'This wallet has no linked repository to repay',
+            this.i18n.t('transactions.NO_LINKED_REPOSITORY_TO_REPAY'),
           );
         }
 
@@ -603,11 +641,13 @@ export class TransactionsService {
           creditWallet.repositoryWalletId,
         );
         if (repository.closedAt) {
-          throw new BadRequestException('This repository wallet is closed');
+          throw new BadRequestException(
+            this.i18n.t('transactions.REPOSITORY_CLOSED'),
+          );
         }
         if (!repository.walletType.depositable) {
           throw new BadRequestException(
-            'This repository does not accept installment repayments',
+            this.i18n.t('transactions.REPOSITORY_NOT_DEPOSITABLE'),
           );
         }
 
@@ -686,12 +726,12 @@ export class TransactionsService {
     const creditWallet = await this.walletsService.getByIdUnscoped(walletId);
     if (requireBlocked && !creditWallet.blockedAt) {
       throw new BadRequestException(
-        'This wallet is not currently blocked for overdue installments',
+        this.i18n.t('transactions.WALLET_NOT_BLOCKED'),
       );
     }
     if (!creditWallet.repositoryWalletId) {
       throw new BadRequestException(
-        'This wallet has no linked repository to repay',
+        this.i18n.t('transactions.NO_LINKED_REPOSITORY_TO_REPAY'),
       );
     }
     const repository = await this.walletsService.getByIdUnscoped(
@@ -701,7 +741,7 @@ export class TransactionsService {
       await this.installmentsService.getOutstandingForWallet(walletId);
     if (!outstanding.length) {
       throw new BadRequestException(
-        'This wallet has no outstanding installments to collect',
+        this.i18n.t('transactions.NO_OUTSTANDING_INSTALLMENTS'),
       );
     }
     const totalOwed =
@@ -1194,7 +1234,7 @@ export class TransactionsService {
           await this.walletsService.getByIdUnscoped(walletId);
         if (creditWalletTyped.walletType.code !== WalletTypeCode.CREDIT) {
           throw new BadRequestException(
-            'Only CREDIT wallets can be closed through offboarding',
+            this.i18n.t('transactions.ONLY_CREDIT_OFFBOARDING'),
           );
         }
         const creditWallet = await this.walletsService.lockById(
@@ -1202,10 +1242,14 @@ export class TransactionsService {
           walletId,
         );
         if (creditWallet.closedAt) {
-          throw new BadRequestException('This wallet is already closed');
+          throw new BadRequestException(
+            this.i18n.t('transactions.WALLET_ALREADY_CLOSED'),
+          );
         }
         if (!creditWallet.repositoryWalletId) {
-          throw new BadRequestException('This wallet has no linked repository');
+          throw new BadRequestException(
+            this.i18n.t('transactions.NO_LINKED_REPOSITORY'),
+          );
         }
         const outstanding =
           await this.installmentsService.getOutstandingForWallet(walletId);
@@ -1306,7 +1350,7 @@ export class TransactionsService {
             toWalletRef.closedAt
           ) {
             throw new NotFoundException(
-              'That wallet cannot receive purchases for this merchant',
+              this.i18n.t('transactions.WALLET_CANNOT_RECEIVE_FOR_MERCHANT'),
             );
           }
           currency = toWalletRef.walletType.currency;
@@ -1319,7 +1363,9 @@ export class TransactionsService {
           );
           if (!toWalletRef) {
             throw new NotFoundException(
-              `You have no ${currency.code} wallet eligible to receive purchases`,
+              this.i18n.t('transactions.NO_ELIGIBLE_WALLET_FOR_CURRENCY', {
+                args: { currency: currency.code },
+              }),
             );
           }
           // Merchant access controls only apply to the merchant's own
@@ -1443,7 +1489,7 @@ export class TransactionsService {
         !purchase.fromWalletId
       ) {
         throw new NotFoundException(
-          'Purchase not found, already resolved, or has no wallet attached yet',
+          this.i18n.t('transactions.PURCHASE_NOT_FOUND_UNRESOLVED'),
         );
       }
 
@@ -1535,7 +1581,9 @@ export class TransactionsService {
         })
         .getOne();
       if (!transaction) {
-        throw new NotFoundException('Transaction not found');
+        throw new NotFoundException(
+          this.i18n.t('transactions.TRANSACTION_NOT_FOUND'),
+        );
       }
 
       // A row with no fromWalletId is either genuinely walletless — a
@@ -1975,12 +2023,16 @@ export class TransactionsService {
           .andWhere('t.type = :type', { type: TransactionType.PURCHASE })
           .getOne();
         if (!original) {
-          throw new NotFoundException('Purchase not found');
+          throw new NotFoundException(
+            this.i18n.t('transactions.PURCHASE_NOT_FOUND'),
+          );
         }
         await this.assertOwnsEitherSide(userId, original);
 
         if (original.status === TransactionStatus.REVERSED) {
-          throw new ConflictException('This purchase was already reversed');
+          throw new ConflictException(
+            this.i18n.t('transactions.PURCHASE_ALREADY_REVERSED'),
+          );
         }
 
         if (original.status === TransactionStatus.PENDING) {
@@ -2158,7 +2210,7 @@ export class TransactionsService {
       .execute();
     if (!result.affected) {
       throw new NotFoundException(
-        'No pending purchase found with that id — it may already be resolved',
+        this.i18n.t('transactions.PENDING_PURCHASE_NOT_FOUND'),
       );
     }
   }
@@ -2356,7 +2408,7 @@ export class TransactionsService {
       const ip = requestContext?.ip;
       if (!ip || !wallet.allowedIps.includes(ip)) {
         throw new ForbiddenException(
-          'This request does not come from an allowed IP for this wallet',
+          this.i18n.t('transactions.IP_NOT_ALLOWED'),
         );
       }
     }
@@ -2367,7 +2419,7 @@ export class TransactionsService {
         const storeHost = new URL(wallet.storeSite).hostname;
         if (requestHost !== storeHost) {
           throw new ForbiddenException(
-            'This request does not originate from the wallet-registered store site',
+            this.i18n.t('transactions.STORE_SITE_MISMATCH'),
           );
         }
       } catch (error) {
@@ -2383,9 +2435,7 @@ export class TransactionsService {
   // being paid) is unaffected.
   private assertNotBlocked(wallet: { blockedAt: Date | null }): void {
     if (wallet.blockedAt) {
-      throw new ForbiddenException(
-        'This wallet is blocked pending an overdue installment payment',
-      );
+      throw new ForbiddenException(this.i18n.t('transactions.WALLET_BLOCKED'));
     }
   }
 
@@ -2441,7 +2491,9 @@ export class TransactionsService {
     ]);
     const owns = fromWallet?.userId === userId || toWallet?.userId === userId;
     if (!owns) {
-      throw new ForbiddenException('This transaction does not belong to you');
+      throw new ForbiddenException(
+        this.i18n.t('transactions.TRANSACTION_NOT_YOURS'),
+      );
     }
   }
 
@@ -2497,7 +2549,9 @@ export class TransactionsService {
       where: { id: transactionId },
     });
     if (!transaction) {
-      throw new NotFoundException('Transaction not found');
+      throw new NotFoundException(
+        this.i18n.t('transactions.TRANSACTION_NOT_FOUND'),
+      );
     }
 
     const [fromWallet, toWallet] = await Promise.all([
@@ -2512,7 +2566,9 @@ export class TransactionsService {
     const ownsFrom = fromWallet?.userId === userId;
     const ownsTo = toWallet?.userId === userId;
     if (!ownsFrom && !ownsTo) {
-      throw new ForbiddenException('This transaction does not belong to you');
+      throw new ForbiddenException(
+        this.i18n.t('transactions.TRANSACTION_NOT_YOURS'),
+      );
     }
 
     return {
@@ -2550,7 +2606,9 @@ export class TransactionsService {
       where: { id: transactionId },
     });
     if (!transaction) {
-      throw new NotFoundException('Transaction not found');
+      throw new NotFoundException(
+        this.i18n.t('transactions.TRANSACTION_NOT_FOUND'),
+      );
     }
 
     const [fromWallet, toWallet] = await Promise.all([
@@ -2623,7 +2681,9 @@ export class TransactionsService {
     work: (manager: EntityManager) => Promise<T>,
   ): Promise<T> {
     if (!idempotencyKey) {
-      throw new BadRequestException('Idempotency-Key header is required');
+      throw new BadRequestException(
+        this.i18n.t('transactions.IDEMPOTENCY_KEY_REQUIRED'),
+      );
     }
 
     try {

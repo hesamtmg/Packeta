@@ -1,11 +1,12 @@
 # Brings up the whole Packeta stack: two Postgres databases (Packeta's own
 # backend, and the standalone sandbox IPG it calls out to), Mongo (Packeta's
-# transaction-log store), and all four apps (backend, ipg-backend, frontend,
-# ipg-frontend). `docker compose up --build` is enough to get everything
-# running with no manual .env setup — every value below already matches the
-# various services' .env.example defaults for local/sandbox use.
+# transaction-log store) with a mongo-express web UI in front of it, and all
+# four apps (backend, ipg-backend, frontend, ipg-frontend). `docker compose
+# up --build` is enough to get everything running with no manual .env setup
+# — every value below already matches the various services' .env.example
+# defaults for local/sandbox use.
 #
-# Two things worth knowing:
+# Three things worth knowing:
 #   1. FRONTEND_URL / IPG_FRONTEND_URL (on backend and ipg-backend) and the
 #      frontends' VITE_* build args all point at http://localhost:<port>,
 #      not an internal docker-network hostname — they're used to build URLs
@@ -15,6 +16,10 @@
 #   2. VITE_* values are baked into the frontend bundles at *build* time
 #      (Vite inlines import.meta.env.VITE_*), so changing them requires a
 #      rebuild (`docker compose up --build`), not just a container restart.
+#   3. mongo-express (http://localhost:8081, basic auth admin/admin by
+#      default) is a browsing UI only — nothing writes through it. The
+#      backend is still the only thing that writes to `packeta_logs`
+#      (see MONGO_URI on the backend service below).
 #
 # Real secrets (JWT_SECRET, a real ZARINPAL_MERCHANT_ID, etc.) can be
 # supplied via a .env file at the repo root — see the ${VAR:-default}
@@ -63,6 +68,25 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # Web UI for browsing Mongo — mainly for the backend's `packeta_logs`
+  # database (see MONGO_URI below), the one place its Mongo-side data
+  # actually lives. Login is HTTP basic auth (defaults below); open
+  # http://localhost:8081, then pick "packeta_logs" from the database list
+  # once the backend has written at least one log entry.
+  mongo-express:
+    image: mongo-express:1-20-alpine3.19
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongo
+      ME_CONFIG_MONGODB_PORT: 27017
+      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USERNAME:-admin}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD:-admin}
+    ports:
+      - '8081:8081'
 
   # The standalone sandbox IPG — a real external-looking payment gateway
   # backend's PURCHASE/installment-repayment flow calls out to.

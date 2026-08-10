@@ -1,0 +1,10 @@
+{
+  "PAYMENT_NOT_FOUND": "Payment not found",
+  "PAYMENT_NOT_FOUND_OR_RESOLVED": "Payment not found, expired, or already resolved",
+  "TOPUP_NOT_SUPPORTED": "This wallet does not support a credit top-up",
+  "TOPUP_NOT_NEEDED": "This wallet now has enough credit to cover the purchase — go back and continue normally",
+  "SESSION_EXPIRED": "Your session has expired — request a new code",
+  "WALLET_NOT_USABLE": "That wallet cannot be used for this purchase",
+  "WALLET_BLOCKED": "This wallet is blocked pending an overdue installment payment",
+  "COUNTERPARTY_NOT_ALLOWED": "This purchase is not allowed between these two wallets"
+}
