@@ -9,6 +9,29 @@ import { TransactionsService } from './transactions.service';
 import { TransactionType } from './entities/transaction.entity';
 import { SettlementRailType } from '../rail-settlements/entities/rail-settlement.entity';
 
+// Minimal stand-in for nestjs-i18n's I18nService: resolves against the real
+// English translation files (so message-dependent assertions, e.g. the
+// "amount must not be zero" check below, still see real copy) without
+// pulling in the whole I18nModule/request-context machinery for a plain
+// `new TransactionsService(...)` unit test.
+const i18nNamespaces = ['common', 'transactions'];
+const i18nDict: Record<string, Record<string, string>> = {};
+for (const ns of i18nNamespaces) {
+  i18nDict[ns] = require(`../i18n/en/${ns}.json`);
+}
+const i18nStub = {
+  t: (key: string, options?: { args?: Record<string, string> }) => {
+    const [ns, prop] = key.split('.');
+    let text = i18nDict[ns]?.[prop] ?? key;
+    if (options?.args) {
+      for (const [argKey, value] of Object.entries(options.args)) {
+        text = text.replace(new RegExp(`\\{${argKey}\\}`, 'g'), value);
+      }
+    }
+    return text;
+  },
+};
+
 interface WalletTypeFixture {
   code?: string;
   name: string;
@@ -189,6 +212,7 @@ function buildService(options: {
     (installmentsService ?? {}) as any,
     railSettlementsService as any,
     {} as any,
+    i18nStub as any,
   );
 
   return {
@@ -1011,6 +1035,7 @@ function buildSweepService(options: {
     {} as any,
     railSettlementsService as any,
     {} as any,
+    i18nStub as any,
   );
 
   return {
@@ -2363,6 +2388,7 @@ describe('TransactionsService.getHistory', () => {
       {} as any,
       {} as any,
       transactionsRepository as any,
+      i18nStub as any,
     );
     return { service, transactionsRepository };
   }

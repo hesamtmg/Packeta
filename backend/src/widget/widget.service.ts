@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { I18nService } from 'nestjs-i18n';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
@@ -63,6 +64,7 @@ export class WidgetService {
     private readonly configService: ConfigService,
     private readonly transactionsService: TransactionsService,
     private readonly installmentsService: InstallmentsService,
+    private readonly i18n: I18nService,
   ) {}
 
   async createSession(
@@ -76,21 +78,17 @@ export class WidgetService {
       wallet.walletType.code !== WalletTypeCode.MERCHANT ||
       !wallet.walletType.allowWidget
     ) {
-      throw new BadRequestException(
-        'This wallet is not enabled for the wallet-viewing widget',
-      );
+      throw new BadRequestException(this.i18n.t('widget.NOT_ENABLED'));
     }
     if (wallet.allowedIps?.length) {
       const ip = requestContext?.ip;
       if (!ip || !wallet.allowedIps.includes(ip)) {
-        throw new ForbiddenException(
-          'This request does not come from an allowed IP for this wallet',
-        );
+        throw new ForbiddenException(this.i18n.t('widget.IP_NOT_ALLOWED'));
       }
     }
     if (!wallet.walletType.widgetRequiresOtp && !phoneNumber) {
       throw new BadRequestException(
-        'phoneNumber is required to create a non-OTP widget session',
+        this.i18n.t('widget.PHONE_REQUIRED_FOR_NON_OTP'),
       );
     }
 
@@ -136,24 +134,20 @@ export class WidgetService {
     const session = await this.getPendingOrAuthenticated(token);
     const wallet = await this.walletsService.getByIdUnscoped(session.walletId);
     if (!wallet.walletType.widgetRequiresOtp) {
-      throw new BadRequestException(
-        'This wallet does not use OTP — call the authenticate endpoint instead',
-      );
+      throw new BadRequestException(this.i18n.t('widget.REQUIRES_OTP'));
     }
 
     if (!this.captchaService.verify(captchaId, captchaAnswer)) {
-      throw new ForbiddenException('Incorrect or expired captcha answer');
+      throw new ForbiddenException(this.i18n.t('common.INVALID_CAPTCHA'));
     }
 
     const targetPhone = session.phoneNumber ?? phoneNumber;
     if (!targetPhone) {
-      throw new BadRequestException('phoneNumber is required');
+      throw new BadRequestException(this.i18n.t('common.PHONE_REQUIRED'));
     }
     const user = await this.usersService.findByPhoneNumber(targetPhone);
     if (!user) {
-      throw new NotFoundException(
-        'No account is registered with that phone number',
-      );
+      throw new NotFoundException(this.i18n.t('common.NO_ACCOUNT_FOR_PHONE'));
     }
 
     const code = this.otpService.generateOtp(token, user.id);
@@ -167,7 +161,7 @@ export class WidgetService {
     const session = await this.getPendingOrAuthenticated(token);
     const userId = this.otpService.verifyOtp(token, code);
     if (!userId) {
-      throw new ForbiddenException('Invalid or expired code');
+      throw new ForbiddenException(this.i18n.t('common.INVALID_OTP'));
     }
     session.userId = userId;
     session.status = WidgetSessionStatus.AUTHENTICATED;
@@ -183,18 +177,14 @@ export class WidgetService {
     const session = await this.getPendingOrAuthenticated(token);
     const wallet = await this.walletsService.getByIdUnscoped(session.walletId);
     if (wallet.walletType.widgetRequiresOtp) {
-      throw new BadRequestException('This wallet requires OTP verification');
+      throw new BadRequestException(this.i18n.t('widget.NOT_OTP_WALLET'));
     }
     if (!session.phoneNumber) {
-      throw new BadRequestException(
-        'This session was not created with a phone number to trust',
-      );
+      throw new BadRequestException(this.i18n.t('widget.NO_PHONE_TO_TRUST'));
     }
     const user = await this.usersService.findByPhoneNumber(session.phoneNumber);
     if (!user) {
-      throw new NotFoundException(
-        'No account is registered with that phone number',
-      );
+      throw new NotFoundException(this.i18n.t('common.NO_ACCOUNT_FOR_PHONE'));
     }
     session.userId = user.id;
     session.status = WidgetSessionStatus.AUTHENTICATED;
@@ -250,9 +240,7 @@ export class WidgetService {
     if (user?.panelRoleId) {
       const granted = user.panelRole?.permissions ?? [];
       if (!granted.includes('deposit')) {
-        throw new ForbiddenException(
-          'You do not have permission to perform this action',
-        );
+        throw new ForbiddenException(this.i18n.t('widget.PERMISSION_DENIED'));
       }
     }
     return this.transactionsService.deposit(
@@ -308,7 +296,9 @@ export class WidgetService {
       session.status !== WidgetSessionStatus.AUTHENTICATED ||
       !session.userId
     ) {
-      throw new ForbiddenException('This session has not authenticated yet');
+      throw new ForbiddenException(
+        this.i18n.t('widget.SESSION_NOT_AUTHENTICATED'),
+      );
     }
     return session;
   }
@@ -320,10 +310,10 @@ export class WidgetService {
       where: { token },
     });
     if (!session) {
-      throw new NotFoundException('Widget session not found');
+      throw new NotFoundException(this.i18n.t('widget.SESSION_NOT_FOUND'));
     }
     if (session.expiresAt < new Date()) {
-      throw new ForbiddenException('This widget session has expired');
+      throw new ForbiddenException(this.i18n.t('widget.SESSION_EXPIRED'));
     }
     return session;
   }
