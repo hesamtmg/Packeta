@@ -582,6 +582,7 @@ export default {
       canPurchaseLabel: 'امکان خرید (مشتری)',
       canReceivePurchaseLabel: 'امکان دریافت خرید (فروشنده)',
       depositableLabel: 'امکان واریز',
+      isStarterTypeLabel: 'ایجاد خودکار برای هر ثبت‌نام جدید (کیف پول پیش‌فرض)',
       hasVirtualBalanceLabel: 'دارای موجودی مجازی (تنظیم دستی در زمان ایجاد)',
       hiddenFromCustomerLabel: 'پنهان از فهرست کیف‌پول‌ها/تراکنش‌های مشتری (پنل مدیریت تحت تأثیر قرار نمی‌گیرد)',
       allowWidgetLabel: 'فعال‌سازی ویجت نمایش کیف‌پول (فقط کیف‌پول‌های MERCHANT)',
