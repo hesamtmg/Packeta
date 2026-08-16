@@ -61,6 +61,12 @@ export class UpdateWalletTypeDto {
   @IsBoolean()
   depositable?: boolean;
 
+  // Whether a new self-service signup automatically gets a wallet of this
+  // type (see WalletType.isStarterType).
+  @IsOptional()
+  @IsBoolean()
+  isStarterType?: boolean;
+
   // Whether wallets of this type may carry a manually-set virtual balance at
   // creation (see WalletType.hasVirtualBalance).
   @IsOptional()

@@ -582,6 +582,7 @@ export default {
       canPurchaseLabel: 'Can make purchases (customer)',
       canReceivePurchaseLabel: 'Can receive purchases (merchant)',
       depositableLabel: 'Accepts deposits',
+      isStarterTypeLabel: 'Create automatically for every new signup (starter wallet)',
       hasVirtualBalanceLabel: 'Has a virtual balance (set manually at creation)',
       hiddenFromCustomerLabel: 'Hide from customer wallets/transactions lists (admin panel unaffected)',
       allowWidgetLabel: 'Allow wallet-viewing widget (MERCHANT wallets only)',

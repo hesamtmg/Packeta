@@ -127,6 +127,7 @@ export class WalletTypesService {
       allowPurchaseOut: dto.allowPurchaseOut ?? false,
       allowPurchaseIn: dto.allowPurchaseIn ?? false,
       depositable: dto.depositable ?? true,
+      isStarterType: dto.isStarterType ?? false,
       hasVirtualBalance: dto.hasVirtualBalance ?? false,
       hiddenFromCustomer: dto.hiddenFromCustomer ?? false,
       allowWidget: dto.allowWidget ?? false,
@@ -241,6 +242,9 @@ export class WalletTypesService {
     }
     if (dto.depositable !== undefined) {
       type.depositable = dto.depositable;
+    }
+    if (dto.isStarterType !== undefined) {
+      type.isStarterType = dto.isStarterType;
     }
     if (dto.hasVirtualBalance !== undefined) {
       type.hasVirtualBalance = dto.hasVirtualBalance;
