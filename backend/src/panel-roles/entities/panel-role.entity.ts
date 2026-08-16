@@ -24,6 +24,13 @@ export class PanelRole {
   @Column({ type: 'simple-array' })
   permissions: string[];
 
+  // At most one role may have this set — enforced in PanelRolesService, not
+  // at the DB level (same reasoning as Currency.isDefault). The role marked
+  // here is auto-assigned as the panelRoleId of every new self-service
+  // signup (see PanelRolesService.findDefaultForSignup).
+  @Column({ type: 'boolean', default: false })
+  isDefaultForSignup: boolean;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

@@ -28,11 +28,28 @@ export class PanelRolesService {
     return role;
   }
 
+  // The role auto-assigned as panelRoleId for every new self-service signup
+  // (see AuthService.signup/verifyPhoneOtp and BatchImportService). At most
+  // one row can have isDefaultForSignup true at a time, so this is either
+  // one row or none.
+  findDefaultForSignup(): Promise<PanelRole | null> {
+    return this.panelRolesRepository.findOne({
+      where: { isDefaultForSignup: true },
+    });
+  }
+
   async create(dto: {
     name: string;
     permissions: string[];
+    isDefaultForSignup?: boolean;
   }): Promise<PanelRole> {
     try {
+      if (dto.isDefaultForSignup) {
+        await this.panelRolesRepository.update(
+          { isDefaultForSignup: true },
+          { isDefaultForSignup: false },
+        );
+      }
       return await this.panelRolesRepository.save(
         this.panelRolesRepository.create(dto),
       );
@@ -46,13 +63,26 @@ export class PanelRolesService {
 
   async update(
     id: string,
-    updates: { name?: string; permissions?: string[] },
+    updates: {
+      name?: string;
+      permissions?: string[];
+      isDefaultForSignup?: boolean;
+    },
   ): Promise<PanelRole> {
     const role = await this.findById(id);
     if (updates.name !== undefined) role.name = updates.name;
     if (updates.permissions !== undefined)
       role.permissions = updates.permissions;
+    if (updates.isDefaultForSignup !== undefined) {
+      role.isDefaultForSignup = updates.isDefaultForSignup;
+    }
     try {
+      if (role.isDefaultForSignup) {
+        await this.panelRolesRepository.update(
+          { isDefaultForSignup: true },
+          { isDefaultForSignup: false },
+        );
+      }
       return await this.panelRolesRepository.save(role);
     } catch (error) {
       if ((error as { code?: string }).code === '23505') {

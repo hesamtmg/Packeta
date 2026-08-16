@@ -1,6 +1,7 @@
 import {
   ArrayUnique,
   IsArray,
+  IsBoolean,
   IsIn,
   IsOptional,
   IsString,
@@ -21,4 +22,8 @@ export class UpdatePanelRoleDto {
   @ArrayUnique()
   @IsIn(PANEL_ROLE_PERMISSIONS, { each: true })
   permissions?: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  isDefaultForSignup?: boolean;
 }

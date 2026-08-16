@@ -6,6 +6,7 @@ import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
 import { WalletsService } from '../wallets/wallets.service';
 import { WalletTypesService } from '../wallet-types/wallet-types.service';
+import { PanelRolesService } from '../panel-roles/panel-roles.service';
 import {
   normalizePhoneNumber,
   PHONE_NUMBER_REGEX,
@@ -37,6 +38,7 @@ export class BatchImportService {
     private readonly usersService: UsersService,
     private readonly walletsService: WalletsService,
     private readonly walletTypesService: WalletTypesService,
+    private readonly panelRolesService: PanelRolesService,
   ) {}
 
   // Columns: email, password, phoneNumber (optional).
@@ -44,6 +46,7 @@ export class BatchImportService {
     const rows = await parseXlsxRows(buffer);
     const errors: BatchRowError[] = [];
     let created = 0;
+    const defaultRole = await this.panelRolesService.findDefaultForSignup();
 
     for (const [index, row] of rows.entries()) {
       const rowNumber = index + 2; // header is row 1
@@ -93,7 +96,12 @@ export class BatchImportService {
         const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
         await this.dataSource.transaction(async (manager) => {
           const savedUser = await manager.save(
-            manager.create(User, { email, passwordHash, phoneNumber }),
+            manager.create(User, {
+              email,
+              passwordHash,
+              phoneNumber,
+              panelRoleId: defaultRole?.id ?? null,
+            }),
           );
           await this.walletsService.createDefaultWalletsForUser(
             manager,

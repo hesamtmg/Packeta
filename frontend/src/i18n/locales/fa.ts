@@ -563,6 +563,8 @@ export default {
       roleCreateFailed: 'ایجاد نقش ناموفق بود',
       roleSectionsLabel: 'بخش‌های پنل مدیریت',
       roleCustomerActionsLabel: 'اقدامات داشبورد مشتری',
+      roleDefaultForSignup: 'نقش پیش‌فرض برای ثبت‌نام‌های جدید',
+      roleDefaultForSignupHint: 'هر مشتری جدیدی که ثبت‌نام می‌کند به‌طور خودکار این نقش را دریافت می‌کند. فقط یک نقش می‌تواند پیش‌فرض باشد — انتخاب آن در اینجا آن را از هر نقش دیگری حذف می‌کند.',
       assignHeading: 'نقش پنل',
       assignSave: 'ذخیره',
       assignSaved: 'نقش اختصاص یافت.',
