@@ -1,7 +1,9 @@
 import {
   ArrayUnique,
   IsArray,
+  IsBoolean,
   IsIn,
+  IsOptional,
   IsString,
   MaxLength,
   MinLength,
@@ -18,4 +20,8 @@ export class CreatePanelRoleDto {
   @ArrayUnique()
   @IsIn(PANEL_ROLE_PERMISSIONS, { each: true })
   permissions: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  isDefaultForSignup?: boolean;
 }

@@ -14,6 +14,7 @@ import { WalletsService } from '../wallets/wallets.service';
 import { LoggingService } from '../logging/logging.service';
 import { AuthOtpService } from './auth-otp.service';
 import { CaptchaService } from '../purchase-gateway/captcha.service';
+import { PanelRolesService } from '../panel-roles/panel-roles.service';
 import { syntheticEmailForPhone } from '../common/synthetic-email';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
@@ -30,6 +31,7 @@ export class AuthService {
     private readonly loggingService: LoggingService,
     private readonly authOtpService: AuthOtpService,
     private readonly captchaService: CaptchaService,
+    private readonly panelRolesService: PanelRolesService,
     private readonly i18n: I18nService,
   ) {}
 
@@ -46,11 +48,13 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(dto.password, SALT_ROUNDS);
+    const defaultRole = await this.panelRolesService.findDefaultForSignup();
 
     const user = await this.dataSource.transaction(async (manager) => {
       const created = manager.create(User, {
         email: dto.email,
         passwordHash,
+        panelRoleId: defaultRole?.id ?? null,
       });
       const savedUser = await manager.save(created);
       await this.walletsService.createDefaultWalletsForUser(
@@ -135,11 +139,13 @@ export class AuthService {
 
     if (!user) {
       const passwordHash = await bcrypt.hash(randomUUID(), SALT_ROUNDS);
+      const defaultRole = await this.panelRolesService.findDefaultForSignup();
       user = await this.dataSource.transaction(async (manager) => {
         const created = manager.create(User, {
           email: syntheticEmailForPhone(phoneNumber),
           passwordHash,
           phoneNumber,
+          panelRoleId: defaultRole?.id ?? null,
         });
         const savedUser = await manager.save(created);
         await this.walletsService.createDefaultWalletsForUser(

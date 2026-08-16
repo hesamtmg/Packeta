@@ -86,9 +86,11 @@ const roleFormError = ref('');
 const roleFormBusy = ref(false);
 const newRoleName = ref('');
 const newRolePermissions = ref<string[]>([]);
+const newRoleIsDefaultForSignup = ref(false);
 const editingRoleId = ref<string | null>(null);
 const editRoleName = ref('');
 const editRolePermissions = ref<string[]>([]);
+const editRoleIsDefaultForSignup = ref(false);
 
 async function loadRoles() {
   try {
@@ -109,10 +111,15 @@ async function createRole() {
   try {
     await apiRequest('/admin/roles', {
       method: 'POST',
-      body: { name: newRoleName.value.trim(), permissions: newRolePermissions.value },
+      body: {
+        name: newRoleName.value.trim(),
+        permissions: newRolePermissions.value,
+        isDefaultForSignup: newRoleIsDefaultForSignup.value,
+      },
     });
     newRoleName.value = '';
     newRolePermissions.value = [];
+    newRoleIsDefaultForSignup.value = false;
     await loadRoles();
   } catch (err) {
     roleFormError.value = err instanceof ApiError ? err.message : t('admin.admins.roleCreateFailed');
@@ -125,6 +132,7 @@ function startEditRole(role: PanelRole) {
   editingRoleId.value = role.id;
   editRoleName.value = role.name;
   editRolePermissions.value = [...role.permissions];
+  editRoleIsDefaultForSignup.value = role.isDefaultForSignup;
 }
 
 function cancelEditRole() {
@@ -137,7 +145,11 @@ async function saveRole(role: PanelRole) {
   try {
     await apiRequest(`/admin/roles/${role.id}`, {
       method: 'PATCH',
-      body: { name: editRoleName.value.trim(), permissions: editRolePermissions.value },
+      body: {
+        name: editRoleName.value.trim(),
+        permissions: editRolePermissions.value,
+        isDefaultForSignup: editRoleIsDefaultForSignup.value,
+      },
     });
     editingRoleId.value = null;
     await Promise.all([loadRoles(), load()]);
@@ -419,6 +431,11 @@ loadRoles();
                 {{ t(`customerActions.${action}`) }}
               </label>
             </div>
+            <label class="permission-checkbox default-signup-checkbox">
+              <input type="checkbox" v-model="editRoleIsDefaultForSignup" />
+              {{ t('admin.admins.roleDefaultForSignup') }}
+            </label>
+            <p class="hint">{{ t('admin.admins.roleDefaultForSignupHint') }}</p>
             <div class="role-card-actions">
               <button class="admin-btn admin-btn-primary" :disabled="roleFormBusy" @click="saveRole(role)">
                 {{ t('admin.admins.roleSave') }}
@@ -427,7 +444,10 @@ loadRoles();
             </div>
           </template>
           <template v-else>
-            <span class="role-name">{{ role.name }}</span>
+            <span class="role-name">
+              {{ role.name }}
+              <span v-if="role.isDefaultForSignup" class="admin-badge admin-badge-accent">{{ t('admin.admins.roleDefaultForSignup') }}</span>
+            </span>
             <div class="badges">
               <span v-for="section in role.permissions" :key="section" class="admin-badge">{{ permissionLabel(section) }}</span>
               <span v-if="!role.permissions.length" class="hint">{{ t('admin.admins.roleNoSections') }}</span>
@@ -478,6 +498,11 @@ loadRoles();
             {{ t(`customerActions.${action}`) }}
           </label>
         </div>
+        <label class="permission-checkbox default-signup-checkbox">
+          <input type="checkbox" v-model="newRoleIsDefaultForSignup" />
+          {{ t('admin.admins.roleDefaultForSignup') }}
+        </label>
+        <p class="hint">{{ t('admin.admins.roleDefaultForSignupHint') }}</p>
         <button type="submit" class="admin-btn admin-btn-primary" :disabled="roleFormBusy || !newRoleName.trim()">
           {{ t('admin.admins.roleCreate') }}
         </button>
@@ -732,6 +757,12 @@ h4 {
 }
 .role-name {
   font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.default-signup-checkbox {
+  margin-top: 4px;
 }
 .role-card-actions {
   display: flex;

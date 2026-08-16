@@ -9,10 +9,16 @@ function buildService(roles: PanelRole[] = []) {
     find: jest.fn(async () =>
       [...store].sort((a, b) => a.name.localeCompare(b.name)),
     ),
-    findOne: jest.fn(
-      async ({ where: { id } }: { where: { id: string } }) =>
-        store.find((r) => r.id === id) ?? null,
-    ),
+    findOne: jest.fn(async ({ where }: { where: Partial<PanelRole> }) => {
+      const match = store.find((r) =>
+        Object.entries(where).every(
+          ([key, value]) => (r as any)[key] === value,
+        ),
+      );
+      // Clone, like a real repository fetch — mutating the returned entity
+      // must not silently mutate the store until save() is called.
+      return match ? { ...match } : null;
+    }),
     create: jest.fn(
       (dto: Partial<PanelRole>) => ({ id: 'new-id', ...dto }) as PanelRole,
     ),
@@ -25,6 +31,19 @@ function buildService(roles: PanelRole[] = []) {
       else store.push(role);
       return role;
     }),
+    update: jest.fn(
+      async (
+        criteria: Partial<PanelRole>,
+        partial: Partial<PanelRole>,
+      ) => {
+        for (const role of store) {
+          const matches = Object.entries(criteria).every(
+            ([key, value]) => (role as any)[key] === value,
+          );
+          if (matches) Object.assign(role, partial);
+        }
+      },
+    ),
     delete: jest.fn(async (id: string) => {
       const index = store.findIndex((r) => r.id === id);
       if (index >= 0) store.splice(index, 1);
@@ -86,6 +105,64 @@ describe('PanelRolesService.update', () => {
     await expect(
       service.update('missing', { name: 'X' }),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('PanelRolesService default-for-signup enforcement', () => {
+  it('clears isDefaultForSignup on other roles when a new role is created as default', async () => {
+    const existingDefault = {
+      id: 'r1',
+      name: 'Old Default',
+      permissions: [],
+      isDefaultForSignup: true,
+    } as unknown as PanelRole;
+    const { service, store } = buildService([existingDefault]);
+
+    const created = await service.create({
+      name: 'New Default',
+      permissions: [],
+      isDefaultForSignup: true,
+    });
+
+    expect(created.isDefaultForSignup).toBe(true);
+    expect(store.find((r) => r.id === 'r1')!.isDefaultForSignup).toBe(false);
+  });
+
+  it('clears isDefaultForSignup on other roles when an existing role is updated to be default', async () => {
+    const existingDefault = {
+      id: 'r1',
+      name: 'Old Default',
+      permissions: [],
+      isDefaultForSignup: true,
+    } as unknown as PanelRole;
+    const other = {
+      id: 'r2',
+      name: 'Other',
+      permissions: [],
+      isDefaultForSignup: false,
+    } as unknown as PanelRole;
+    const { service, store } = buildService([existingDefault, other]);
+
+    const updated = await service.update('r2', { isDefaultForSignup: true });
+
+    expect(updated.isDefaultForSignup).toBe(true);
+    expect(store.find((r) => r.id === 'r1')!.isDefaultForSignup).toBe(false);
+  });
+
+  it('findDefaultForSignup returns the role marked default, or null', async () => {
+    const { service: emptyService } = buildService();
+    await expect(emptyService.findDefaultForSignup()).resolves.toBeNull();
+
+    const existingDefault = {
+      id: 'r1',
+      name: 'Default Role',
+      permissions: [],
+      isDefaultForSignup: true,
+    } as unknown as PanelRole;
+    const { service } = buildService([existingDefault]);
+
+    const found = await service.findDefaultForSignup();
+    expect(found?.id).toBe('r1');
   });
 });
 

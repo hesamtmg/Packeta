@@ -563,6 +563,8 @@ export default {
       roleCreateFailed: 'Failed to create role',
       roleSectionsLabel: 'Admin panel sections',
       roleCustomerActionsLabel: 'Customer dashboard actions',
+      roleDefaultForSignup: 'Default role for new signups',
+      roleDefaultForSignupHint: 'Every new customer who signs up gets this role automatically. Only one role can be the default — picking it here unsets it on any other role.',
       assignHeading: 'Panel role',
       assignSave: 'Save',
       assignSaved: 'Role assigned.',

@@ -10,12 +10,14 @@ import { UsersModule } from '../users/users.module';
 import { WalletsModule } from '../wallets/wallets.module';
 import { LoggingModule } from '../logging/logging.module';
 import { CaptchaService } from '../purchase-gateway/captcha.service';
+import { PanelRolesModule } from '../panel-roles/panel-roles.module';
 
 @Module({
   imports: [
     UsersModule,
     WalletsModule,
     LoggingModule,
+    PanelRolesModule,
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],

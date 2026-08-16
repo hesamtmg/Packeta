@@ -46,6 +46,7 @@ export interface PanelRole {
   id: string;
   name: string;
   permissions: string[];
+  isDefaultForSignup: boolean;
 }
 
 export interface AdminUser {
