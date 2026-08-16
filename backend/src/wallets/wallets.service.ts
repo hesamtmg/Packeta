@@ -594,18 +594,18 @@ export class WalletsService {
       .getMany();
   }
 
-  // Gives every new user one wallet of each type denominated in the default
-  // currency (USD) as a starting set; they can create additional wallets —
-  // in any currency the admin has made available — afterwards. Adding a new
-  // currency's wallet types therefore never changes what existing or new
-  // users get by default.
+  // Gives every new user one wallet of each type an admin has marked
+  // isStarterType, in whatever currency that type is denominated in — the
+  // checkbox alone decides membership, not a hidden currency gate (there is
+  // no admin-facing "default currency" control, so coupling to one would be
+  // invisible and surprising). They can create additional wallets in any
+  // other currency the admin has made available afterwards.
   async createDefaultWalletsForUser(
     manager: EntityManager,
     userId: string,
   ): Promise<Wallet[]> {
     const types = await manager.find(WalletType, {
-      relations: { currency: true },
-      where: { currency: { isDefault: true }, isStarterType: true },
+      where: { isStarterType: true },
     });
     const wallets = types.map((type) =>
       manager.create(Wallet, { userId, walletTypeId: type.id, balance: '0' }),
