@@ -68,6 +68,15 @@ export class CreateWalletTypeDto {
   @IsBoolean()
   depositable?: boolean;
 
+  // Whether a new self-service signup automatically gets a wallet of this
+  // type (see WalletType.isStarterType). Multiple types in the same
+  // currency can all be starter types at once — every new customer gets one
+  // wallet per starter type in the default currency; none checked means no
+  // wallet is auto-created at signup at all.
+  @IsOptional()
+  @IsBoolean()
+  isStarterType?: boolean;
+
   // Whether wallets of this type may carry a manually-set virtual balance at
   // creation (see WalletType.hasVirtualBalance).
   @IsOptional()

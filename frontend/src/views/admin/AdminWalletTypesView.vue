@@ -24,6 +24,10 @@ interface WalletType {
   allowPurchaseOut: boolean;
   allowPurchaseIn: boolean;
   depositable: boolean;
+  // Whether a new self-service signup automatically gets a wallet of this
+  // type. Multiple starter types can be checked at once; none checked means
+  // no wallet is auto-created at signup.
+  isStarterType: boolean;
   // Whether wallets of this type may carry a manually-set virtual balance at
   // creation (e.g. a REPOSITORY wallet's funding pool).
   hasVirtualBalance: boolean;
@@ -126,6 +130,7 @@ const newType = reactive({
   allowPurchaseOut: false,
   allowPurchaseIn: false,
   depositable: true,
+  isStarterType: false,
   hasVirtualBalance: false,
   hiddenFromCustomer: false,
   allowWidget: false,
@@ -226,6 +231,7 @@ async function save(type: WalletType) {
         allowPurchaseOut: type.allowPurchaseOut,
         allowPurchaseIn: type.allowPurchaseIn,
         depositable: type.depositable,
+        isStarterType: type.isStarterType,
         hasVirtualBalance: type.hasVirtualBalance,
         hiddenFromCustomer: type.hiddenFromCustomer,
         allowWidget: type.allowWidget,
@@ -304,6 +310,7 @@ async function createType() {
         allowPurchaseOut: newType.allowPurchaseOut,
         allowPurchaseIn: newType.allowPurchaseIn,
         depositable: newType.depositable,
+        isStarterType: newType.isStarterType,
         hasVirtualBalance: newType.hasVirtualBalance,
         hiddenFromCustomer: newType.hiddenFromCustomer,
         allowWidget: newType.allowWidget,
@@ -363,6 +370,7 @@ async function createType() {
     newType.allowPurchaseOut = false;
     newType.allowPurchaseIn = false;
     newType.depositable = true;
+    newType.isStarterType = false;
     newType.hasVirtualBalance = false;
     newType.hiddenFromCustomer = false;
     newType.allowWidget = false;
@@ -430,6 +438,7 @@ loadTypes();
           <label class="checkbox-label"><input v-model="wt.allowPurchaseOut" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.canPurchaseLabel') }}</label>
           <label class="checkbox-label"><input v-model="wt.allowPurchaseIn" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.canReceivePurchaseLabel') }}</label>
           <label class="checkbox-label"><input v-model="wt.depositable" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.depositableLabel') }}</label>
+          <label class="checkbox-label"><input v-model="wt.isStarterType" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.isStarterTypeLabel') }}</label>
           <label class="checkbox-label"><input v-model="wt.hasVirtualBalance" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.hasVirtualBalanceLabel') }}</label>
           <label class="checkbox-label"><input v-model="wt.hiddenFromCustomer" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.hiddenFromCustomerLabel') }}</label>
           <label class="checkbox-label"><input v-model="wt.allowWidget" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.allowWidgetLabel') }}</label>
@@ -546,6 +555,7 @@ loadTypes();
       <label class="checkbox-label"><input v-model="newType.allowPurchaseOut" type="checkbox" /> {{ t('admin.walletTypes.canPurchaseLabel') }}</label>
       <label class="checkbox-label"><input v-model="newType.allowPurchaseIn" type="checkbox" /> {{ t('admin.walletTypes.canReceivePurchaseLabel') }}</label>
       <label class="checkbox-label"><input v-model="newType.depositable" type="checkbox" /> {{ t('admin.walletTypes.depositableLabel') }}</label>
+      <label class="checkbox-label"><input v-model="newType.isStarterType" type="checkbox" /> {{ t('admin.walletTypes.isStarterTypeLabel') }}</label>
       <label class="checkbox-label"><input v-model="newType.hasVirtualBalance" type="checkbox" /> {{ t('admin.walletTypes.hasVirtualBalanceLabel') }}</label>
       <label class="checkbox-label"><input v-model="newType.hiddenFromCustomer" type="checkbox" /> {{ t('admin.walletTypes.hiddenFromCustomerLabel') }}</label>
       <label class="checkbox-label"><input v-model="newType.allowWidget" type="checkbox" /> {{ t('admin.walletTypes.allowWidgetLabel') }}</label>
