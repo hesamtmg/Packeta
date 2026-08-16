@@ -52,10 +52,20 @@ import { UpdatePanelRoleDto } from '../panel-roles/dto/update-panel-role.dto';
 import { SettlementService } from '../settlement/settlement.service';
 
 function serializePanelRole(
-  role: { id: string; name: string; permissions: string[] } | null,
+  role: {
+    id: string;
+    name: string;
+    permissions: string[];
+    isDefaultForSignup?: boolean;
+  } | null,
 ) {
   if (!role) return null;
-  return { id: role.id, name: role.name, permissions: role.permissions };
+  return {
+    id: role.id,
+    name: role.name,
+    permissions: role.permissions,
+    isDefaultForSignup: role.isDefaultForSignup ?? false,
+  };
 }
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
