@@ -142,6 +142,70 @@ describe('WalletsService admin data scoping', () => {
   });
 });
 
+describe('WalletsService.createDefaultWalletsForUser', () => {
+  // isStarterType alone decides membership — no dependency on which
+  // currency happens to be flagged isDefault (there is no admin-facing way
+  // to see or change that flag, so coupling to it would silently skip
+  // starter types on any other currency).
+  it('creates a wallet for every isStarterType type regardless of currency', async () => {
+    const types = [
+      { id: 'usd-starter', isStarterType: true, currencyId: 'usd' },
+      { id: 'irr-starter', isStarterType: true, currencyId: 'irr' },
+      { id: 'usd-non-starter', isStarterType: false, currencyId: 'usd' },
+    ];
+    const manager = {
+      find: jest.fn(async (_entity: unknown, options: any) => {
+        return types.filter((type) =>
+          Object.entries(options.where).every(
+            ([key, value]) => (type as any)[key] === value,
+          ),
+        );
+      }),
+      create: jest.fn((_entity: unknown, dto: unknown) => dto),
+      save: jest.fn(async (wallets: unknown) => wallets),
+    };
+    const service = new WalletsService(
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    const wallets = await service.createDefaultWalletsForUser(
+      manager as any,
+      'user-1',
+    );
+
+    expect(wallets).toEqual([
+      { userId: 'user-1', walletTypeId: 'usd-starter', balance: '0' },
+      { userId: 'user-1', walletTypeId: 'irr-starter', balance: '0' },
+    ]);
+  });
+
+  it('creates no wallets when no type is marked isStarterType', async () => {
+    const manager = {
+      find: jest.fn(async () => []),
+      create: jest.fn(),
+      save: jest.fn(async (wallets: unknown) => wallets),
+    };
+    const service = new WalletsService(
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    const wallets = await service.createDefaultWalletsForUser(
+      manager as any,
+      'user-1',
+    );
+
+    expect(wallets).toEqual([]);
+  });
+});
+
 function buildService(wallet: {
   id: string;
   userId: string;

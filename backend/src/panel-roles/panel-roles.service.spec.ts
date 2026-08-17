@@ -32,10 +32,7 @@ function buildService(roles: PanelRole[] = []) {
       return role;
     }),
     update: jest.fn(
-      async (
-        criteria: Partial<PanelRole>,
-        partial: Partial<PanelRole>,
-      ) => {
+      async (criteria: Partial<PanelRole>, partial: Partial<PanelRole>) => {
         for (const role of store) {
           const matches = Object.entries(criteria).every(
             ([key, value]) => (role as any)[key] === value,
