@@ -58,12 +58,12 @@ if [ "$STAGING" = "1" ]; then
   staging_arg="--staging"
 fi
 
-echo "### Requesting a real cert for $WALLET_DOMAIN (+ www) ..."
+echo "### Requesting a real cert for $WALLET_DOMAIN ..."
 docker compose run --rm certbot certonly \
   --webroot -w /var/www/certbot \
   $staging_arg \
   --email "$LETSENCRYPT_EMAIL" \
-  -d "$WALLET_DOMAIN" -d "www.$WALLET_DOMAIN" \
+  -d "$WALLET_DOMAIN" \
   --rsa-key-size 2048 \
   --agree-tos \
   --no-eff-email \

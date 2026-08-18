@@ -141,7 +141,7 @@ instead of in Docker:
    `/etc/letsencrypt/live/<domain>/`:
 
    ```bash
-   sudo certbot certonly --webroot -w /var/www/certbot -d packeta.ir -d www.packeta.ir
+   sudo certbot certonly --webroot -w /var/www/certbot -d packeta.ir
    sudo certbot certonly --webroot -w /var/www/certbot -d pay.packeta.ir
    sudo systemctl reload nginx
    ```
