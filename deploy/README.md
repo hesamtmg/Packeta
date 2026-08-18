@@ -1,110 +1,154 @@
 # Deploying to packeta.ir / pay.packeta.ir
 
-Two public domains, each pairing a static frontend with its backend under `/api`:
+Two public domains, each pairing a frontend with its backend under `/api`:
 
-| Domain             | Serves                          | `/api` proxies to      |
-|---------------------|----------------------------------|-------------------------|
-| `packeta.ir`         | `frontend` (wallet app)          | `backend` on `:3000`    |
-| `pay.packeta.ir`     | `ipg-frontend` (pay page/widgets)| `ipg-backend` on `:4000`|
+| Domain            | Serves                            | `/api` proxies to        |
+|-------------------|------------------------------------|---------------------------|
+| `packeta.ir`      | `frontend` (wallet app)            | `backend`                 |
+| `pay.packeta.ir`  | `ipg-frontend` (pay page/widgets)  | `ipg-backend`             |
 
-Both backends are plain NestJS apps with no `/api` prefix of their own
-(`backend/src/main.ts`, `ipg-backend/src/main.ts`) — the `/api` prefix exists
-only in nginx, which strips it before proxying. This also means the backends
-should **not** be exposed directly on the public interface; nginx is the only
-public entry point, and the backends should listen on `127.0.0.1` (or be
-firewalled to loopback) once this is in place.
+Neither backend has a built-in `/api` prefix (see `backend/src/main.ts`,
+`ipg-backend/src/main.ts`) — the `/api` prefix exists only in nginx, which
+strips it before proxying. There are two ways to run this; pick one.
 
-## 1. DNS
+## Option A — Docker Compose (recommended)
+
+`docker-compose.yml` already wires up nginx + both domains: an `nginx`
+container is the only thing published to the host (ports 80/443), and it
+reverse-proxies to the `frontend`/`backend`/`ipg-frontend`/`ipg-backend`
+containers by service name over the internal compose network — none of
+those publish ports directly anymore.
+
+### 1. DNS
 
 Point both `packeta.ir` and `pay.packeta.ir` A/AAAA records at the server.
 
-## 2. Build the frontends with the right API URLs
+### 2. (Optional) override the domains
 
-Vite bakes `VITE_*` values into the bundle at build time, so this has to be
-set correctly before `npm run build`:
+Defaults are `packeta.ir` / `pay.packeta.ir`. To deploy elsewhere, put this
+in a `.env` file at the repo root instead of editing `docker-compose.yml`:
+
+```
+WALLET_DOMAIN=packeta.ir
+PAY_DOMAIN=pay.packeta.ir
+```
+
+Also set real secrets there for a public deployment — `JWT_SECRET`,
+`ZARINPAL_MERCHANT_ID`, `MONGO_EXPRESS_USERNAME`/`PASSWORD` — see the
+`${VAR:-default}` fallbacks in `docker-compose.yml`.
+
+### 3. First-time TLS
 
 ```bash
-# frontend (wallet app)
-cd frontend
-VITE_API_URL=https://packeta.ir/api npm ci && npm run build
-
-# ipg-frontend (pay page) — also calls Packeta's own backend directly
-# (phone+OTP identification, wallet selection on a merchant charge)
-cd ipg-frontend
-VITE_API_URL=https://pay.packeta.ir/api \
-VITE_PACKETA_API_URL=https://packeta.ir/api \
-npm ci && npm run build
+LETSENCRYPT_EMAIL=you@example.com ./deploy/docker/init-letsencrypt.sh
 ```
 
-Copy the output to where nginx serves it:
+This issues real Let's Encrypt certs for both domains (see the script's
+header comment for why it needs a dummy-cert bootstrap step first) and
+starts nginx. Set `STAGING=1` on the first run if you want to test against
+Let's Encrypt's staging CA (no rate limits, untrusted cert) before doing it
+for real.
+
+### 4. Bring up everything else
 
 ```bash
-sudo mkdir -p /var/www/packeta/frontend /var/www/packeta/ipg-frontend
-sudo cp -r frontend/dist/. /var/www/packeta/frontend/
-sudo cp -r ipg-frontend/dist/. /var/www/packeta/ipg-frontend/
+docker compose up -d --build
 ```
 
-Re-run the build + copy any time `VITE_*` values or frontend code change —
-container/service restarts alone won't pick up new `VITE_*` values.
+`--build` matters here specifically for the frontends: Vite bakes
+`VITE_API_URL`/`VITE_PACKETA_API_URL` into the bundle at *build* time from
+`WALLET_DOMAIN`/`PAY_DOMAIN`, so a plain restart won't pick up a domain
+change — only a rebuild will.
 
-## 3. Run the two backends
+### 5. Renewing certs
 
-Build each and configure its `.env` (see `backend/.env.example`,
-`ipg-backend/.env.example`) with production DB credentials and, importantly,
-the browser-facing URLs so redirects and callback links point at the real
-domains instead of localhost:
+Let's Encrypt certs expire after 90 days. Nothing in this repo auto-renews
+them (a background renewal loop can't reload nginx without extra
+docker-socket access, which isn't worth the complexity here) — instead, add
+this to the host's crontab:
 
-```
-# backend/.env
-PORT=3000
-FRONTEND_URL=https://packeta.ir
-IPG_FRONTEND_URL=https://pay.packeta.ir
-IPG_BASE_URL=http://127.0.0.1:4000   # server-to-server, stays internal
-
-# ipg-backend/.env
-PORT=4000
-IPG_FRONTEND_URL=https://pay.packeta.ir
+```cron
+0 3 * * * cd /path/to/Packeta && docker compose run --rm certbot renew --webroot -w /var/www/certbot -q && docker compose exec nginx nginx -s reload
 ```
 
-Then build and install the systemd units in `deploy/systemd/` (adjust
-`WorkingDirectory`/`User` if your paths differ):
+## Option B — Bare metal (host nginx + systemd)
 
-```bash
-cd backend && npm ci && npm run build
-cd ../ipg-backend && npm ci && npm run build
+If you'd rather run nginx and the two Nest backends directly on the host
+instead of in Docker:
 
-sudo cp deploy/systemd/packeta-backend.service /etc/systemd/system/
-sudo cp deploy/systemd/packeta-ipg-backend.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now packeta-backend packeta-ipg-backend
-```
+1. **Build the frontends** with the right API URLs baked in (Vite inlines
+   `VITE_*` at build time):
 
-## 4. nginx
+   ```bash
+   cd frontend
+   VITE_API_URL=https://packeta.ir/api npm ci && npm run build
 
-```bash
-sudo cp deploy/nginx/packeta.ir.conf /etc/nginx/sites-available/
-sudo cp deploy/nginx/pay.packeta.ir.conf /etc/nginx/sites-available/
-sudo ln -s /etc/nginx/sites-available/packeta.ir.conf /etc/nginx/sites-enabled/
-sudo ln -s /etc/nginx/sites-available/pay.packeta.ir.conf /etc/nginx/sites-enabled/
-sudo mkdir -p /var/www/certbot
-sudo nginx -t && sudo systemctl reload nginx
-```
+   cd ../ipg-frontend
+   VITE_API_URL=https://pay.packeta.ir/api \
+   VITE_PACKETA_API_URL=https://packeta.ir/api \
+   npm ci && npm run build
+   ```
 
-## 5. TLS (Let's Encrypt)
+   Copy the output to where nginx serves it:
 
-The provided configs assume certs already exist at
-`/etc/letsencrypt/live/<domain>/`. Issue them with certbot's webroot plugin
-(matches the `/.well-known/acme-challenge/` location in both configs):
+   ```bash
+   sudo mkdir -p /var/www/packeta/frontend /var/www/packeta/ipg-frontend
+   sudo cp -r frontend/dist/. /var/www/packeta/frontend/
+   sudo cp -r ipg-frontend/dist/. /var/www/packeta/ipg-frontend/
+   ```
 
-```bash
-sudo certbot certonly --webroot -w /var/www/certbot -d packeta.ir -d www.packeta.ir
-sudo certbot certonly --webroot -w /var/www/certbot -d pay.packeta.ir
-sudo systemctl reload nginx
-```
+2. **Run the two backends** as systemd services. Configure each `.env` (see
+   `backend/.env.example`, `ipg-backend/.env.example`) with production DB
+   credentials and the browser-facing URLs:
 
-Certbot's installed timer renews both automatically.
+   ```
+   # backend/.env
+   PORT=3000
+   FRONTEND_URL=https://packeta.ir
+   IPG_FRONTEND_URL=https://pay.packeta.ir
+   IPG_BASE_URL=http://127.0.0.1:4000
 
-## Notes
+   # ipg-backend/.env
+   PORT=4000
+   IPG_FRONTEND_URL=https://pay.packeta.ir
+   ```
+
+   ```bash
+   cd backend && npm ci && npm run build
+   cd ../ipg-backend && npm ci && npm run build
+
+   sudo cp deploy/systemd/packeta-backend.service /etc/systemd/system/
+   sudo cp deploy/systemd/packeta-ipg-backend.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now packeta-backend packeta-ipg-backend
+   ```
+
+   Both backends should listen on `127.0.0.1` only (or be firewalled to
+   loopback) — nginx is meant to be the only public entry point.
+
+3. **nginx**:
+
+   ```bash
+   sudo cp deploy/nginx/packeta.ir.conf /etc/nginx/sites-available/
+   sudo cp deploy/nginx/pay.packeta.ir.conf /etc/nginx/sites-available/
+   sudo ln -s /etc/nginx/sites-available/packeta.ir.conf /etc/nginx/sites-enabled/
+   sudo ln -s /etc/nginx/sites-available/pay.packeta.ir.conf /etc/nginx/sites-enabled/
+   sudo mkdir -p /var/www/certbot
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+
+4. **TLS**: the configs assume certs already exist at
+   `/etc/letsencrypt/live/<domain>/`:
+
+   ```bash
+   sudo certbot certonly --webroot -w /var/www/certbot -d packeta.ir -d www.packeta.ir
+   sudo certbot certonly --webroot -w /var/www/certbot -d pay.packeta.ir
+   sudo systemctl reload nginx
+   ```
+
+   Certbot's installed timer renews both automatically.
+
+## Notes (apply to both options)
 
 - **CORS**: `pay.packeta.ir`'s frontend calls `packeta.ir/api` directly
   (cross-origin). Both backends already call `app.enableCors()` with no
@@ -112,10 +156,11 @@ Certbot's installed timer renews both automatically.
   origins in `main.ts` if you want to lock that down later.
 - **Uploads**: avatar/document uploads are served by the backend itself at
   `/uploads/*` (see `ServeStaticModule` in `backend/src/app.module.ts`), not
-  by nginx — they arrive at the client as `/api/uploads/...` through the same
-  `/api/` proxy location, so no separate nginx rule is needed.
-- **File size**: both configs set `client_max_body_size 10m`; the backend
-  itself caps individual uploads at 5 MB (`MAX_UPLOAD_BYTES` /
+  by nginx — they arrive at the client as `/api/uploads/...` through the
+  same `/api/` proxy location, so no separate nginx rule is needed.
+- **File size**: both nginx configs set `client_max_body_size 10m`; the
+  backend itself caps individual uploads at 5 MB (`MAX_UPLOAD_BYTES` /
   `MAX_AVATAR_BYTES`).
-- **SPA routing**: both frontends use Vue Router in `history` mode, so each
-  config falls back unknown paths to `index.html`.
+- **SPA routing**: both frontends use Vue Router in `history` mode. The
+  Docker path proxies to `vite preview`, which already serves the SPA
+  fallback itself; the bare-metal configs do it with `try_files ... /index.html`.
