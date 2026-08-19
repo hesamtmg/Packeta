@@ -1,0 +1,52 @@
+# Local development overlay — runs the whole stack with no domains, no
+# nginx, and no TLS: every app container is published straight to
+# localhost, exactly like hitting each service directly. Use this when
+# packeta.ir/pay.packeta.ir aren't reachable from where you're working (a
+# laptop, a machine with no public DNS pointed at it, etc).
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#
+# nginx and certbot are skipped automatically — the base file gates them
+# behind profiles that only activate when named explicitly (the production
+# flow does that; a plain `up -d` here never touches them). No cert
+# bootstrap, no init-letsencrypt.sh, nothing to fail on a machine without a
+# public IP.
+#
+# Afterwards:
+#   http://localhost:5173  — wallet app (frontend)
+#   http://localhost:3000  — wallet backend API
+#   http://localhost:5174  — IPG pay page / widgets (ipg-frontend)
+#   http://localhost:4000  — IPG backend API
+#
+# Rebuild (`--build`) any time VITE_API_URL/VITE_PACKETA_API_URL would
+# change — Vite bakes them into the bundle at build time, same as prod.
+
+services:
+  backend:
+    environment:
+      FRONTEND_URL: http://localhost:5173
+      IPG_FRONTEND_URL: http://localhost:5174
+    ports:
+      - '3000:3000'
+
+  ipg-backend:
+    environment:
+      IPG_FRONTEND_URL: http://localhost:5174
+    ports:
+      - '4000:4000'
+
+  frontend:
+    build:
+      args:
+        VITE_API_URL: http://localhost:3000
+    ports:
+      - '5173:5173'
+
+  ipg-frontend:
+    build:
+      args:
+        VITE_API_URL: http://localhost:4000
+        VITE_PACKETA_API_URL: http://localhost:3000
+    ports:
+      - '5174:5174'

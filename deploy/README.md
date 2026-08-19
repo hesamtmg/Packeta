@@ -9,9 +9,36 @@ Two public domains, each pairing a frontend with its backend under `/api`:
 
 Neither backend has a built-in `/api` prefix (see `backend/src/main.ts`,
 `ipg-backend/src/main.ts`) — the `/api` prefix exists only in nginx, which
-strips it before proxying. There are two ways to run this; pick one.
+strips it before proxying.
 
-## Option A — Docker Compose (recommended)
+None of this — domains, nginx, TLS — is needed to just run the app locally.
+See **Local development** below if that's all you want; otherwise pick one
+of the two real-deployment options that follow it.
+
+## Local development (no domains, no certificate)
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
+
+`docker-compose.dev.yml` is an overlay on the base compose file: it skips
+nginx and certbot entirely (the base file only starts them when named
+explicitly, which this overlay never does) and publishes each app straight
+to `localhost` instead, the same as before nginx/TLS existed in this repo:
+
+| URL                       | What it is              |
+|---------------------------|--------------------------|
+| `http://localhost:5173`   | wallet app (frontend)    |
+| `http://localhost:3000`   | wallet backend API       |
+| `http://localhost:5174`   | IPG pay page / widgets   |
+| `http://localhost:4000`   | IPG backend API          |
+
+No DNS, no certs, nothing that can fail because a domain isn't reachable
+from your machine. `--build` matters here too — Vite bakes `VITE_API_URL`
+into the bundle at build time, so switching between this and the domain
+setup always needs a rebuild, not just a restart.
+
+## Option A — Docker Compose, for a real domain (recommended for production)
 
 `docker-compose.yml` already wires up nginx + both domains: an `nginx`
 container is the only thing published to the host (ports 80/443), and it
