@@ -13,6 +13,10 @@
 # the full setup (DNS, first-time TLS via deploy/docker/init-letsencrypt.sh,
 # renewals).
 #
+# Just want it running locally, no domain or certificate involved? Use
+# docker-compose.dev.yml instead — see its header comment or the "Local
+# development" section of deploy/README.md.
+#
 # Five things worth knowing:
 #   1. WALLET_DOMAIN / PAY_DOMAIN (defaults: packeta.ir / pay.packeta.ir)
 #      drive both nginx's server_name/cert paths and the browser-facing URLs
@@ -223,6 +227,12 @@ services:
     image: nginx:1.27-alpine
     restart: unless-stopped
     mem_limit: 64m
+    # Not started by a plain `docker compose up` — only by the documented
+    # production flow, which always names it explicitly (`docker compose up
+    # -d nginx`, as deploy/docker/init-letsencrypt.sh does) or activates this
+    # profile. That's what makes docker-compose.dev.yml's plain `up -d` skip
+    # it automatically instead of needing --scale nginx=0 or similar.
+    profiles: ['prod']
     depends_on:
       - frontend
       - ipg-frontend
