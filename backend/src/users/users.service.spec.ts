@@ -221,6 +221,19 @@ describe('UsersService.setRole', () => {
     expect(record.role).toBe(UserRole.USER);
     expect(record.panelRoleId).toBe('r2');
   });
+
+  it('refuses to grant SUPER_ADMIN — the panel can only move a user between USER and ADMIN', async () => {
+    const { service, record } = buildService({
+      id: 'u1',
+      role: UserRole.ADMIN,
+      panelRoleId: null,
+    });
+
+    await expect(service.setRole('u1', UserRole.SUPER_ADMIN)).rejects.toThrow(
+      BadRequestException,
+    );
+    expect(record.role).toBe(UserRole.ADMIN);
+  });
 });
 
 describe('UsersService.setPanelRole', () => {
