@@ -523,9 +523,9 @@ export default {
     admins: {
       title: 'مدیریت نقش‌ها',
       readOnlyHint: 'فقط مدیران ارشد، یا نقشی با بخش «نقش‌ها»، می‌توانند نقش‌های پنل و دسترسی‌ها را مدیریت کنند.',
-      promoteHeading: 'ارتقاء یک مشتری',
+      promoteHeading: 'ارتقاء یک مشتری به مدیر',
       chooseCustomer: 'انتخاب یک مشتری…',
-      promoteButton: 'ارتقاء',
+      promoteButton: 'ارتقاء به مدیر',
       roleAdmin: 'مدیر',
       roleSuperAdmin: 'مدیر ارشد',
       roleUser: 'مشتری',

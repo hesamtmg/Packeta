@@ -108,6 +108,16 @@ export class UsersService {
   }
 
   async setRole(id: string, role: UserRole): Promise<User> {
+    // Belt and suspenders alongside UpdateUserRoleDto's @IsIn: this method
+    // takes a plain UserRole, so nothing at the type level stops some other
+    // future caller from passing SUPER_ADMIN — granting it must always go
+    // through the CLI script (backend/src/scripts/promote-to-admin.ts), not
+    // this panel-facing path.
+    if (role === UserRole.SUPER_ADMIN) {
+      throw new BadRequestException(
+        'SUPER_ADMIN cannot be granted from the admin panel',
+      );
+    }
     const user = await this.findById(id);
     if (!user) {
       throw new NotFoundException('User not found');
