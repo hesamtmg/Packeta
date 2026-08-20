@@ -49,7 +49,6 @@ const users = ref<AdminUser[]>([]);
 const error = ref('');
 const busy = ref(false);
 const promoteUserId = ref('');
-const promoteRole = ref<'ADMIN' | 'SUPER_ADMIN'>('ADMIN');
 
 // The "Panel users" table below includes every account (admins and
 // customers alike) so a role's access can be managed for USER accounts
@@ -217,7 +216,7 @@ async function promote() {
   try {
     await apiRequest(`/admin/users/${promoteUserId.value}/role`, {
       method: 'PATCH',
-      body: { role: promoteRole.value },
+      body: { role: 'ADMIN' },
     });
     promoteUserId.value = '';
     await load();
@@ -389,10 +388,6 @@ loadRoles();
         <select v-model="promoteUserId" class="admin-input">
           <option value="" disabled>{{ t('admin.admins.chooseCustomer') }}</option>
           <option v-for="c in customers" :key="c.id" :value="c.id">{{ displayIdentity(c) }}</option>
-        </select>
-        <select v-model="promoteRole" class="admin-input">
-          <option value="ADMIN">{{ t('admin.admins.roleAdmin') }}</option>
-          <option value="SUPER_ADMIN">{{ t('admin.admins.roleSuperAdmin') }}</option>
         </select>
         <button class="admin-btn admin-btn-primary" :disabled="busy || !promoteUserId" @click="promote">
           {{ t('admin.admins.promoteButton') }}

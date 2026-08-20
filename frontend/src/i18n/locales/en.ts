@@ -523,9 +523,9 @@ export default {
     admins: {
       title: 'Role management',
       readOnlyHint: 'Only super admins, or a role with the "roles" section, can manage panel roles and access.',
-      promoteHeading: 'Promote a customer',
+      promoteHeading: 'Promote a customer to admin',
       chooseCustomer: 'Choose a customer…',
-      promoteButton: 'Promote',
+      promoteButton: 'Promote to admin',
       roleAdmin: 'Admin',
       roleSuperAdmin: 'Super Admin',
       roleUser: 'Customer',
