@@ -32,13 +32,23 @@ export class AutoWithdrawSweepService {
     );
 
     for (const wallet of due) {
-      await this.transactionsService.sweepAutoWithdraw(wallet.id);
+      const created = await this.transactionsService.sweepAutoWithdraw(
+        wallet.id,
+      );
       this.logger.log(`Auto-swept wallet ${wallet.id} at ${currentTime}`);
       await this.loggingService.log({
         category: 'SCHEDULER',
         action: 'auto_withdraw_sweep',
         success: true,
-        metadata: { walletId: wallet.id, currentTime },
+        metadata: {
+          walletId: wallet.id,
+          currentTime,
+          transactions: created.map((tx) => ({
+            id: tx.id,
+            amount: tx.amount,
+            destinationIban: tx.destinationIban,
+          })),
+        },
       });
     }
   }

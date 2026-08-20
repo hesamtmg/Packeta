@@ -60,12 +60,22 @@ const activeWalletCount = computed(() => wallets.value.filter((w) => !w.closedAt
 const closedWalletCount = computed(() => wallets.value.filter((w) => !!w.closedAt).length);
 const blockedWalletCount = computed(() => wallets.value.filter((w) => !!w.blockedAt).length);
 
+// Local calendar-day boundary, not a rolling 24h window — bucketing by
+// "how many exact 24h periods before this instant" made the chart drift
+// throughout the day (a signup at 11pm yesterday and one at 1am today could
+// land in the same or a swapped bucket depending on what time it is right
+// now), so today's and yesterday's counts never quite matched what actually
+// happened on those calendar dates.
+function startOfDay(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
 function perDayBuckets(dates: string[], days: number): number[] {
   const buckets = new Array(days).fill(0);
-  const now = new Date();
+  const todayStart = startOfDay(new Date());
   const dayMs = 24 * 60 * 60 * 1000;
   for (const iso of dates) {
-    const diff = Math.floor((now.getTime() - new Date(iso).getTime()) / dayMs);
+    const diff = Math.round((todayStart - startOfDay(new Date(iso))) / dayMs);
     const idx = days - 1 - diff;
     if (idx >= 0 && idx < days) buckets[idx] += 1;
   }

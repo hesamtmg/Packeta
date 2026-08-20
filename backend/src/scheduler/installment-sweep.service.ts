@@ -25,7 +25,15 @@ export class InstallmentSweepService {
         category: 'SCHEDULER',
         action: 'installment_generate',
         success: true,
-        metadata: { count: generated.length },
+        metadata: {
+          count: generated.length,
+          installments: generated.map((installment) => ({
+            id: installment.id,
+            walletId: installment.walletId,
+            amount: installment.amount,
+            sequenceNumber: installment.sequenceNumber,
+          })),
+        },
       });
     }
 
