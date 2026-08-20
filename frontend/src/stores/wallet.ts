@@ -254,10 +254,15 @@ export const useWalletStore = defineStore('wallet', {
         },
       );
     },
-    async withdraw(walletId: string, amount: number, railType: SettlementRailType) {
+    async withdraw(
+      walletId: string,
+      amount: number,
+      railType: SettlementRailType,
+      destinationIban: string,
+    ) {
       await apiRequest('/transactions/withdraw', {
         method: 'POST',
-        body: { walletId, amount, railType },
+        body: { walletId, amount, railType, destinationIban },
         idempotent: true,
       });
       await Promise.all([this.fetchWallets(), this.fetchTransactions()]);
