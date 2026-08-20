@@ -458,11 +458,15 @@ export default {
       tableWhen: 'When',
       none: 'No scheduler activity yet.',
       loadFailed: 'Failed to load scheduler logs',
+      wallet: 'Wallet',
+      transaction: 'Transaction',
+      installment: 'Installment',
       actions: {
         auto_withdraw_sweep: 'Auto-withdraw sweep',
         rail_settlement_sweep: 'Rail-settlement sweep',
         installment_generate: 'Installment generation',
         installment_overdue_penalty: 'Overdue penalty applied',
+        installment_overdue_block: 'Wallet blocked (overdue)',
         purchase_timeout_reverse: 'Purchase timeout reversal',
       },
     },
@@ -652,6 +656,7 @@ export default {
       title: 'Wallet',
       owner: 'Owner',
       loadFailed: 'Failed to load wallet',
+      transactionsHeading: 'Transactions ({count})',
     },
     reports: {
       title: 'Reports',

@@ -40,7 +40,9 @@ export class SettlementRailSweepService {
     });
 
     for (const wallet of due) {
-      await this.transactionsService.sweepAutoWithdraw(wallet.id);
+      const created = await this.transactionsService.sweepAutoWithdraw(
+        wallet.id,
+      );
       this.logger.log(
         `Rail-settled wallet ${wallet.id} via ${wallet.railType} at ${currentTime}`,
       );
@@ -52,6 +54,11 @@ export class SettlementRailSweepService {
           walletId: wallet.id,
           railType: wallet.railType,
           currentTime,
+          transactions: created.map((tx) => ({
+            id: tx.id,
+            amount: tx.amount,
+            destinationIban: tx.destinationIban,
+          })),
         },
       });
     }

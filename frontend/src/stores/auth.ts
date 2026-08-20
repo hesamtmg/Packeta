@@ -5,6 +5,7 @@ const ROLE_KEY = 'packeta_role';
 const EMAIL_KEY = 'packeta_email';
 const PERMISSIONS_KEY = 'packeta_permissions';
 const HAS_PANEL_ROLE_KEY = 'packeta_has_panel_role';
+const AVATAR_URL_KEY = 'packeta_avatar_url';
 
 function readPermissions(): string[] {
   try {
@@ -27,6 +28,7 @@ export const useAuthStore = defineStore('auth', {
     // 0 permissions granted is fully locked out. Persisted so this survives
     // a page reload without waiting on the /users/me refresh.
     hasPanelRole: localStorage.getItem(HAS_PANEL_ROLE_KEY) === '1',
+    avatarUrl: localStorage.getItem(AVATAR_URL_KEY) as string | null,
   }),
   getters: {
     isAuthenticated: (state) => !!state.accessToken,
@@ -62,17 +64,27 @@ export const useAuthStore = defineStore('auth', {
       localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(this.permissions));
       localStorage.setItem(HAS_PANEL_ROLE_KEY, this.hasPanelRole ? '1' : '0');
     },
+    setAvatarUrl(url: string | null) {
+      this.avatarUrl = url;
+      if (url) {
+        localStorage.setItem(AVATAR_URL_KEY, url);
+      } else {
+        localStorage.removeItem(AVATAR_URL_KEY);
+      }
+    },
     logout() {
       this.accessToken = null;
       this.role = null;
       this.email = null;
       this.permissions = [];
       this.hasPanelRole = false;
+      this.avatarUrl = null;
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(ROLE_KEY);
       localStorage.removeItem(EMAIL_KEY);
       localStorage.removeItem(PERMISSIONS_KEY);
       localStorage.removeItem(HAS_PANEL_ROLE_KEY);
+      localStorage.removeItem(AVATAR_URL_KEY);
     },
   },
 });

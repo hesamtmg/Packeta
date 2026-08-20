@@ -8,6 +8,19 @@ import AdminLayout from '../../components/admin/AdminLayout.vue';
 import SortableTh from '../../components/admin/SortableTh.vue';
 import ListPagination from '../../components/admin/ListPagination.vue';
 
+interface SchedulerLogChildTransaction {
+  id: string;
+  amount?: string;
+  destinationIban?: string | null;
+}
+
+interface SchedulerLogChildInstallment {
+  id: string;
+  walletId?: string;
+  amount?: string;
+  sequenceNumber?: number;
+}
+
 interface SchedulerLogEntry {
   _id: string;
   action: string;
@@ -22,6 +35,45 @@ const error = ref('');
 
 function actionLabel(action: string): string {
   return t(`admin.schedulerLogs.actions.${action}`, action);
+}
+
+// The fields every action's metadata renders specially below — everything
+// else in a log's metadata falls back to a generic "key: value" chip so a
+// new scheduler action never shows up with no detail at all.
+const STRUCTURED_KEYS = new Set([
+  'walletId',
+  'transactionId',
+  'transactions',
+  'installments',
+]);
+
+function childTransactions(log: SchedulerLogEntry): SchedulerLogChildTransaction[] {
+  const raw = log.metadata?.transactions;
+  return Array.isArray(raw) ? (raw as SchedulerLogChildTransaction[]) : [];
+}
+
+function childInstallments(log: SchedulerLogEntry): SchedulerLogChildInstallment[] {
+  const raw = log.metadata?.installments;
+  return Array.isArray(raw) ? (raw as SchedulerLogChildInstallment[]) : [];
+}
+
+function singleTransactionId(log: SchedulerLogEntry): string | null {
+  const id = log.metadata?.transactionId;
+  return typeof id === 'string' ? id : null;
+}
+
+function walletId(log: SchedulerLogEntry): string | null {
+  const id = log.metadata?.walletId;
+  return typeof id === 'string' ? id : null;
+}
+
+// Whatever's left in metadata once the structured fields above are pulled
+// out — still shown, just as plain "key: value" text instead of raw JSON.
+function otherFields(log: SchedulerLogEntry): [string, string][] {
+  if (!log.metadata) return [];
+  return Object.entries(log.metadata)
+    .filter(([key, value]) => !STRUCTURED_KEYS.has(key) && value !== null && value !== undefined)
+    .map(([key, value]) => [key, typeof value === 'object' ? JSON.stringify(value) : String(value)]);
 }
 
 const {
@@ -81,7 +133,40 @@ onMounted(load);
         <tbody>
           <tr v-for="log in pageItems" :key="log._id">
             <td><span class="admin-badge">{{ actionLabel(log.action) }}</span></td>
-            <td class="mono">{{ log.metadata ? JSON.stringify(log.metadata) : '' }}</td>
+            <td class="details-cell">
+              <router-link
+                v-if="walletId(log)"
+                class="detail-chip"
+                :to="{ name: 'admin-wallet-detail', params: { id: walletId(log) } }"
+              >
+                {{ t('admin.schedulerLogs.wallet') }}
+              </router-link>
+              <router-link
+                v-if="singleTransactionId(log)"
+                class="detail-chip"
+                :to="{ name: 'admin-transaction-detail', params: { id: singleTransactionId(log) } }"
+              >
+                {{ t('admin.schedulerLogs.transaction') }}
+              </router-link>
+              <router-link
+                v-for="tx in childTransactions(log)"
+                :key="tx.id"
+                class="detail-chip"
+                :to="{ name: 'admin-transaction-detail', params: { id: tx.id } }"
+              >
+                {{ tx.amount }}{{ tx.destinationIban ? ` → ${tx.destinationIban}` : '' }}
+              </router-link>
+              <router-link
+                v-for="installment in childInstallments(log)"
+                :key="installment.id"
+                class="detail-chip"
+                :to="{ name: 'admin-wallet-detail', params: { id: installment.walletId } }"
+              >
+                {{ t('admin.schedulerLogs.installment') }} #{{ installment.sequenceNumber }} — {{ installment.amount }}
+              </router-link>
+              <span v-for="[key, value] in otherFields(log)" :key="key" class="detail-field">{{ key }}: {{ value }}</span>
+              <span v-if="!log.metadata || !Object.keys(log.metadata).length" class="detail-field">{{ t('common.none') }}</span>
+            </td>
             <td>{{ formatDateTime(log.createdAt) }}</td>
           </tr>
           <tr v-if="!pageItems.length"><td colspan="3">{{ t('admin.schedulerLogs.none') }}</td></tr>
@@ -117,5 +202,31 @@ onMounted(load);
   font-family: monospace;
   font-size: 0.8rem;
   color: var(--text-dim);
+}
+.details-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.detail-chip {
+  font-family: monospace;
+  font-size: 0.76rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--input-bg, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--card-border);
+  color: var(--accent-blue);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.detail-chip:hover {
+  border-color: var(--accent-blue);
+}
+.detail-field {
+  font-family: monospace;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  white-space: nowrap;
 }
 </style>

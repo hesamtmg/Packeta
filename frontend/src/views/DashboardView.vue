@@ -320,10 +320,12 @@ onMounted(async () => {
   try {
     const me = await apiRequest<{
       role: string;
+      avatarUrl: string | null;
       panelRole: { permissions: string[] } | null;
     }>('/users/me');
     auth.setRole(me.role);
     auth.setPermissions(me.panelRole?.permissions ?? null);
+    auth.setAvatarUrl(me.avatarUrl ?? null);
   } catch {
     // Non-critical — the gated cards just keep whatever was cached.
   }

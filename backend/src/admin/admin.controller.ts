@@ -295,12 +295,25 @@ export class AdminController {
   }
 
   // Left ungated, same reasoning as listWallets — scoped the same way.
+  // Optional walletId narrows to a single wallet's history — same query
+  // param shape as the customer-facing GET /transactions — backing the
+  // Wallets list/detail views' "view transactions" link. A regular admin
+  // must still own that wallet within their scope; a super-admin can pass
+  // any wallet id.
   @Get('transactions')
   async listTransactions(
     @CurrentUser() caller: AuthenticatedUser,
     @Query('limit') limit?: string,
+    @Query('walletId') walletId?: string,
   ) {
     const parsedLimit = limit ? parseInt(limit, 10) : undefined;
+    if (walletId) {
+      await this.assertWalletInScope(caller.userId, walletId);
+      return this.transactionsService.listAllForWallets(
+        [walletId],
+        parsedLimit,
+      );
+    }
     if (await this.isSuperAdmin(caller.userId)) {
       return this.transactionsService.listAll(parsedLimit);
     }
@@ -666,8 +679,10 @@ export class AdminController {
   // Admin panel's "Add wallet" action on a customer — a narrower version of
   // the self-service POST /wallets (see AdminCreateWalletDto), for quickly
   // provisioning a customer a wallet without them doing it themselves.
+  // Super-admin only — a regular admin can view and manage a customer's
+  // existing wallets but not create new ones on their behalf.
   @Post('customers/:userId/wallets')
-  @RequireSection('customers')
+  @UseGuards(SuperAdminGuard)
   async createWalletForCustomer(
     @CurrentUser() admin: AuthenticatedUser,
     @Param('userId') userId: string,
