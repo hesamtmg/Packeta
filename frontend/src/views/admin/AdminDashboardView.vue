@@ -32,13 +32,24 @@ const adminCount = computed(
 const walletCount = computed(() => wallets.value.length);
 const transactionCount = computed(() => transactions.value.length);
 
+// Local calendar-day boundary, not a rolling 24h window — bucketing by "how
+// many exact 24h periods before this instant" made the chart drift
+// throughout the day (a signup at 11pm yesterday and one at 1am today could
+// land in the same or a swapped bucket depending on what time it is right
+// now), so today's and yesterday's counts never quite matched what actually
+// happened on those calendar dates. Same fix as AdminReportsView's
+// perDayBuckets.
+function startOfDay(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
 const signupsPerDay = computed(() => {
   const days = 14;
   const buckets = new Array(days).fill(0);
-  const now = new Date();
+  const todayStart = startOfDay(new Date());
   const dayMs = 24 * 60 * 60 * 1000;
   for (const u of users.value) {
-    const diff = Math.floor((now.getTime() - new Date(u.createdAt).getTime()) / dayMs);
+    const diff = Math.round((todayStart - startOfDay(new Date(u.createdAt))) / dayMs);
     const idx = days - 1 - diff;
     if (idx >= 0 && idx < days) buckets[idx] += 1;
   }

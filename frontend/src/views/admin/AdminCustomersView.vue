@@ -390,6 +390,7 @@ loadRoles();
         </article>
       </div>
 
+      <template v-if="auth.isSuperAdmin">
       <h3>{{ t('admin.customers.addWalletHeading') }}</h3>
       <p v-if="addWalletError" class="admin-error">{{ addWalletError }}</p>
       <form class="add-wallet-form" @submit.prevent="onAddWallet">
@@ -418,6 +419,7 @@ loadRoles();
           {{ t('admin.customers.addWallet') }}
         </button>
       </form>
+      </template>
 
       <h3>{{ t('admin.customers.historyHeading') }}</h3>
       <div class="table-scroll">

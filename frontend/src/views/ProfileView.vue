@@ -43,6 +43,7 @@ onMounted(async () => {
     name.value = result.name ?? '';
     nationalCode.value = result.nationalCode ?? '';
     phoneNumber.value = result.phoneNumber ?? '';
+    auth.setAvatarUrl(result.avatarUrl ?? null);
   } catch (err) {
     profileError.value = err instanceof ApiError ? err.message : t('profile.loadError');
   }
@@ -105,6 +106,7 @@ async function onUploadAvatar() {
     if (me.value) {
       me.value.avatarUrl = result.avatarUrl;
     }
+    auth.setAvatarUrl(result.avatarUrl);
     avatarFile.value = undefined;
   } catch (err) {
     avatarError.value = err instanceof ApiError ? err.message : t('profile.avatar.error');

@@ -458,11 +458,15 @@ export default {
       tableWhen: 'زمان',
       none: 'هنوز فعالیتی ثبت نشده است.',
       loadFailed: 'بارگذاری گزارش زمان‌بند ناموفق بود',
+      wallet: 'کیف پول',
+      transaction: 'تراکنش',
+      installment: 'قسط',
       actions: {
         auto_withdraw_sweep: 'برداشت خودکار',
         rail_settlement_sweep: 'تسویه ریلی',
         installment_generate: 'ایجاد قسط',
         installment_overdue_penalty: 'اعمال جریمه تأخیر',
+        installment_overdue_block: 'مسدودسازی کیف پول (تأخیر)',
         purchase_timeout_reverse: 'برگشت پرداخت منقضی‌شده',
       },
     },
@@ -652,6 +656,7 @@ export default {
       title: 'کیف پول',
       owner: 'مالک',
       loadFailed: 'بارگذاری کیف پول ناموفق بود',
+      transactionsHeading: 'تراکنش‌ها ({count})',
     },
     reports: {
       title: 'گزارش‌ها',

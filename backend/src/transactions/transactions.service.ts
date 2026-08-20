@@ -2241,11 +2241,12 @@ export class TransactionsService {
   // which rail (Pol Pay/Paya/Satna/bank transfer) it went out over — the
   // WITHDRAW still carries the actual ledger movement, exactly as it does
   // for a non-rail wallet.
-  async sweepAutoWithdraw(walletId: string): Promise<void> {
-    await this.dataSource.transaction(async (manager) => {
+  async sweepAutoWithdraw(walletId: string): Promise<Transaction[]> {
+    return this.dataSource.transaction(async (manager) => {
+      const created: Transaction[] = [];
       const wallet = await this.walletsService.lockById(manager, walletId);
       if (BigInt(wallet.balance) <= 0n) {
-        return;
+        return created;
       }
 
       const now = new Date();
@@ -2312,7 +2313,8 @@ export class TransactionsService {
         });
         await manager.save(transaction);
         await recordRailSettlement(transaction, wallet.balance, null, null);
-        return;
+        created.push(transaction);
+        return created;
       }
 
       let remainingBalance = BigInt(wallet.balance);
@@ -2351,6 +2353,7 @@ export class TransactionsService {
             item.iban,
             item.label,
           );
+          created.push(withdrawal);
         }
 
         purchase.settledAt = new Date();
@@ -2360,6 +2363,7 @@ export class TransactionsService {
       await manager.update(Wallet, wallet.id, {
         balance: remainingBalance.toString(),
       });
+      return created;
     });
   }
 

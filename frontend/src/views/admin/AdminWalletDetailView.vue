@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { apiRequest, ApiError } from '../../api/client';
 import { formatAmount, formatAmountWords } from '../../utils/currency';
 import { formatDateTime } from '../../utils/date';
 import { displayIdentity } from '../../utils/identity';
 import { walletDisplayName } from '../../utils/wallet-name';
+import { transactionTypeClass, transactionStatusClass, type AdminTransaction } from '../../types/admin';
 import type { Wallet } from '../../stores/wallet';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
 
@@ -18,11 +19,21 @@ interface AdminWalletDetail extends Wallet {
 
 const { t } = useI18n();
 const route = useRoute();
+const router = useRouter();
 const wallet = ref<AdminWalletDetail | null>(null);
+const transactions = ref<AdminTransaction[]>([]);
+const transactionsError = ref('');
 const error = ref('');
 const busy = ref(false);
 const adjustAmount = ref('');
 const adjustReason = ref('');
+
+// Signed relative to *this* wallet — a TRANSFER out of it reads as negative
+// even though the same row is positive on the receiving wallet's own page.
+function signedAmount(tx: AdminTransaction): string {
+  const amount = formatAmount(tx.amount, wallet.value!.walletType.currency);
+  return tx.toWalletId === wallet.value!.id ? `+ ${amount}` : `− ${amount}`;
+}
 
 const amountWords = computed(() =>
   wallet.value ? formatAmountWords(wallet.value.balance, wallet.value.walletType.currency) : '',
@@ -33,10 +44,19 @@ const virtualAmountWords = computed(() =>
 
 async function load() {
   error.value = '';
+  transactionsError.value = '';
   try {
     wallet.value = await apiRequest<AdminWalletDetail>(`/admin/wallets/${route.params.id}`);
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : t('admin.walletDetail.loadFailed');
+    return;
+  }
+  try {
+    transactions.value = await apiRequest<AdminTransaction[]>(
+      `/admin/transactions?walletId=${route.params.id}&limit=100`,
+    );
+  } catch (err) {
+    transactionsError.value = err instanceof ApiError ? err.message : t('admin.transactions.loadFailed');
   }
 }
 
@@ -224,6 +244,43 @@ onMounted(load);
         <input v-model="adjustReason" type="text" class="admin-input" :placeholder="t('admin.wallets.reasonPlaceholder')" />
         <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('admin.wallets.save') }}</button>
       </form>
+    </section>
+
+    <section v-if="wallet" class="admin-card">
+      <h2>{{ t('admin.walletDetail.transactionsHeading', { count: transactions.length }) }}</h2>
+      <p v-if="transactionsError" class="admin-error">{{ transactionsError }}</p>
+      <div class="table-scroll">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>{{ t('admin.transactions.tableType') }}</th>
+            <th>{{ t('admin.transactions.tableStatus') }}</th>
+            <th>{{ t('admin.transactions.tableAmount') }}</th>
+            <th>{{ t('admin.transactions.tableNote') }}</th>
+            <th>{{ t('admin.transactions.tableId') }}</th>
+            <th>{{ t('admin.transactions.tableDate') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="tx in transactions"
+            :key="tx.id"
+            class="tx-row-clickable"
+            @click="router.push({ name: 'admin-transaction-detail', params: { id: tx.id } })"
+          >
+            <td><span class="admin-badge" :class="transactionTypeClass(tx.type)">{{ t(`admin.transactions.${tx.type.toLowerCase()}`) }}</span></td>
+            <td><span class="admin-badge" :class="transactionStatusClass(tx.status)">{{ t(`admin.transactions.status${tx.status}`) }}</span></td>
+            <td>
+              <span class="money-chip" :class="tx.toWalletId === wallet.id ? 'money-in' : 'money-out'">{{ signedAmount(tx) }}</span>
+            </td>
+            <td>{{ tx.note ?? t('common.none') }}</td>
+            <td class="mono-id">{{ tx.id }}</td>
+            <td>{{ formatDateTime(tx.createdAt) }}</td>
+          </tr>
+          <tr v-if="!transactions.length"><td colspan="6">{{ t('admin.transactions.noTransactions') }}</td></tr>
+        </tbody>
+      </table>
+      </div>
     </section>
   </AdminLayout>
 </template>

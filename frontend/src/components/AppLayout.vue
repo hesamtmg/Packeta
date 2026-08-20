@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
+import { API_URL } from '../api/client';
 import LanguageSwitcher from './LanguageSwitcher.vue';
 import './../styles/admin-theme.css';
 import './../styles/customer-theme.css';
@@ -15,6 +16,7 @@ const auth = useAuthStore();
 const { t } = useI18n();
 
 const initials = computed(() => (auth.email ?? '?').slice(0, 1).toUpperCase());
+const avatarSrc = computed(() => (auth.avatarUrl ? `${API_URL}${auth.avatarUrl}` : null));
 
 function logout() {
   auth.logout();
@@ -81,7 +83,10 @@ function logout() {
             </router-link>
             <LanguageSwitcher />
             {{ auth.email }}
-            <router-link :to="{ name: 'profile' }" class="admin-avatar">{{ initials }}</router-link>
+            <router-link :to="{ name: 'profile' }" class="admin-avatar">
+              <img v-if="avatarSrc" :src="avatarSrc" :alt="t('nav.profile')" />
+              <template v-else>{{ initials }}</template>
+            </router-link>
           </div>
         </header>
 
