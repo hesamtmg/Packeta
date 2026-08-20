@@ -4,6 +4,7 @@ import { WalletsService } from '../wallets/wallets.service';
 import { TransactionsService } from '../transactions/transactions.service';
 import { effectiveRailScheduleTimes } from '../rail-settlements/rail-schedule';
 import { LoggingService } from '../logging/logging.service';
+import { currentTehranTime } from '../common/tehran-time';
 
 // Merchant wallets configured with a withdrawal-schedule rail (Pol Pay /
 // Paya / Satna / bank transfer — see Wallet.railType) get swept on that
@@ -25,10 +26,7 @@ export class SettlementRailSweepService {
   @Cron('* * * * *')
   async sweep(): Promise<void> {
     console.log('SettlementRailSweepService');
-    const now = new Date();
-    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(
-      now.getMinutes(),
-    ).padStart(2, '0')}`;
+    const currentTime = currentTehranTime();
 
     const candidates = await this.walletsService.listWithRailSettlementDue();
     const due = candidates.filter((wallet) => {

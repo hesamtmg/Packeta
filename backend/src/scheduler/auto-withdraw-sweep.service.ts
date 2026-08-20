@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { WalletsService } from '../wallets/wallets.service';
 import { TransactionsService } from '../transactions/transactions.service';
 import { LoggingService } from '../logging/logging.service';
+import { currentTehranTime } from '../common/tehran-time';
 
 // Merchant wallet types configure exactly 3 "HH:MM" (server-local) times at
 // which every wallet of that type has its full balance auto-swept out via a
@@ -21,10 +22,7 @@ export class AutoWithdrawSweepService {
   @Cron('* * * * *')
   async sweep(): Promise<void> {
     console.log('AutoWithdrawSweepService');
-    const now = new Date();
-    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(
-      now.getMinutes(),
-    ).padStart(2, '0')}`;
+    const currentTime = currentTehranTime();
 
     const candidates = await this.walletsService.listWithAutoWithdrawDue();
     const due = candidates.filter((wallet) =>

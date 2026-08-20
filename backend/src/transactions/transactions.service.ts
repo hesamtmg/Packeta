@@ -180,12 +180,13 @@ export class TransactionsService {
     walletId: string,
     amount: number,
     railType: SettlementRailType,
+    destinationIban: string,
     idempotencyKey: string,
   ): Promise<MoneyResult> {
     return this.run(
       'withdraw',
       userId,
-      { walletId, amount, railType },
+      { walletId, amount, railType, destinationIban },
       idempotencyKey,
       async (manager) => {
         const walletRef = await this.walletsService.getById(userId, walletId);
@@ -229,6 +230,7 @@ export class TransactionsService {
           fromWalletId: wallet.id,
           toWalletId: null,
           amount: amount.toString(),
+          destinationIban,
           idempotencyKey,
         });
         await manager.save(transaction);
@@ -239,7 +241,7 @@ export class TransactionsService {
             walletId: wallet.id,
             railType,
             amount: amount.toString(),
-            destinationIban: null,
+            destinationIban,
             label: null,
             transactionId: transaction.id,
             scheduledFor: new Date(),

@@ -209,6 +209,7 @@ export default {
         title: 'برداشت',
         chooseWallet: 'انتخاب کیف پول',
         chooseRail: 'روش برداشت را انتخاب کنید',
+        ibanPlaceholder: 'شماره شبا مقصد',
         submit: 'برداشت',
       },
       transfer: {

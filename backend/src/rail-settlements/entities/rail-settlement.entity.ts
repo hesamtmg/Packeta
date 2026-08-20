@@ -71,6 +71,18 @@ export class RailSettlement {
   @Column({ type: 'timestamptz', nullable: true })
   processedAt: Date | null;
 
+  // The mocked rail provider's own reference for this payout, and its raw
+  // response payload — persisted so it survives until the real PAYA/SATNA/
+  // Pol Pay/bank-transfer APIs replace RailProviderClient's mock
+  // implementations (see providers/*.provider.ts). Each rail's real
+  // response shape differs, hence the untyped jsonb rather than dedicated
+  // columns.
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  providerReference: string | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  providerResponse: Record<string, unknown> | null;
+
   // The resulting WITHDRAW Transaction — see Transaction.railSettlementId
   // for the reverse link.
   @Index({ unique: true })

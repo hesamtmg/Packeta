@@ -12,6 +12,8 @@ export function serializeRailSettlement(settlement: RailSettlement) {
     scheduledFor: settlement.scheduledFor,
     processedAt: settlement.processedAt,
     transactionId: settlement.transactionId,
+    providerReference: settlement.providerReference,
+    providerResponse: settlement.providerResponse,
     createdAt: settlement.createdAt,
   };
 }
