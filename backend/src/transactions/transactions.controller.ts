@@ -57,6 +57,7 @@ export class TransactionsController {
       dto.walletId,
       dto.amount,
       dto.railType,
+      dto.destinationIban,
       idempotencyKey,
     );
   }

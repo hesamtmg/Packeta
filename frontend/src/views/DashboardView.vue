@@ -69,6 +69,7 @@ const depositAmount = ref('');
 const withdrawWalletId = ref('');
 const withdrawAmount = ref('');
 const withdrawRailType = ref<SettlementRailType | ''>('');
+const withdrawDestinationIban = ref('');
 const transferFromWalletId = ref('');
 const transferEmail = ref('');
 const transferAmount = ref('');
@@ -604,10 +605,16 @@ function onDeposit() {
 function onWithdraw() {
   runAction(async () => {
     const w = findWallet(withdrawWalletId.value);
-    if (!w || !withdrawRailType.value) return;
-    await wallet.withdraw(w.id, toMinorUnits(withdrawAmount.value, w.walletType.currency), withdrawRailType.value);
+    if (!w || !withdrawRailType.value || !withdrawDestinationIban.value) return;
+    await wallet.withdraw(
+      w.id,
+      toMinorUnits(withdrawAmount.value, w.walletType.currency),
+      withdrawRailType.value,
+      withdrawDestinationIban.value,
+    );
     withdrawAmount.value = '';
     withdrawRailType.value = '';
+    withdrawDestinationIban.value = '';
   });
 }
 
@@ -1148,6 +1155,13 @@ async function onGrantCredit() {
           <option value="SATNA">{{ t('dashboard.settlement.rail.SATNA') }}</option>
           <option value="BANK_TRANSFER">{{ t('dashboard.settlement.rail.BANK_TRANSFER') }}</option>
         </select>
+        <input
+          v-model="withdrawDestinationIban"
+          type="text"
+          :placeholder="t('dashboard.actions.withdraw.ibanPlaceholder')"
+          class="admin-input"
+          required
+        />
         <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.actions.withdraw.submit') }}</button>
       </form>
 

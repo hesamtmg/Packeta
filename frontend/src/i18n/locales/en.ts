@@ -209,6 +209,7 @@ export default {
         title: 'Withdraw',
         chooseWallet: 'Choose wallet',
         chooseRail: 'Choose how you want to withdraw',
+        ibanPlaceholder: 'Destination IBAN',
         submit: 'Withdraw',
       },
       transfer: {
