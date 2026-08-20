@@ -99,6 +99,19 @@ async function reopen(wallet: AdminWallet) {
   }
 }
 
+async function close(wallet: AdminWallet) {
+  error.value = '';
+  busy.value = true;
+  try {
+    await apiRequest(`/admin/wallets/${wallet.id}`, { method: 'DELETE' });
+    await load();
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : t('admin.wallets.closeFailed');
+  } finally {
+    busy.value = false;
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -145,6 +158,15 @@ onMounted(load);
                 <button class="admin-btn admin-btn-ghost" @click.stop="toggleAdjust(w.id)">{{ t('admin.wallets.adjust') }}</button>
                 <button v-if="w.closedAt" class="admin-btn admin-btn-ghost" :disabled="busy" @click.stop="reopen(w)">
                   {{ t('admin.wallets.reopen') }}
+                </button>
+                <button
+                  v-else-if="auth.isSuperAdmin"
+                  class="admin-btn admin-btn-danger"
+                  :disabled="busy || w.balance !== '0'"
+                  :title="w.balance !== '0' ? t('dashboard.wallets.closeRequiresZero') : ''"
+                  @click.stop="close(w)"
+                >
+                  {{ t('admin.wallets.close') }}
                 </button>
               </td>
             </tr>
