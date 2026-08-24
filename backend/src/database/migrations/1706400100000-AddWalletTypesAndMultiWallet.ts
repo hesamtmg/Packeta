@@ -23,15 +23,7 @@ export class AddWalletTypesAndMultiWallet1706400100000 implements MigrationInter
       `CREATE UNIQUE INDEX "IDX_wallet_types_code" ON "wallet_types" ("code")`,
     );
 
-    await queryRunner.query(`
-      INSERT INTO "wallet_types"
-        ("code", "name", "allowNegativeBalance", "creditLimit", "allowWithdraw", "allowP2pOut", "allowP2pIn")
-      VALUES
-        ('BUY', 'Buy', false, NULL, true, true, true),
-        ('SELL', 'Sell', false, NULL, true, false, false),
-        ('CREDIT', 'Credit', true, 100000, true, false, false),
-        ('GIFT', 'Gift', false, NULL, false, false, false)
-    `);
+
 
     // --- wallets: allow multiple per user, tag each with a wallet type ---
     await queryRunner.query(`DROP INDEX "IDX_wallets_userId"`);

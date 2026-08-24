@@ -29,8 +29,8 @@ export class AddCurrencies1706400300000 implements MigrationInterface {
       INSERT INTO "currencies"
         ("code", "name", "symbol", "symbolPosition", "decimalPlaces", "isDefault")
       VALUES
-        ('USD', 'US Dollar', '$', 'PREFIX', 2, true),
-        ('IRR', 'Iranian Rial', 'IRR', 'SUFFIX', 0, false)
+        ('USD', 'US Dollar', '$', 'PREFIX', 2, false),
+        ('IRR', 'Iranian Rial', 'IRR', 'SUFFIX', 0, true)
     `);
 
     // --- wallet_types: denominate every existing row in USD, then make
@@ -67,10 +67,8 @@ export class AddCurrencies1706400300000 implements MigrationInterface {
         ("code", "name", "currencyId", "allowNegativeBalance", "creditLimit", "allowWithdraw", "allowP2pOut", "allowP2pIn")
       SELECT v.code, v.name, c."id", v."allowNegativeBalance", v."creditLimit", v."allowWithdraw", v."allowP2pOut", v."allowP2pIn"
       FROM (VALUES
-        ('BUY', 'Buy', false, NULL::bigint, true, true, true),
-        ('SELL', 'Sell', false, NULL::bigint, true, false, false),
-        ('CREDIT', 'Credit', true, 50000000::bigint, true, false, false),
-        ('GIFT', 'Gift', false, NULL::bigint, false, false, false)
+        ('BUY', 'خرید', false, NULL::bigint, true, true, true),
+        ('GIFT', 'هدیه', false, NULL::bigint, false, false, false)
       ) AS v(code, name, "allowNegativeBalance", "creditLimit", "allowWithdraw", "allowP2pOut", "allowP2pIn")
       CROSS JOIN (SELECT "id" FROM "currencies" WHERE "code" = 'IRR') AS c
     `);

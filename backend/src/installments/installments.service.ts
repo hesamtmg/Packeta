@@ -166,6 +166,7 @@ export class InstallmentsService {
       today.getMonth() - 1,
       today.getDate(),
     );
+  
     const periodStart = toDateOnly(periodStartAt);
 
     const wallets = await this.walletsRepository
@@ -198,7 +199,7 @@ export class InstallmentsService {
         .getRawOne()) ?? { total: '0' };
       const periodTotal = BigInt(total ?? '0');
       if (periodTotal <= 0n) continue;
-
+   console.log('InstallmentSweepService3');
       for (
         let sequenceNumber = 1;
         sequenceNumber <= installmentCount;

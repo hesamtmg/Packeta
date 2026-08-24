@@ -3,10 +3,10 @@
 // counterparties by email (transfers, purchases, restriction lists) that
 // making it nullable would ripple everywhere. Instead they get a
 // deterministic, never-shown placeholder in this reserved domain.
-const SYNTHETIC_EMAIL_DOMAIN = '@phone.internal';
+const SYNTHETIC_EMAIL_DOMAIN = '@packeta.ir';
 
 export function syntheticEmailForPhone(phoneNumber: string): string {
-  return `phone-${phoneNumber.replace(/[^0-9]/g, '')}${SYNTHETIC_EMAIL_DOMAIN}`;
+  return `${phoneNumber.replace(/[^0-9]/g, '')}${SYNTHETIC_EMAIL_DOMAIN}`;
 }
 
 export function isSyntheticPhoneEmail(email: string): boolean {

@@ -56,7 +56,7 @@ services:
     environment:
       POSTGRES_USER: hesamtmg
       POSTGRES_PASSWORD: Tmg@2215309
-      POSTGRES_DB: postgres
+      POSTGRES_DB: packeta
     ports:
         - '5432:5432'
     volumes:
@@ -85,7 +85,7 @@ services:
     volumes:
       - ipg_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ipg']
+      test: ['CMD-SHELL', 'pg_isready -U packeta-ipg']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -172,7 +172,7 @@ services:
       DB_PORT: 5432
       DB_USERNAME: hesamtmg
       DB_PASSWORD: Tmg@2215309
-      DB_DATABASE: postgres
+      DB_DATABASE: packeta
       MONGO_URI: mongodb://mongo:27017/packeta_logs
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1h}
