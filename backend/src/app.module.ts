@@ -22,6 +22,9 @@ import { Installment } from './installments/entities/installment.entity';
 import { RailSettlement } from './rail-settlements/entities/rail-settlement.entity';
 import { PanelRole } from './panel-roles/entities/panel-role.entity';
 import { WidgetSession } from './widget/entities/widget-session.entity';
+import { GlAccount } from './gl/entities/gl-account.entity';
+import { GlJournalEntry } from './gl/entities/gl-journal-entry.entity';
+import { GlPosting } from './gl/entities/gl-posting.entity';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { WalletsModule } from './wallets/wallets.module';
@@ -37,6 +40,7 @@ import { SettlementModule } from './settlement/settlement.module';
 import { RailSettlementsModule } from './rail-settlements/rail-settlements.module';
 import { PanelRolesModule } from './panel-roles/panel-roles.module';
 import { WidgetModule } from './widget/widget.module';
+import { GlModule } from './gl/gl.module';
 
 @Module({
   imports: [
@@ -78,6 +82,9 @@ import { WidgetModule } from './widget/widget.module';
           RailSettlement,
           PanelRole,
           WidgetSession,
+          GlAccount,
+          GlJournalEntry,
+          GlPosting,
         ],
         synchronize: false,
       }),
@@ -103,6 +110,7 @@ import { WidgetModule } from './widget/widget.module';
     RailSettlementsModule,
     PanelRolesModule,
     WidgetModule,
+    GlModule,
   ],
 })
 export class AppModule {}

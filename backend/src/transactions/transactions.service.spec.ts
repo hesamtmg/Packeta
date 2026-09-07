@@ -7,7 +7,10 @@ import {
 } from '@nestjs/common';
 import { TransactionsService } from './transactions.service';
 import { TransactionType } from './entities/transaction.entity';
-import { SettlementRailType } from '../rail-settlements/entities/rail-settlement.entity';
+import {
+  RailSettlementStatus,
+  SettlementRailType,
+} from '../rail-settlements/entities/rail-settlement.entity';
 
 // Minimal stand-in for nestjs-i18n's I18nService: resolves against the real
 // English translation files (so message-dependent assertions, e.g. the
@@ -31,6 +34,18 @@ const i18nStub = {
     return text;
   },
 };
+
+// GL posting is verified separately (see ledger.service.spec.ts) — these
+// unit tests only need it to not blow up when a wired-in call site invokes
+// it.
+function buildLedgerServiceStub() {
+  return {
+    postCashMovement: jest.fn().mockResolvedValue(undefined),
+    postWalletToWallet: jest.fn().mockResolvedValue(undefined),
+    postAdjustment: jest.fn().mockResolvedValue(undefined),
+    postEntry: jest.fn().mockResolvedValue(undefined),
+  };
+}
 
 interface WalletTypeFixture {
   code?: string;
@@ -69,6 +84,7 @@ function buildService(options: {
   supportWallet?: WalletFixture | null;
   ipgOverrides?: Record<string, jest.Mock>;
   installmentsService?: Record<string, jest.Mock>;
+  railSettlementStatus?: RailSettlementStatus;
 }) {
   const {
     senderWallet,
@@ -77,6 +93,7 @@ function buildService(options: {
     supportWallet,
     ipgOverrides,
     installmentsService,
+    railSettlementStatus,
   } = options;
   const lockCalls: string[] = [];
 
@@ -196,8 +213,13 @@ function buildService(options: {
   };
 
   const railSettlementsService = {
-    createForSweep: jest.fn().mockResolvedValue({ id: 'rail-settlement-1' }),
+    createForSweep: jest.fn().mockResolvedValue({
+      id: 'rail-settlement-1',
+      status: railSettlementStatus ?? RailSettlementStatus.COMPLETED,
+    }),
   };
+
+  const ledgerService = buildLedgerServiceStub();
 
   const service = new TransactionsService(
     dataSource as any,
@@ -211,6 +233,7 @@ function buildService(options: {
     settlementService as any,
     (installmentsService ?? {}) as any,
     railSettlementsService as any,
+    ledgerService as any,
     {} as any,
     i18nStub as any,
   );
@@ -223,6 +246,7 @@ function buildService(options: {
     zarinpalClientService,
     railSettlementsService,
     walletsService,
+    ledgerService,
   };
 }
 
@@ -449,6 +473,40 @@ describe('TransactionsService.transfer', () => {
     );
 
     expect(lockCalls).toEqual(['wallet-a', 'wallet-b']);
+  });
+
+  it('posts a wallet-to-wallet GL entry with no cash leg', async () => {
+    const senderWallet: WalletFixture = {
+      id: 'wallet-b',
+      balance: '500',
+      walletType: walletType(),
+    };
+    const recipientWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '0',
+      walletType: walletType({ name: 'Sell', allowP2pOut: false }),
+    };
+    const { service, manager, ledgerService } = buildService({
+      senderWallet,
+      recipientWallet,
+    });
+
+    const result = await service.transfer(
+      'sender',
+      senderWallet.id,
+      'recipient@example.com',
+      100,
+      'idem-gl-transfer-1',
+    );
+
+    expect(ledgerService.postWalletToWallet).toHaveBeenCalledWith(
+      manager,
+      result.transactionId,
+      expect.any(String),
+      senderWallet.walletType,
+      recipientWallet.walletType,
+      100n,
+    );
   });
 
   it('rejects a transfer that exceeds the sender balance', async () => {
@@ -681,6 +739,66 @@ describe('TransactionsService.withdraw', () => {
     );
   });
 
+  it('posts a WITHDRAW to bank cash when the rail settlement completes', async () => {
+    const senderWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '1000',
+      walletType: walletType({ name: 'Buy' }),
+    };
+    const { service, manager, ledgerService } = buildService({
+      senderWallet,
+      railSettlementStatus: RailSettlementStatus.COMPLETED,
+    });
+
+    const result = await service.withdraw(
+      'sender',
+      senderWallet.id,
+      300,
+      SettlementRailType.POL_PAY,
+      'IR000000000000000000000001',
+      'idem-gl-withdraw-1',
+    );
+
+    expect(ledgerService.postCashMovement).toHaveBeenCalledWith(
+      manager,
+      result.transactionId,
+      expect.any(String),
+      senderWallet.walletType,
+      -300n,
+      'BANK_CASH',
+    );
+  });
+
+  it('parks a WITHDRAW in settlement clearing (not bank cash) when the rail settlement fails', async () => {
+    const senderWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '1000',
+      walletType: walletType({ name: 'Buy' }),
+    };
+    const { service, manager, ledgerService } = buildService({
+      senderWallet,
+      railSettlementStatus: RailSettlementStatus.FAILED,
+    });
+
+    const result = await service.withdraw(
+      'sender',
+      senderWallet.id,
+      300,
+      SettlementRailType.POL_PAY,
+      'IR000000000000000000000001',
+      'idem-gl-withdraw-2',
+    );
+
+    expect(ledgerService.postCashMovement).toHaveBeenCalledWith(
+      manager,
+      result.transactionId,
+      expect.any(String),
+      senderWallet.walletType,
+      -300n,
+      'SETTLEMENT_CLEARING',
+    );
+  });
+
   it('rejects withdrawing a credit wallet beyond its credit limit', async () => {
     const senderWallet: WalletFixture = {
       id: 'wallet-a',
@@ -792,7 +910,9 @@ describe('TransactionsService.adjust', () => {
       balance: '100',
       walletType: walletType({ name: 'Gift', allowWithdraw: false }),
     };
-    const { service } = buildService({ senderWallet: wallet });
+    const { service, manager, ledgerService } = buildService({
+      senderWallet: wallet,
+    });
 
     const result = await service.adjust(
       'admin-1',
@@ -805,6 +925,13 @@ describe('TransactionsService.adjust', () => {
     expect(result.balance).toBe('150');
     expect(result.toWalletId).toBe(wallet.id);
     expect(result.fromWalletId).toBeNull();
+    expect(ledgerService.postAdjustment).toHaveBeenCalledWith(
+      manager,
+      result.transactionId,
+      'Promo credit',
+      wallet.walletType,
+      50n,
+    );
   });
 
   it('debits a wallet down to but not past its floor', async () => {
@@ -813,7 +940,9 @@ describe('TransactionsService.adjust', () => {
       balance: '100',
       walletType: walletType({ name: 'Buy' }),
     };
-    const { service } = buildService({ senderWallet: wallet });
+    const { service, manager, ledgerService } = buildService({
+      senderWallet: wallet,
+    });
 
     const result = await service.adjust(
       'admin-1',
@@ -824,6 +953,13 @@ describe('TransactionsService.adjust', () => {
     );
     expect(result.balance).toBe('0');
     expect(result.fromWalletId).toBe(wallet.id);
+    expect(ledgerService.postAdjustment).toHaveBeenCalledWith(
+      manager,
+      result.transactionId,
+      'Correcting duplicate deposit',
+      wallet.walletType,
+      -100n,
+    );
   });
 
   it('rejects a debit that would take the wallet past its floor', async () => {
@@ -1041,6 +1177,7 @@ function buildSweepService(options: {
     settlementService as any,
     {} as any,
     railSettlementsService as any,
+    buildLedgerServiceStub() as any,
     {} as any,
     i18nStub as any,
   );
@@ -1375,6 +1512,60 @@ describe('TransactionsService.verifyPurchase', () => {
       manager,
       'installment-1',
       'installment-tx-1',
+    );
+  });
+
+  it('verifies a plain self-deposit and posts it to the GL as a bank-cash inflow', async () => {
+    const depositWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '200',
+      walletType: walletType({ name: 'Buy' }),
+    };
+    const { service, manager, zarinpalClientService, ledgerService } =
+      buildService({ senderWallet: depositWallet });
+
+    const pendingDeposit = {
+      id: 'deposit-tx-1',
+      type: TransactionType.DEPOSIT,
+      status: 'PENDING',
+      fromWalletId: null,
+      toWalletId: depositWallet.id,
+      amount: '300',
+      installmentId: null,
+      settlesWalletId: null,
+      completesPurchaseId: null,
+      expiresAt: null,
+      ipgAuthority: 'zarinpal-auth-1',
+    };
+    manager.createQueryBuilder = jest.fn(() => {
+      const builder: any = {
+        setLock: () => builder,
+        where: () => builder,
+        andWhere: () => builder,
+        getOne: async () => pendingDeposit,
+      };
+      return builder;
+    });
+
+    const result = await service.verifyPurchase('deposit-tx-1');
+
+    expect(result.status).toBe('COMPLETED');
+    expect(zarinpalClientService.verifyPayment).toHaveBeenCalledWith(
+      'zarinpal-auth-1',
+      '300',
+    );
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      depositWallet.id,
+      { balance: '500' },
+    );
+    expect(ledgerService.postCashMovement).toHaveBeenCalledWith(
+      manager,
+      'deposit-tx-1',
+      expect.any(String),
+      depositWallet.walletType,
+      300n,
+      'BANK_CASH',
     );
   });
 
@@ -2385,6 +2576,7 @@ describe('TransactionsService.getHistory', () => {
     const service = new TransactionsService(
       {} as any,
       walletsService as any,
+      {} as any,
       {} as any,
       {} as any,
       {} as any,

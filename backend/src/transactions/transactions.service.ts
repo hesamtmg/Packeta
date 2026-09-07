@@ -43,7 +43,12 @@ import {
   InstallmentStatus,
 } from '../installments/entities/installment.entity';
 import { RailSettlementsService } from '../rail-settlements/rail-settlements.service';
-import { SettlementRailType } from '../rail-settlements/entities/rail-settlement.entity';
+import {
+  RailSettlementStatus,
+  SettlementRailType,
+} from '../rail-settlements/entities/rail-settlement.entity';
+import { LedgerService } from '../gl/ledger.service';
+import { GlAccountCode } from '../gl/entities/gl-account.entity';
 
 export interface MoneyResult {
   transactionId: string;
@@ -86,6 +91,7 @@ export class TransactionsService {
     private readonly settlementService: SettlementService,
     private readonly installmentsService: InstallmentsService,
     private readonly railSettlementsService: RailSettlementsService,
+    private readonly ledgerService: LedgerService,
     @InjectRepository(Transaction)
     private readonly transactionsRepository: Repository<Transaction>,
     private readonly i18n: I18nService,
@@ -251,6 +257,27 @@ export class TransactionsService {
           railSettlementId: settlement.id,
         });
 
+        // The mocked rail providers resolve synchronously (see
+        // BankTransferClientService etc.), so the settlement's outcome is
+        // already known here. A COMPLETED settlement means the money
+        // actually left the bank; a FAILED one means it left the customer's
+        // wallet without a matching bank debit — parked in
+        // SETTLEMENT_CLEARING rather than posted straight to BANK_CASH,
+        // until it's reconciled. Once a real (asynchronous) rail API
+        // replaces these mocks, a FAILED-or-still-PENDING settlement here
+        // will need a second posting later, when the real confirmation
+        // arrives, to move it from clearing to bank cash.
+        await this.ledgerService.postCashMovement(
+          manager,
+          transaction.id,
+          `Withdraw via ${railType}`,
+          walletRef.walletType,
+          -BigInt(amount),
+          settlement.status === RailSettlementStatus.COMPLETED
+            ? GlAccountCode.BANK_CASH
+            : GlAccountCode.SETTLEMENT_CLEARING,
+        );
+
         return {
           transactionId: transaction.id,
           fromWalletId: wallet.id,
@@ -378,6 +405,22 @@ export class TransactionsService {
         });
         await manager.save(transaction);
 
+        // toWalletRef came from findEligibleP2pInWallet, which only joins
+        // walletType for filtering and doesn't select it — fetch the full
+        // ref (with walletType+currency) to know which GL account it maps
+        // to.
+        const toWalletFullRef = await this.walletsService.getByIdUnscoped(
+          toWallet.id,
+        );
+        await this.ledgerService.postWalletToWallet(
+          manager,
+          transaction.id,
+          'Transfer',
+          fromWalletRef.walletType,
+          toWalletFullRef.walletType,
+          BigInt(amount),
+        );
+
         return {
           transactionId: transaction.id,
           fromWalletId: fromWallet.id,
@@ -443,6 +486,14 @@ export class TransactionsService {
           performedByUserId: adminUserId,
         });
         await manager.save(transaction);
+
+        await this.ledgerService.postAdjustment(
+          manager,
+          transaction.id,
+          reason,
+          walletRef.walletType,
+          BigInt(amount),
+        );
 
         return {
           transactionId: transaction.id,
@@ -1679,6 +1730,21 @@ export class TransactionsService {
           await manager.update(Wallet, toWallet.id, {
             balance: newToBalance.toString(),
           });
+
+          // Plain self-deposit (installment repayment / overdue-and-quit
+          // collection go through creditInstallmentRepayment above, and
+          // aren't wired into the GL yet — see that method).
+          const toWalletFullRef = await this.walletsService.getByIdUnscoped(
+            toWallet.id,
+          );
+          await this.ledgerService.postCashMovement(
+            manager,
+            transaction.id,
+            'Deposit',
+            toWalletFullRef.walletType,
+            BigInt(transaction.amount),
+            GlAccountCode.BANK_CASH,
+          );
         }
 
         transaction.status = TransactionStatus.COMPLETED;

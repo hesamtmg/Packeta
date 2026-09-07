@@ -12,6 +12,7 @@ import { SettlementModule } from '../settlement/settlement.module';
 import { InstallmentsModule } from '../installments/installments.module';
 import { RailSettlementsModule } from '../rail-settlements/rail-settlements.module';
 import { CustomerActionGuard } from '../admin/guards/customer-action.guard';
+import { GlModule } from '../gl/gl.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { CustomerActionGuard } from '../admin/guards/customer-action.guard';
     SettlementModule,
     InstallmentsModule,
     RailSettlementsModule,
+    GlModule,
   ],
   controllers: [TransactionsController],
   providers: [TransactionsService, CustomerActionGuard],
