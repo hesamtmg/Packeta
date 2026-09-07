@@ -23,6 +23,18 @@ import {
   TransactionType,
 } from '../transactions/entities/transaction.entity';
 import { serializeWallet } from './wallet.serializer';
+import { LedgerService } from '../gl/ledger.service';
+
+// Correlated-subquery equivalent of the old `wallet.balance <> 0` filter, now
+// that balance is derived from gl_postings rather than stored — a wallet
+// with no postings at all (net 0) is excluded same as one whose postings
+// happen to sum to exactly 0.
+const WALLET_NONZERO_BALANCE_SQL = `EXISTS (
+  SELECT 1 FROM gl_postings gp
+  WHERE gp."walletId" = wallet.id
+  GROUP BY gp."walletId"
+  HAVING SUM(CASE WHEN gp.direction = 'CREDIT' THEN gp.amount ELSE -gp.amount END) <> 0
+)`;
 
 const WALLET_RELATIONS = { walletType: { currency: true } } as const;
 const WALLET_RELATIONS_WITH_OWNER = {
@@ -39,6 +51,7 @@ export class WalletsService {
     private readonly walletTypesService: WalletTypesService,
     private readonly usersService: UsersService,
     private readonly idempotencyService: IdempotencyService,
+    private readonly ledgerService: LedgerService,
   ) {}
 
   async createForUser(
@@ -75,7 +88,6 @@ export class WalletsService {
     const wallet = manager.create(Wallet, {
       userId,
       walletTypeId,
-      balance: '0',
       name: options?.name?.trim() ? options.name.trim() : null,
       purchaseTimeoutSeconds: options?.purchaseTimeoutSeconds ?? null,
       restrictedCounterparties: options?.restrictedCounterparties ?? null,
@@ -259,7 +271,10 @@ export class WalletsService {
     const availableVirtual = wallet.virtualAmount
       ? BigInt(wallet.virtualAmount)
       : 0n;
-    const repositoryBalance = BigInt(repository.balance);
+    const repositoryBalance = await this.ledgerService.getWalletBalance(
+      this.walletsRepository.manager,
+      repository.id,
+    );
     return availableVirtual < repositoryBalance
       ? availableVirtual
       : repositoryBalance;
@@ -386,7 +401,7 @@ export class WalletsService {
       where: { id: creditWallet.id },
       relations: WALLET_RELATIONS,
     });
-    const responseBody = serializeWallet(updated!);
+    const responseBody = serializeWallet(updated!, '0');
     await this.idempotencyService.complete(
       manager,
       idempotencyKey,
@@ -446,7 +461,11 @@ export class WalletsService {
     if (wallet.closedAt) {
       throw new BadRequestException('This wallet is already closed');
     }
-    if (BigInt(wallet.balance) !== 0n) {
+    const balance = await this.ledgerService.getWalletBalance(
+      this.walletsRepository.manager,
+      wallet.id,
+    );
+    if (balance !== 0n) {
       throw new UnprocessableEntityException(
         'Withdraw or transfer out the remaining balance before closing this wallet',
       );
@@ -476,7 +495,11 @@ export class WalletsService {
     if (wallet.closedAt) {
       throw new BadRequestException('This wallet is already closed');
     }
-    if (BigInt(wallet.balance) !== 0n) {
+    const balance = await this.ledgerService.getWalletBalance(
+      this.walletsRepository.manager,
+      wallet.id,
+    );
+    if (balance !== 0n) {
       throw new UnprocessableEntityException(
         'Withdraw or transfer out the remaining balance before closing this wallet',
       );
@@ -572,7 +595,7 @@ export class WalletsService {
       .where('walletType.supportsAutoWithdraw = true')
       .andWhere('walletType.autoWithdrawTimes IS NOT NULL')
       .andWhere('wallet."railType" IS NULL')
-      .andWhere('wallet.balance <> 0')
+      .andWhere(WALLET_NONZERO_BALANCE_SQL)
       .andWhere('wallet.closedAt IS NULL')
       .getMany();
   }
@@ -589,7 +612,7 @@ export class WalletsService {
       .innerJoinAndSelect('walletType.currency', 'currency')
       .where('walletType.supportsAutoWithdraw = true')
       .andWhere('wallet."railType" IS NOT NULL')
-      .andWhere('wallet.balance <> 0')
+      .andWhere(WALLET_NONZERO_BALANCE_SQL)
       .andWhere('wallet.closedAt IS NULL')
       .getMany();
   }
@@ -608,7 +631,7 @@ export class WalletsService {
       where: { isStarterType: true },
     });
     const wallets = types.map((type) =>
-      manager.create(Wallet, { userId, walletTypeId: type.id, balance: '0' }),
+      manager.create(Wallet, { userId, walletTypeId: type.id }),
     );
     return manager.save(wallets);
   }

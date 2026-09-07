@@ -51,6 +51,7 @@ import { CreatePanelRoleDto } from '../panel-roles/dto/create-panel-role.dto';
 import { UpdatePanelRoleDto } from '../panel-roles/dto/update-panel-role.dto';
 import { SettlementService } from '../settlement/settlement.service';
 import { GlReportingService } from '../gl/gl-reporting.service';
+import { LedgerService } from '../gl/ledger.service';
 
 function serializePanelRole(
   role: {
@@ -89,6 +90,7 @@ export class AdminController {
     private readonly panelRolesService: PanelRolesService,
     private readonly settlementService: SettlementService,
     private readonly glReportingService: GlReportingService,
+    private readonly ledgerService: LedgerService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -126,6 +128,10 @@ export class AdminController {
       await this.assertCustomerInScope(caller.userId, user.id);
     }
     const wallets = await this.walletsService.listForUser(id);
+    const walletBalances = await this.ledgerService.getWalletBalances(
+      this.dataSource.manager,
+      wallets.map((wallet) => wallet.id),
+    );
     return {
       id: user.id,
       email: user.email,
@@ -133,7 +139,9 @@ export class AdminController {
       role: user.role,
       panelRole: serializePanelRole(user.panelRole),
       createdAt: user.createdAt,
-      wallets: wallets.map((wallet) => serializeWallet(wallet)),
+      wallets: wallets.map((wallet) =>
+        serializeWallet(wallet, (walletBalances.get(wallet.id) ?? 0n).toString()),
+      ),
     };
   }
 
@@ -157,11 +165,17 @@ export class AdminController {
     const wallets = await this.walletsService.listMerchantEligibleWallets(
       merchant.id,
     );
+    const walletBalances = await this.ledgerService.getWalletBalances(
+      this.dataSource.manager,
+      wallets.map((wallet) => wallet.id),
+    );
     return {
       id: merchant.id,
       email: merchant.email,
       phoneNumber: merchant.phoneNumber,
-      wallets: wallets.map((wallet) => serializeWallet(wallet)),
+      wallets: wallets.map((wallet) =>
+        serializeWallet(wallet, (walletBalances.get(wallet.id) ?? 0n).toString()),
+      ),
     };
   }
 
@@ -288,8 +302,15 @@ export class AdminController {
     const wallets = isSuperAdmin
       ? await this.walletsService.listAll()
       : await this.walletsService.listScopedForAdmin(caller.userId);
+    const walletBalances = await this.ledgerService.getWalletBalances(
+      this.dataSource.manager,
+      wallets.map((wallet) => wallet.id),
+    );
     return wallets.map((wallet) => ({
-      ...serializeWallet(wallet),
+      ...serializeWallet(
+        wallet,
+        (walletBalances.get(wallet.id) ?? 0n).toString(),
+      ),
       ownerId: wallet.user.id,
       ownerEmail: wallet.user.email,
       ownerPhoneNumber: wallet.user.phoneNumber,
@@ -544,6 +565,10 @@ export class AdminController {
     const creditWallets = wallets.filter(
       (wallet) => wallet.walletType.code === WalletTypeCode.CREDIT,
     );
+    const creditWalletBalances = await this.ledgerService.getWalletBalances(
+      this.dataSource.manager,
+      creditWallets.map((wallet) => wallet.id),
+    );
     const summaries = await Promise.all(
       creditWallets.map(async (wallet) => {
         const outstanding =
@@ -553,7 +578,10 @@ export class AdminController {
           0n,
         );
         return {
-          ...serializeWallet(wallet),
+          ...serializeWallet(
+            wallet,
+            (creditWalletBalances.get(wallet.id) ?? 0n).toString(),
+          ),
           outstandingTotal: outstandingTotal.toString(),
           outstandingCount: outstanding.length,
         };
@@ -762,7 +790,7 @@ export class AdminController {
         nationalCode: dto.nationalCode,
       }),
     );
-    return serializeWallet({ ...wallet, walletType });
+    return serializeWallet({ ...wallet, walletType }, '0');
   }
 
   // Full single-wallet detail (every column, plus owner identity and its
@@ -776,12 +804,12 @@ export class AdminController {
   ) {
     await this.assertWalletInScope(admin.userId, walletId);
     const wallet = await this.walletsService.getByIdWithOwner(walletId);
-    const settlementAccounts = await this.settlementService.findForWallet(
-      this.dataSource.manager,
-      walletId,
-    );
+    const [settlementAccounts, balance] = await Promise.all([
+      this.settlementService.findForWallet(this.dataSource.manager, walletId),
+      this.ledgerService.getWalletBalance(this.dataSource.manager, walletId),
+    ]);
     return {
-      ...serializeWallet(wallet, settlementAccounts),
+      ...serializeWallet(wallet, balance.toString(), settlementAccounts),
       ownerId: wallet.user.id,
       ownerEmail: wallet.user.email,
       ownerPhoneNumber: wallet.user.phoneNumber,
@@ -798,7 +826,7 @@ export class AdminController {
   ) {
     await this.assertWalletInScope(admin.userId, walletId);
     const wallet = await this.walletsService.reopenAsAdmin(walletId);
-    return serializeWallet(wallet);
+    return serializeWallet(wallet, '0');
   }
 
   // Admin-scoped soft-close, e.g. from the role-management panel's embedded
@@ -811,7 +839,7 @@ export class AdminController {
   ) {
     await this.assertWalletInScope(admin.userId, walletId);
     const wallet = await this.walletsService.closeAsAdmin(walletId);
-    return serializeWallet(wallet);
+    return serializeWallet(wallet, '0');
   }
 
   // Bulk onboarding: an admin uploads a spreadsheet of customers/wallets

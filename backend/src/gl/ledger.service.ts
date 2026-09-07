@@ -10,14 +10,30 @@ export interface LedgerLeg {
   currencyId: string;
   direction: GlPostingDirection;
   amount: bigint;
+  // Only set for a leg against a wallet-mapped account (CUSTOMER_WALLETS or
+  // CREDIT_RECEIVABLE) — which specific wallet it belongs to, so
+  // getWalletBalance can find it later. Null for a leg against a non-wallet
+  // account (BANK_CASH, SETTLEMENT_CLEARING, FEE_REVENUE,
+  // LEDGER_ADJUSTMENTS, REPOSITORY_ALLOCATIONS).
+  walletId: string | null;
 }
 
-// Double-entry postings alongside the existing wallet-balance/Transaction
-// ledger — see the GL accounts doc comment on GlAccountCode for what each
-// account means. Every public method here takes the same EntityManager the
-// caller is already inside (TransactionsService.run wraps every money
-// movement in one DB transaction), so a posting can never exist without the
-// balance change that produced it, or vice versa.
+// A wallet-mapped leg needs both which wallet it's for (to tag the
+// posting) and that wallet's type (to pick CUSTOMER_WALLETS vs
+// CREDIT_RECEIVABLE and its currency) — every caller already has both from
+// the same Wallet row, so this is just those two fields rather than the
+// whole entity.
+export interface WalletLegInput {
+  id: string;
+  walletType: WalletType;
+}
+
+// Double-entry postings alongside the Transaction ledger — see the GL
+// accounts doc comment on GlAccountCode for what each account means. Every
+// public method here takes the same EntityManager the caller is already
+// inside (TransactionsService.run wraps every money movement in one DB
+// transaction), so a posting can never exist without the balance change
+// that produced it, or vice versa.
 //
 // Which GL account a wallet maps to depends on its type's law
 // (allowNegativeBalance), not on the Transaction's type — a CREDIT wallet's
@@ -28,7 +44,10 @@ export interface LedgerLeg {
 // standard "credit increases it" rule, and for the receivable it holds too,
 // because a CREDIT wallet's balance moving down means more is owed to
 // Packeta, i.e. the receivable (an asset) is increasing, which is also
-// recorded as a debit.
+// recorded as a debit. getWalletBalance relies on this same rule running in
+// reverse: summing CREDIT postings as positive and DEBIT as negative, for a
+// given wallet, always reproduces its balance — there's no stored
+// wallets.balance column anymore.
 @Injectable()
 export class LedgerService {
   private readonly accountCache = new Map<string, GlAccount>();
@@ -46,12 +65,13 @@ export class LedgerService {
     return delta > 0n ? GlPostingDirection.CREDIT : GlPostingDirection.DEBIT;
   }
 
-  walletLeg(walletType: WalletType, delta: bigint): LedgerLeg {
+  walletLeg(wallet: WalletLegInput, delta: bigint): LedgerLeg {
     return {
-      code: this.walletAccountCode(walletType),
-      currencyId: walletType.currencyId,
+      code: this.walletAccountCode(wallet.walletType),
+      currencyId: wallet.walletType.currencyId,
       direction: this.directionForWalletDelta(delta),
       amount: delta < 0n ? -delta : delta,
+      walletId: wallet.id,
     };
   }
 
@@ -75,6 +95,48 @@ export class LedgerService {
     }
     this.accountCache.set(cacheKey, account);
     return account;
+  }
+
+  // A wallet's derived balance — sum of every CREDIT posting tagged with
+  // its id, minus every DEBIT — instead of a stored column. Callers that
+  // already hold this wallet's row lock (SELECT ... FOR UPDATE via
+  // WalletsService.lockById) are safe to treat this as current-and-about-
+  // to-be-written: any other transaction touching the same wallet is
+  // blocked on that same lock until this one commits.
+  async getWalletBalance(
+    manager: EntityManager,
+    walletId: string,
+  ): Promise<bigint> {
+    const balances = await this.getWalletBalances(manager, [walletId]);
+    return balances.get(walletId) ?? 0n;
+  }
+
+  // Batch form for list views (e.g. serializing every wallet a user owns) —
+  // one query instead of one per wallet. Wallets with no postings at all
+  // (brand new, never moved money) aren't in the returned map; callers
+  // should default a missing entry to 0n, same as getWalletBalance does.
+  async getWalletBalances(
+    manager: EntityManager,
+    walletIds: string[],
+  ): Promise<Map<string, bigint>> {
+    const result = new Map<string, bigint>();
+    if (walletIds.length === 0) return result;
+
+    const rows = await manager
+      .createQueryBuilder(GlPosting, 'posting')
+      .where('posting.walletId IN (:...walletIds)', { walletIds })
+      .select('posting.walletId', 'walletId')
+      .addSelect(
+        `SUM(CASE WHEN posting.direction = 'CREDIT' THEN posting.amount ELSE -posting.amount END)`,
+        'net',
+      )
+      .groupBy('posting.walletId')
+      .getRawMany<{ walletId: string; net: string }>();
+
+    for (const row of rows) {
+      result.set(row.walletId, BigInt(row.net));
+    }
+    return result;
   }
 
   // Inserts a balanced journal entry. Throws if the legs don't net to zero
@@ -130,6 +192,7 @@ export class LedgerService {
           accountId: account.id,
           direction: leg.direction,
           amount: leg.amount.toString(),
+          walletId: leg.walletId,
         });
       }),
     );
@@ -146,14 +209,14 @@ export class LedgerService {
     manager: EntityManager,
     transactionId: string,
     description: string,
-    walletType: WalletType,
+    wallet: WalletLegInput,
     delta: bigint,
     cashAccountCode: GlAccountCode.BANK_CASH | GlAccountCode.SETTLEMENT_CLEARING,
   ): Promise<GlJournalEntry> {
-    const walletLeg = this.walletLeg(walletType, delta);
+    const walletLeg = this.walletLeg(wallet, delta);
     const cashLeg: LedgerLeg = {
       code: cashAccountCode,
-      currencyId: walletType.currencyId,
+      currencyId: wallet.walletType.currencyId,
       // The cash leg always moves opposite to the wallet leg — money
       // arriving credits the wallet and debits cash in (an asset increase
       // is a debit); money leaving debits the wallet and credits cash.
@@ -162,6 +225,7 @@ export class LedgerService {
           ? GlPostingDirection.DEBIT
           : GlPostingDirection.CREDIT,
       amount: walletLeg.amount,
+      walletId: null,
     };
     return this.postEntry(manager, {
       transactionId,
@@ -183,7 +247,7 @@ export class LedgerService {
     cashAccountCode: GlAccountCode.BANK_CASH | GlAccountCode.SETTLEMENT_CLEARING,
     currencyId: string,
     totalAmount: bigint,
-    walletCredits: Array<{ walletType: WalletType; amount: bigint }>,
+    walletCredits: Array<{ wallet: WalletLegInput; amount: bigint }>,
   ): Promise<GlJournalEntry> {
     const legs: LedgerLeg[] = [
       {
@@ -191,10 +255,11 @@ export class LedgerService {
         currencyId,
         direction: GlPostingDirection.DEBIT,
         amount: totalAmount,
+        walletId: null,
       },
       ...walletCredits
         .filter((c) => c.amount > 0n)
-        .map((c) => this.walletLeg(c.walletType, c.amount)),
+        .map((c) => this.walletLeg(c.wallet, c.amount)),
     ];
     return this.postEntry(manager, { transactionId, description, legs });
   }
@@ -206,16 +271,16 @@ export class LedgerService {
     manager: EntityManager,
     transactionId: string,
     description: string,
-    fromWalletType: WalletType,
-    toWalletType: WalletType,
+    fromWallet: WalletLegInput,
+    toWallet: WalletLegInput,
     amount: bigint,
   ): Promise<GlJournalEntry> {
     return this.postEntry(manager, {
       transactionId,
       description,
       legs: [
-        this.walletLeg(fromWalletType, -amount),
-        this.walletLeg(toWalletType, amount),
+        this.walletLeg(fromWallet, -amount),
+        this.walletLeg(toWallet, amount),
       ],
     });
   }
@@ -226,18 +291,19 @@ export class LedgerService {
     manager: EntityManager,
     transactionId: string,
     description: string,
-    walletType: WalletType,
+    wallet: WalletLegInput,
     delta: bigint,
   ): Promise<GlJournalEntry> {
-    const walletLeg = this.walletLeg(walletType, delta);
+    const walletLeg = this.walletLeg(wallet, delta);
     const suspenseLeg: LedgerLeg = {
       code: GlAccountCode.LEDGER_ADJUSTMENTS,
-      currencyId: walletType.currencyId,
+      currencyId: wallet.walletType.currencyId,
       direction:
         walletLeg.direction === GlPostingDirection.CREDIT
           ? GlPostingDirection.DEBIT
           : GlPostingDirection.CREDIT,
       amount: walletLeg.amount,
+      walletId: null,
     };
     return this.postEntry(manager, {
       transactionId,
@@ -255,16 +321,16 @@ export class LedgerService {
   // sources that may not have applied (e.g. a purchase with no repository
   // funding at all).
   private multiLegs(
-    debits: Array<{ walletType: WalletType; amount: bigint }>,
-    credits: Array<{ walletType: WalletType; amount: bigint }>,
+    debits: Array<{ wallet: WalletLegInput; amount: bigint }>,
+    credits: Array<{ wallet: WalletLegInput; amount: bigint }>,
   ): LedgerLeg[] {
     return [
       ...debits
         .filter((d) => d.amount > 0n)
-        .map((d) => this.walletLeg(d.walletType, -d.amount)),
+        .map((d) => this.walletLeg(d.wallet, -d.amount)),
       ...credits
         .filter((c) => c.amount > 0n)
-        .map((c) => this.walletLeg(c.walletType, c.amount)),
+        .map((c) => this.walletLeg(c.wallet, c.amount)),
     ];
   }
 
@@ -272,8 +338,8 @@ export class LedgerService {
     manager: EntityManager,
     transactionId: string,
     description: string,
-    debits: Array<{ walletType: WalletType; amount: bigint }>,
-    credits: Array<{ walletType: WalletType; amount: bigint }>,
+    debits: Array<{ wallet: WalletLegInput; amount: bigint }>,
+    credits: Array<{ wallet: WalletLegInput; amount: bigint }>,
   ): Promise<GlJournalEntry> {
     return this.postEntry(manager, {
       transactionId,
@@ -292,8 +358,8 @@ export class LedgerService {
     originalTransactionId: string,
     reversalTransactionId: string,
     description: string,
-    debits: Array<{ walletType: WalletType; amount: bigint }>,
-    credits: Array<{ walletType: WalletType; amount: bigint }>,
+    debits: Array<{ wallet: WalletLegInput; amount: bigint }>,
+    credits: Array<{ wallet: WalletLegInput; amount: bigint }>,
   ): Promise<GlJournalEntry> {
     const original = await manager.findOne(GlJournalEntry, {
       where: { transactionId: originalTransactionId },
@@ -303,6 +369,42 @@ export class LedgerService {
       description,
       legs: this.multiLegs(debits, credits),
       reversalOfId: original?.id,
+    });
+  }
+
+  // A repository-backed CREDIT wallet's own balance now mirrors its real
+  // movement too (see the DeriveWalletBalanceFromGl migration) — the
+  // REPOSITORY's own account already carries the real money movement
+  // (posted separately, wherever the caller resolved this wallet's
+  // ledgerWalletType to the repository), so this is a second, independent,
+  // self-balancing entry: the wallet's own leg for the exact same delta,
+  // offset by the REPOSITORY_ALLOCATIONS plug account. A no-op when delta
+  // is zero (e.g. a purchase a repository fully funds and fully spends in
+  // the same step nets to zero on the credit wallet's own balance — see
+  // TransactionsService.settleCreditFundedPurchase).
+  async postRepositoryAllocationMirror(
+    manager: EntityManager,
+    transactionId: string,
+    description: string,
+    wallet: WalletLegInput,
+    delta: bigint,
+  ): Promise<GlJournalEntry | null> {
+    if (delta === 0n) return null;
+    const walletLeg = this.walletLeg(wallet, delta);
+    const plugLeg: LedgerLeg = {
+      code: GlAccountCode.REPOSITORY_ALLOCATIONS,
+      currencyId: wallet.walletType.currencyId,
+      direction:
+        walletLeg.direction === GlPostingDirection.CREDIT
+          ? GlPostingDirection.DEBIT
+          : GlPostingDirection.CREDIT,
+      amount: walletLeg.amount,
+      walletId: null,
+    };
+    return this.postEntry(manager, {
+      transactionId,
+      description,
+      legs: [walletLeg, plugLeg],
     });
   }
 }

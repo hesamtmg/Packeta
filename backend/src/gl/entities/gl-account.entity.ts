@@ -40,6 +40,14 @@ export enum GlAccountCode {
   // correction isn't backed by a real cash movement, so it has to hit
   // something.
   LEDGER_ADJUSTMENTS = 'LEDGER_ADJUSTMENTS',
+  // Offsetting leg for a repository-backed CREDIT wallet's own mirrored
+  // balance posting (see LedgerService.postRepositoryAllocationMirror) —
+  // the REPOSITORY's real balance movement is already posted elsewhere
+  // (BANK_CASH/merchant/etc), so mirroring the same amount onto the
+  // employee's own CREDIT_RECEIVABLE needs a plug on the other side to
+  // keep the entry balanced. Purely a bookkeeping bridge with no
+  // independent real-world meaning of its own.
+  REPOSITORY_ALLOCATIONS = 'REPOSITORY_ALLOCATIONS',
 }
 
 export enum GlAccountType {

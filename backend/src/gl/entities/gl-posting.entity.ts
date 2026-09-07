@@ -27,6 +27,16 @@ export class GlPosting {
   @Column({ type: 'uuid' })
   accountId: string;
 
+  // Which wallet this posting's amount belongs to — set for every
+  // CUSTOMER_WALLETS/CREDIT_RECEIVABLE leg (including a repository
+  // allocation mirror leg, itself tagged with the wallet it mirrors, not
+  // the repository), null for a leg against a non-wallet account like
+  // BANK_CASH or REPOSITORY_ALLOCATIONS. LedgerService.getWalletBalance
+  // sums these to derive a wallet's balance instead of a stored column.
+  @Index()
+  @Column({ type: 'uuid', nullable: true })
+  walletId: string | null;
+
   @Column({ type: 'enum', enum: GlPostingDirection })
   direction: GlPostingDirection;
 

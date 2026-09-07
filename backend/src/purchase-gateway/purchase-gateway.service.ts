@@ -6,6 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { I18nService } from 'nestjs-i18n';
+import { DataSource } from 'typeorm';
 import { TransactionsService } from '../transactions/transactions.service';
 import { UsersService } from '../users/users.service';
 import { WalletsService } from '../wallets/wallets.service';
@@ -19,6 +20,7 @@ import {
   formatAmountWords,
 } from '../common/format-amount';
 import { displayIdentity } from '../common/synthetic-email';
+import { LedgerService } from '../gl/ledger.service';
 
 // Backs the IPG's "identify yourself" step for merchant-initiated charges:
 // the customer proves who they are with phone + OTP (no Packeta session
@@ -32,7 +34,9 @@ export class PurchaseGatewayService {
     private readonly walletsService: WalletsService,
     private readonly otpService: OtpService,
     private readonly captchaService: CaptchaService,
+    private readonly ledgerService: LedgerService,
     private readonly i18n: I18nService,
+    private readonly dataSource: DataSource,
   ) {}
 
   // Also backs the persistent merchant-info + countdown header the pay page
@@ -149,9 +153,15 @@ export class PurchaseGatewayService {
     );
 
     const sessionToken = this.otpService.createSession(authority, userId);
+    const balances = await this.ledgerService.getWalletBalances(
+      this.dataSource.manager,
+      wallets.map((wallet) => wallet.id),
+    );
     return {
       sessionToken,
-      wallets: wallets.map((wallet) => serializeWallet(wallet)),
+      wallets: wallets.map((wallet) =>
+        serializeWallet(wallet, (balances.get(wallet.id) ?? 0n).toString()),
+      ),
     };
   }
 

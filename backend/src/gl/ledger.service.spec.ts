@@ -1,4 +1,4 @@
-import { LedgerService } from './ledger.service';
+import { LedgerService, WalletLegInput } from './ledger.service';
 import { GlAccount, GlAccountCode, GlAccountType } from './entities/gl-account.entity';
 import { GlPostingDirection } from './entities/gl-posting.entity';
 import { WalletType } from '../wallet-types/entities/wallet-type.entity';
@@ -28,11 +28,13 @@ const SEEDED_ACCOUNTS: GlAccount[] = [
   account(GlAccountCode.SETTLEMENT_CLEARING, GlAccountType.LIABILITY),
   account(GlAccountCode.FEE_REVENUE, GlAccountType.REVENUE),
   account(GlAccountCode.LEDGER_ADJUSTMENTS, GlAccountType.EQUITY),
+  account(GlAccountCode.REPOSITORY_ALLOCATIONS, GlAccountType.EQUITY),
 ];
 
 function buildManager(
   accounts: GlAccount[] = SEEDED_ACCOUNTS,
   existingJournalEntries: Array<{ id: string; transactionId: string }> = [],
+  existingPostings: any[] = [],
 ) {
   const savedPostings: any[] = [];
   const savedEntries: any[] = [];
@@ -65,6 +67,46 @@ function buildManager(
         savedEntries.push(data);
       }
       return data;
+    }),
+    createQueryBuilder: jest.fn(() => {
+      const allPostings = [...existingPostings, ...savedPostings];
+      const qb: any = {
+        _walletIds: [] as string[],
+        where(_expr: string, params: { walletIds: string[] }) {
+          qb._walletIds = params.walletIds;
+          return qb;
+        },
+        select() {
+          return qb;
+        },
+        addSelect() {
+          return qb;
+        },
+        groupBy() {
+          return qb;
+        },
+        async getRawMany() {
+          const byWallet = new Map<string, bigint>();
+          for (const posting of allPostings) {
+            if (!posting.walletId || !qb._walletIds.includes(posting.walletId)) {
+              continue;
+            }
+            const signed =
+              posting.direction === GlPostingDirection.CREDIT
+                ? BigInt(posting.amount)
+                : -BigInt(posting.amount);
+            byWallet.set(
+              posting.walletId,
+              (byWallet.get(posting.walletId) ?? 0n) + signed,
+            );
+          }
+          return Array.from(byWallet.entries()).map(([walletId, net]) => ({
+            walletId,
+            net: net.toString(),
+          }));
+        },
+      };
+      return qb;
     }),
   };
   return { manager, savedPostings, savedEntries };
@@ -108,6 +150,11 @@ function walletType(overrides: Partial<WalletType> = {}): WalletType {
   } as WalletType;
 }
 
+let walletIdCounter = 0;
+function wallet(type: WalletType, id?: string): WalletLegInput {
+  return { id: id ?? `wallet-${++walletIdCounter}`, walletType: type };
+}
+
 describe('LedgerService', () => {
   it('maps a normal wallet type to CUSTOMER_WALLETS and a credit-line type to CREDIT_RECEIVABLE', () => {
     const service = new LedgerService();
@@ -123,11 +170,12 @@ describe('LedgerService', () => {
     const service = new LedgerService();
     const { manager, savedPostings } = buildManager();
 
+    const depositWallet = wallet(walletType(), 'wallet-deposit');
     await service.postCashMovement(
       manager as any,
       'tx-1',
       'Deposit',
-      walletType(),
+      depositWallet,
       1000n,
       GlAccountCode.BANK_CASH,
     );
@@ -143,10 +191,12 @@ describe('LedgerService', () => {
     expect(bankLeg).toMatchObject({
       direction: GlPostingDirection.DEBIT,
       amount: '1000',
+      walletId: null,
     });
     expect(walletLeg).toMatchObject({
       direction: GlPostingDirection.CREDIT,
       amount: '1000',
+      walletId: 'wallet-deposit',
     });
   });
 
@@ -158,7 +208,7 @@ describe('LedgerService', () => {
       manager as any,
       'tx-1',
       'Withdraw',
-      walletType(),
+      wallet(walletType()),
       -500n,
       GlAccountCode.SETTLEMENT_CLEARING,
     );
@@ -195,8 +245,8 @@ describe('LedgerService', () => {
       USD_ID,
       400n,
       [
-        { walletType: repositoryType, amount: 350n },
-        { walletType: feeRepoType, amount: 50n },
+        { wallet: wallet(repositoryType), amount: 350n },
+        { wallet: wallet(feeRepoType), amount: 50n },
       ],
     );
 
@@ -222,7 +272,7 @@ describe('LedgerService', () => {
       manager as any,
       'tx-1',
       'Installment repayment',
-      walletType({ allowNegativeBalance: true }),
+      wallet(walletType({ allowNegativeBalance: true })),
       300n,
       GlAccountCode.BANK_CASH,
     );
@@ -245,8 +295,8 @@ describe('LedgerService', () => {
       manager as any,
       'tx-1',
       'Credit-funded purchase',
-      walletType({ allowNegativeBalance: true }),
-      walletType(),
+      wallet(walletType({ allowNegativeBalance: true })),
+      wallet(walletType()),
       200n,
     );
 
@@ -270,7 +320,7 @@ describe('LedgerService', () => {
       manager as any,
       'tx-1',
       'Manual correction',
-      walletType(),
+      wallet(walletType()),
       -50n,
     );
 
@@ -304,10 +354,10 @@ describe('LedgerService', () => {
       'tx-1',
       'Purchase',
       [
-        { walletType: supportType, amount: 50n },
-        { walletType: repositoryType, amount: 100n },
+        { wallet: wallet(supportType), amount: 50n },
+        { wallet: wallet(repositoryType), amount: 100n },
       ],
-      [{ walletType: merchantType, amount: 150n }],
+      [{ wallet: wallet(merchantType), amount: 150n }],
     );
 
     expect(savedPostings).toHaveLength(3);
@@ -330,10 +380,10 @@ describe('LedgerService', () => {
       'tx-1',
       'Purchase',
       [
-        { walletType: walletType({ name: 'Support' }), amount: 0n },
-        { walletType: walletType({ name: 'Repository' }), amount: 150n },
+        { wallet: wallet(walletType({ name: 'Support' })), amount: 0n },
+        { wallet: wallet(walletType({ name: 'Repository' })), amount: 150n },
       ],
-      [{ walletType: walletType({ name: 'Merchant' }), amount: 150n }],
+      [{ wallet: wallet(walletType({ name: 'Merchant' })), amount: 150n }],
     );
 
     expect(savedPostings).toHaveLength(2);
@@ -350,8 +400,8 @@ describe('LedgerService', () => {
       'purchase-1',
       'reversal-1',
       'Refund',
-      [{ walletType: walletType({ name: 'Merchant' }), amount: 500n }],
-      [{ walletType: walletType(), amount: 500n }],
+      [{ wallet: wallet(walletType({ name: 'Merchant' })), amount: 500n }],
+      [{ wallet: wallet(walletType()), amount: 500n }],
     );
 
     expect(savedEntries[0]).toMatchObject({
@@ -369,8 +419,8 @@ describe('LedgerService', () => {
       'purchase-1',
       'reversal-1',
       'Refund',
-      [{ walletType: walletType({ name: 'Merchant' }), amount: 500n }],
-      [{ walletType: walletType(), amount: 500n }],
+      [{ wallet: wallet(walletType({ name: 'Merchant' })), amount: 500n }],
+      [{ wallet: wallet(walletType()), amount: 500n }],
     );
 
     expect(savedEntries[0]).toMatchObject({
@@ -393,12 +443,14 @@ describe('LedgerService', () => {
             currencyId: USD_ID,
             direction: GlPostingDirection.DEBIT,
             amount: 100n,
+            walletId: null,
           },
           {
             code: GlAccountCode.CUSTOMER_WALLETS,
             currencyId: USD_ID,
             direction: GlPostingDirection.CREDIT,
             amount: 99n,
+            walletId: 'wallet-1',
           },
         ],
       }),
@@ -419,6 +471,7 @@ describe('LedgerService', () => {
             currencyId: USD_ID,
             direction: GlPostingDirection.DEBIT,
             amount: 100n,
+            walletId: null,
           },
         ],
       }),
@@ -442,5 +495,91 @@ describe('LedgerService', () => {
     await service.getAccount(manager as any, GlAccountCode.BANK_CASH, USD_ID);
 
     expect(manager.findOne).toHaveBeenCalledTimes(1);
+  });
+
+  it('getWalletBalance sums CREDIT as positive and DEBIT as negative for that wallet only', async () => {
+    const service = new LedgerService();
+    const { manager } = buildManager(SEEDED_ACCOUNTS, [], [
+      { walletId: 'wallet-a', direction: GlPostingDirection.CREDIT, amount: '1000' },
+      { walletId: 'wallet-a', direction: GlPostingDirection.DEBIT, amount: '400' },
+      { walletId: 'wallet-b', direction: GlPostingDirection.CREDIT, amount: '999' },
+    ]);
+
+    expect(await service.getWalletBalance(manager as any, 'wallet-a')).toBe(
+      600n,
+    );
+  });
+
+  it('getWalletBalance returns 0 for a wallet with no postings', async () => {
+    const service = new LedgerService();
+    const { manager } = buildManager();
+
+    expect(await service.getWalletBalance(manager as any, 'wallet-none')).toBe(
+      0n,
+    );
+  });
+
+  it('getWalletBalances batches several wallets into one map, omitting wallets with no postings', async () => {
+    const service = new LedgerService();
+    const { manager } = buildManager(SEEDED_ACCOUNTS, [], [
+      { walletId: 'wallet-a', direction: GlPostingDirection.CREDIT, amount: '100' },
+      { walletId: 'wallet-b', direction: GlPostingDirection.DEBIT, amount: '30' },
+    ]);
+
+    const balances = await service.getWalletBalances(manager as any, [
+      'wallet-a',
+      'wallet-b',
+      'wallet-c',
+    ]);
+
+    expect(balances.get('wallet-a')).toBe(100n);
+    expect(balances.get('wallet-b')).toBe(-30n);
+    expect(balances.has('wallet-c')).toBe(false);
+  });
+
+  it('postRepositoryAllocationMirror posts the wallet leg plus an offsetting REPOSITORY_ALLOCATIONS leg', async () => {
+    const service = new LedgerService();
+    const { manager, savedPostings } = buildManager();
+
+    await service.postRepositoryAllocationMirror(
+      manager as any,
+      'tx-1',
+      'Withdraw mirror',
+      wallet(walletType({ allowNegativeBalance: true }), 'credit-wallet-1'),
+      -200n,
+    );
+
+    expect(savedPostings).toHaveLength(2);
+    const walletLeg = savedPostings.find((p) => p.walletId === 'credit-wallet-1');
+    const plugLeg = savedPostings.find(
+      (p) =>
+        p.accountId ===
+        `account-${GlAccountCode.REPOSITORY_ALLOCATIONS}-${USD_ID}`,
+    );
+    expect(walletLeg).toMatchObject({
+      direction: GlPostingDirection.DEBIT,
+      amount: '200',
+    });
+    expect(plugLeg).toMatchObject({
+      direction: GlPostingDirection.CREDIT,
+      amount: '200',
+      walletId: null,
+    });
+  });
+
+  it('postRepositoryAllocationMirror is a no-op when delta is zero', async () => {
+    const service = new LedgerService();
+    const { manager, savedPostings } = buildManager();
+
+    const result = await service.postRepositoryAllocationMirror(
+      manager as any,
+      'tx-1',
+      'No-op mirror',
+      wallet(walletType({ allowNegativeBalance: true })),
+      0n,
+    );
+
+    expect(result).toBeNull();
+    expect(savedPostings).toHaveLength(0);
   });
 });

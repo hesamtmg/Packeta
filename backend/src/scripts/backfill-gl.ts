@@ -1,6 +1,5 @@
 import { AppDataSource } from '../database/data-source';
 import { Wallet } from '../wallets/entities/wallet.entity';
-import { WalletType } from '../wallet-types/entities/wallet-type.entity';
 import {
   Transaction,
   TransactionStatus,
@@ -12,7 +11,7 @@ import {
 } from '../rail-settlements/entities/rail-settlement.entity';
 import { GlJournalEntry } from '../gl/entities/gl-journal-entry.entity';
 import { GlAccountCode } from '../gl/entities/gl-account.entity';
-import { LedgerService } from '../gl/ledger.service';
+import { LedgerService, WalletLegInput } from '../gl/ledger.service';
 import { EntityManager } from 'typeorm';
 
 // One-off backfill: every Transaction row created before the GL feature
@@ -46,17 +45,19 @@ function isChildLeg(idempotencyKey: string): boolean {
   return CHILD_LEG_PATTERNS.some((p) => p.test(idempotencyKey));
 }
 
-// Mirrors TransactionsService.ledgerWalletType: a repository-backed CREDIT
-// wallet's own balance is a sub-ledger of its REPOSITORY's pool, not an
-// independent Packeta receivable — see that method's doc comment. Kept as
-// a standalone copy here since instantiating the real TransactionsService
-// would drag in its whole dependency graph for a one-time script.
-function ledgerWalletType(
+// Mirrors TransactionsService.ledgerWalletLeg: a repository-backed CREDIT
+// wallet's real cash movement is posted against its REPOSITORY's own id,
+// not its own — the wallet's own balance is derived separately via a
+// REPOSITORY_ALLOCATIONS mirror posting (see repositoryMirrorLeg below).
+// Kept as a standalone copy here since instantiating the real
+// TransactionsService would drag in its whole dependency graph for a
+// one-time script.
+function ledgerWalletLeg(
   wallet: Wallet,
   walletsById: Map<string, Wallet>,
-): WalletType {
+): WalletLegInput {
   if (!wallet.repositoryWalletId) {
-    return wallet.walletType;
+    return { id: wallet.id, walletType: wallet.walletType };
   }
   const repository = walletsById.get(wallet.repositoryWalletId);
   if (!repository) {
@@ -64,7 +65,11 @@ function ledgerWalletType(
       `Wallet ${wallet.id} references missing repository ${wallet.repositoryWalletId}`,
     );
   }
-  return repository.walletType;
+  return { id: repository.id, walletType: repository.walletType };
+}
+
+function ownWalletLeg(wallet: Wallet): WalletLegInput {
+  return { id: wallet.id, walletType: wallet.walletType };
 }
 
 interface Report {
@@ -229,7 +234,7 @@ async function postDeposit(tx: Transaction, ctx: Ctx): Promise<boolean> {
       manager,
       tx.id,
       'Credit shortfall top-up (backfill)',
-      ledgerWalletType(supportWallet, walletsById),
+      ledgerWalletLeg(supportWallet, walletsById),
       BigInt(tx.amount),
       GlAccountCode.BANK_CASH,
     );
@@ -240,7 +245,7 @@ async function postDeposit(tx: Transaction, ctx: Ctx): Promise<boolean> {
     const mainRepository = wallet(tx.toWalletId, tx.id);
     if (!mainRepository) return false;
     const legs = [
-      { walletType: mainRepository.walletType, amount: BigInt(tx.amount) },
+      { wallet: ownWalletLeg(mainRepository), amount: BigInt(tx.amount) },
     ];
     for (const suffix of ['fee', 'penalty', 'unblock-fee']) {
       const sibling = byIdempotencyKey.get(`repayment-split:${tx.id}-${suffix}`);
@@ -248,7 +253,7 @@ async function postDeposit(tx: Transaction, ctx: Ctx): Promise<boolean> {
       const subRepository = wallet(sibling.toWalletId, sibling.id);
       if (!subRepository) continue;
       legs.push({
-        walletType: subRepository.walletType,
+        wallet: ownWalletLeg(subRepository),
         amount: BigInt(sibling.amount),
       });
     }
@@ -271,7 +276,7 @@ async function postDeposit(tx: Transaction, ctx: Ctx): Promise<boolean> {
     manager,
     tx.id,
     'Deposit (backfill)',
-    ledgerWalletType(toWallet, walletsById),
+    ledgerWalletLeg(toWallet, walletsById),
     BigInt(tx.amount),
     GlAccountCode.BANK_CASH,
   );
@@ -298,10 +303,19 @@ async function postWithdraw(tx: Transaction, ctx: Ctx): Promise<boolean> {
     manager,
     tx.id,
     'Withdraw (backfill)',
-    ledgerWalletType(fromWallet, walletsById),
+    ledgerWalletLeg(fromWallet, walletsById),
     -BigInt(tx.amount),
     cashAccount,
   );
+  if (fromWallet.repositoryWalletId) {
+    await ledger.postRepositoryAllocationMirror(
+      manager,
+      tx.id,
+      'Withdraw (backfill)',
+      ownWalletLeg(fromWallet),
+      -BigInt(tx.amount),
+    );
+  }
   return true;
 }
 
@@ -315,17 +329,26 @@ async function postTransfer(tx: Transaction, ctx: Ctx): Promise<boolean> {
     manager,
     tx.id,
     'Transfer (backfill)',
-    ledgerWalletType(fromWallet, walletsById),
-    toWallet.walletType,
+    ledgerWalletLeg(fromWallet, walletsById),
+    ownWalletLeg(toWallet),
     BigInt(tx.amount),
   );
+  if (fromWallet.repositoryWalletId) {
+    await ledger.postRepositoryAllocationMirror(
+      manager,
+      tx.id,
+      'Transfer (backfill)',
+      ownWalletLeg(fromWallet),
+      -BigInt(tx.amount),
+    );
+  }
   return true;
 }
 
 async function postAdjustment(tx: Transaction, ctx: Ctx): Promise<boolean> {
   const { manager, ledger, wallet, byIdempotencyKey } = ctx;
 
-  const creditLegs: Array<{ walletType: WalletType; amount: bigint }> = [];
+  const creditLegs: Array<{ wallet: WalletLegInput; amount: bigint }> = [];
   for (const prefix of ['overdue-absorb', 'quit-absorb']) {
     for (const suffix of ['fee', 'penalty', 'unblock-fee']) {
       const sibling = byIdempotencyKey.get(
@@ -335,7 +358,7 @@ async function postAdjustment(tx: Transaction, ctx: Ctx): Promise<boolean> {
       const subRepository = wallet(sibling.toWalletId, sibling.id);
       if (!subRepository) continue;
       creditLegs.push({
-        walletType: subRepository.walletType,
+        wallet: ownWalletLeg(subRepository),
         amount: BigInt(sibling.amount),
       });
     }
@@ -349,7 +372,7 @@ async function postAdjustment(tx: Transaction, ctx: Ctx): Promise<boolean> {
       manager,
       tx.id,
       'Overdue/offboarding debt absorbed by repository (backfill)',
-      [{ walletType: repository.walletType, amount: routedTotal }],
+      [{ wallet: ownWalletLeg(repository), amount: routedTotal }],
       creditLegs,
     );
     return true;
@@ -365,7 +388,7 @@ async function postAdjustment(tx: Transaction, ctx: Ctx): Promise<boolean> {
     manager,
     tx.id,
     tx.note ?? 'Adjustment (backfill)',
-    target.walletType,
+    ownWalletLeg(target),
     delta,
   );
   return true;
@@ -394,10 +417,10 @@ async function postPurchase(tx: Transaction, ctx: Ctx): Promise<boolean> {
     const repositoryAmount = repositoryLeg ? BigInt(repositoryLeg.amount) : 0n;
     const customerCreditAmount = BigInt(tx.amount) - repositoryAmount;
 
-    const creditLegs: Array<{ walletType: WalletType; amount: bigint }> = [];
+    const creditLegs: Array<{ wallet: WalletLegInput; amount: bigint }> = [];
     if (customerCreditAmount > 0n) {
       creditLegs.push({
-        walletType: customerWallet.walletType,
+        wallet: ownWalletLeg(customerWallet),
         amount: customerCreditAmount,
       });
     }
@@ -405,7 +428,7 @@ async function postPurchase(tx: Transaction, ctx: Ctx): Promise<boolean> {
       const repository = wallet(repositoryLeg.toWalletId, repositoryLeg.id);
       if (repository) {
         creditLegs.push({
-          walletType: repository.walletType,
+          wallet: ownWalletLeg(repository),
           amount: repositoryAmount,
         });
       }
@@ -417,7 +440,7 @@ async function postPurchase(tx: Transaction, ctx: Ctx): Promise<boolean> {
       tx.relatedTransactionId,
       tx.id,
       tx.note ?? 'Refund (backfill)',
-      [{ walletType: merchantWallet.walletType, amount: BigInt(tx.amount) }],
+      [{ wallet: ownWalletLeg(merchantWallet), amount: BigInt(tx.amount) }],
       creditLegs,
     );
     return true;
@@ -433,13 +456,13 @@ async function postPurchase(tx: Transaction, ctx: Ctx): Promise<boolean> {
   const toWallet = wallet(tx.toWalletId, tx.id);
   if (!fromWallet || !toWallet) return false;
 
-  const debitLegs: Array<{ walletType: WalletType; amount: bigint }> = [];
+  const debitLegs: Array<{ wallet: WalletLegInput; amount: bigint }> = [];
   const supportLeg = byIdempotencyKey.get(`support-fund:${tx.id}`);
   if (supportLeg) {
     const supportWallet = wallet(supportLeg.fromWalletId, supportLeg.id);
     if (supportWallet) {
       debitLegs.push({
-        walletType: supportWallet.walletType,
+        wallet: ownWalletLeg(supportWallet),
         amount: BigInt(supportLeg.amount),
       });
     }
@@ -449,14 +472,14 @@ async function postPurchase(tx: Transaction, ctx: Ctx): Promise<boolean> {
     const repository = wallet(creditFundLeg.fromWalletId, creditFundLeg.id);
     if (repository) {
       debitLegs.push({
-        walletType: repository.walletType,
+        wallet: ownWalletLeg(repository),
         amount: BigInt(creditFundLeg.amount),
       });
     }
   }
   if (debitLegs.length === 0) {
     debitLegs.push({
-      walletType: ledgerWalletType(fromWallet, walletsById),
+      wallet: ledgerWalletLeg(fromWallet, walletsById),
       amount: BigInt(tx.amount),
     });
   }
@@ -466,7 +489,7 @@ async function postPurchase(tx: Transaction, ctx: Ctx): Promise<boolean> {
     tx.id,
     'Purchase (backfill)',
     debitLegs,
-    [{ walletType: toWallet.walletType, amount: BigInt(tx.amount) }],
+    [{ wallet: ownWalletLeg(toWallet), amount: BigInt(tx.amount) }],
   );
   return true;
 }

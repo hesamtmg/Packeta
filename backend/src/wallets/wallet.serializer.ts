@@ -12,12 +12,13 @@ function serializeSettlementAccount(row: SettlementSplit) {
 
 export function serializeWallet(
   wallet: Wallet,
+  balance: string,
   settlementAccounts?: SettlementSplit[],
 ) {
   return {
     id: wallet.id,
     name: wallet.name,
-    balance: wallet.balance,
+    balance,
     purchaseTimeoutSeconds: wallet.purchaseTimeoutSeconds,
     restrictedCounterparties: wallet.restrictedCounterparties,
     closedAt: wallet.closedAt,

@@ -47,7 +47,7 @@ import {
   RailSettlementStatus,
   SettlementRailType,
 } from '../rail-settlements/entities/rail-settlement.entity';
-import { LedgerService } from '../gl/ledger.service';
+import { LedgerService, WalletLegInput } from '../gl/ledger.service';
 import { GlAccountCode } from '../gl/entities/gl-account.entity';
 
 export interface MoneyResult {
@@ -222,14 +222,15 @@ export class TransactionsService {
         const floor = walletRef.walletType.allowNegativeBalance
           ? -BigInt(walletRef.walletType.creditLimit ?? '0')
           : 0n;
-        const newBalance = BigInt(wallet.balance) - BigInt(amount);
+        const currentBalance = await this.ledgerService.getWalletBalance(
+          manager,
+          wallet.id,
+        );
+        const newBalance = currentBalance - BigInt(amount);
         if (newBalance < floor) {
           throw new UnprocessableEntityException('Insufficient balance');
         }
-        await manager.update(Wallet, wallet.id, {
-          balance: newBalance.toString(),
-        });
-        await this.debitLinkedRepository(manager, walletRef, BigInt(amount));
+        await this.assertRepositoryCanFund(manager, walletRef, BigInt(amount));
 
         const transaction = manager.create(Transaction, {
           type: TransactionType.WITHDRAW,
@@ -271,12 +272,21 @@ export class TransactionsService {
           manager,
           transaction.id,
           `Withdraw via ${railType}`,
-          await this.ledgerWalletType(walletRef),
+          await this.ledgerWalletLeg(walletRef),
           -BigInt(amount),
           settlement.status === RailSettlementStatus.COMPLETED
             ? GlAccountCode.BANK_CASH
             : GlAccountCode.SETTLEMENT_CLEARING,
         );
+        if (walletRef.repositoryWalletId) {
+          await this.ledgerService.postRepositoryAllocationMirror(
+            manager,
+            transaction.id,
+            `Withdraw via ${railType}`,
+            { id: wallet.id, walletType: walletRef.walletType },
+            -BigInt(amount),
+          );
+        }
 
         return {
           transactionId: transaction.id,
@@ -378,19 +388,15 @@ export class TransactionsService {
         const floor = fromWalletRef.walletType.allowNegativeBalance
           ? -BigInt(fromWalletRef.walletType.creditLimit ?? '0')
           : 0n;
-        const newFromBalance = BigInt(fromWallet.balance) - BigInt(amount);
+        const currentFromBalance = await this.ledgerService.getWalletBalance(
+          manager,
+          fromWallet.id,
+        );
+        const newFromBalance = currentFromBalance - BigInt(amount);
         if (newFromBalance < floor) {
           throw new UnprocessableEntityException('Insufficient balance');
         }
-        const newToBalance = (
-          BigInt(toWallet.balance) + BigInt(amount)
-        ).toString();
-
-        await manager.update(Wallet, fromWallet.id, {
-          balance: newFromBalance.toString(),
-        });
-        await manager.update(Wallet, toWallet.id, { balance: newToBalance });
-        await this.debitLinkedRepository(
+        await this.assertRepositoryCanFund(
           manager,
           fromWalletRef,
           BigInt(amount),
@@ -416,10 +422,19 @@ export class TransactionsService {
           manager,
           transaction.id,
           'Transfer',
-          await this.ledgerWalletType(fromWalletRef),
-          toWalletFullRef.walletType,
+          await this.ledgerWalletLeg(fromWalletRef),
+          { id: toWalletFullRef.id, walletType: toWalletFullRef.walletType },
           BigInt(amount),
         );
+        if (fromWalletRef.repositoryWalletId) {
+          await this.ledgerService.postRepositoryAllocationMirror(
+            manager,
+            transaction.id,
+            'Transfer',
+            { id: fromWallet.id, walletType: fromWalletRef.walletType },
+            -BigInt(amount),
+          );
+        }
 
         return {
           transactionId: transaction.id,
@@ -465,15 +480,16 @@ export class TransactionsService {
           : 0n;
 
         const wallet = await this.walletsService.lockById(manager, walletId);
-        const newBalance = BigInt(wallet.balance) + BigInt(amount);
+        const currentBalance = await this.ledgerService.getWalletBalance(
+          manager,
+          wallet.id,
+        );
+        const newBalance = currentBalance + BigInt(amount);
         if (newBalance < floor) {
           throw new UnprocessableEntityException(
             "Adjustment would take the wallet below its type's allowed balance floor",
           );
         }
-        await manager.update(Wallet, wallet.id, {
-          balance: newBalance.toString(),
-        });
 
         const absAmount = BigInt(Math.abs(amount));
         const transaction = manager.create(Transaction, {
@@ -491,7 +507,7 @@ export class TransactionsService {
           manager,
           transaction.id,
           reason,
-          walletRef.walletType,
+          { id: walletRef.id, walletType: walletRef.walletType },
           BigInt(amount),
         );
 
@@ -830,7 +846,7 @@ export class TransactionsService {
     keyPrefix: string,
   ): Promise<{
     unrouted: bigint;
-    routedLegs: Array<{ walletType: WalletType; amount: bigint }>;
+    routedLegs: Array<{ wallet: WalletLegInput; amount: bigint }>;
   }> {
     const legs: [bigint, string | null, string][] = [
       [parts.fee, walletType.feeRepositoryWalletId, 'fee'],
@@ -842,7 +858,7 @@ export class TransactionsService {
       ],
     ];
     let unrouted = 0n;
-    const routedLegs: Array<{ walletType: WalletType; amount: bigint }> = [];
+    const routedLegs: Array<{ wallet: WalletLegInput; amount: bigint }> = [];
     for (const [amount, subRepositoryId, label] of legs) {
       if (amount <= 0n) continue;
       if (!subRepositoryId) {
@@ -857,9 +873,6 @@ export class TransactionsService {
         unrouted += amount;
         continue;
       }
-      await manager.update(Wallet, subRepository.id, {
-        balance: (BigInt(subRepository.balance) + amount).toString(),
-      });
       const leg = manager.create(Transaction, {
         type: legType,
         fromWalletId:
@@ -872,7 +885,10 @@ export class TransactionsService {
       await manager.save(leg);
       const subRepositoryRef =
         await this.walletsService.getByIdUnscoped(subRepositoryId);
-      routedLegs.push({ walletType: subRepositoryRef.walletType, amount });
+      routedLegs.push({
+        wallet: { id: subRepositoryRef.id, walletType: subRepositoryRef.walletType },
+        amount,
+      });
     }
     return { unrouted, routedLegs };
   }
@@ -926,11 +942,6 @@ export class TransactionsService {
       `repayment-split:${transaction.id}`,
     );
     const toRepository = principal + unrouted;
-    if (toRepository > 0n) {
-      await manager.update(Wallet, repository.id, {
-        balance: (BigInt(repository.balance) + toRepository).toString(),
-      });
-    }
 
     // The whole ZarinPal charge is one cash-in event, landing on however
     // many wallets it was split across (the main repository plus whichever
@@ -945,7 +956,13 @@ export class TransactionsService {
       GlAccountCode.BANK_CASH,
       repositoryRef.walletType.currencyId,
       zarinpalAmount,
-      [{ walletType: repositoryRef.walletType, amount: toRepository }, ...routedLegs],
+      [
+        {
+          wallet: { id: repositoryRef.id, walletType: repositoryRef.walletType },
+          amount: toRepository,
+        },
+        ...routedLegs,
+      ],
     );
 
     // The transaction row was created (and verified against the gateway)
@@ -1089,16 +1106,15 @@ export class TransactionsService {
         );
         const routedTotal = fee + penalty + unblockFee - unrouted;
 
-        const newRepositoryBalance = BigInt(repository.balance) - routedTotal;
+        const currentRepositoryBalance = await this.ledgerService.getWalletBalance(
+          manager,
+          repository.id,
+        );
+        const newRepositoryBalance = currentRepositoryBalance - routedTotal;
         if (newRepositoryBalance < 0n) {
           throw new UnprocessableEntityException(
             "The repository's real balance is not enough to absorb this debt",
           );
-        }
-        if (routedTotal > 0n) {
-          await manager.update(Wallet, repository.id, {
-            balance: newRepositoryBalance.toString(),
-          });
         }
 
         const transaction = manager.create(Transaction, {
@@ -1118,7 +1134,7 @@ export class TransactionsService {
         // Only the routed fee/penalty/unblockFee slices actually move real
         // money (out of the repository, into its sub-repositories) — the
         // written-off principal never touched Packeta's books in the first
-        // place (see ledgerWalletType's doc comment), so there's nothing to
+        // place (see ledgerWalletLeg's doc comment), so there's nothing to
         // post for it.
         if (routedLegs.length > 0) {
           const repositoryRef = await this.walletsService.getByIdUnscoped(
@@ -1128,7 +1144,12 @@ export class TransactionsService {
             manager,
             transaction.id,
             'Overdue debt absorbed by repository',
-            [{ walletType: repositoryRef.walletType, amount: routedTotal }],
+            [
+              {
+                wallet: { id: repositoryRef.id, walletType: repositoryRef.walletType },
+                amount: routedTotal,
+              },
+            ],
             routedLegs,
           );
         }
@@ -1261,16 +1282,15 @@ export class TransactionsService {
         );
         const routedTotal = fee + penalty - unrouted;
 
-        const newRepositoryBalance = BigInt(repository.balance) - routedTotal;
+        const currentRepositoryBalance = await this.ledgerService.getWalletBalance(
+          manager,
+          repository.id,
+        );
+        const newRepositoryBalance = currentRepositoryBalance - routedTotal;
         if (newRepositoryBalance < 0n) {
           throw new UnprocessableEntityException(
             "The repository's real balance is not enough to absorb this debt",
           );
-        }
-        if (routedTotal > 0n) {
-          await manager.update(Wallet, repository.id, {
-            balance: newRepositoryBalance.toString(),
-          });
         }
 
         const transaction = manager.create(Transaction, {
@@ -1297,7 +1317,12 @@ export class TransactionsService {
             manager,
             transaction.id,
             'Offboarding debt absorbed by repository',
-            [{ walletType: repositoryRef.walletType, amount: routedTotal }],
+            [
+              {
+                wallet: { id: repositoryRef.id, walletType: repositoryRef.walletType },
+                amount: routedTotal,
+              },
+            ],
             routedLegs,
           );
         }
@@ -1368,7 +1393,11 @@ export class TransactionsService {
             'This customer still owes an outstanding balance — collect it first via ZarinPal or the repository before closing their wallet',
           );
         }
-        if (BigInt(creditWallet.balance) !== 0n) {
+        const creditWalletBalance = await this.ledgerService.getWalletBalance(
+          manager,
+          creditWallet.id,
+        );
+        if (creditWalletBalance !== 0n) {
           throw new UnprocessableEntityException(
             'This wallet still has a nonzero balance',
           );
@@ -1782,15 +1811,8 @@ export class TransactionsService {
         if (transaction.installmentId || transaction.settlesWalletId) {
           await this.creditInstallmentRepayment(manager, transaction, toWallet);
         } else {
-          const newToBalance =
-            BigInt(toWallet.balance) + BigInt(transaction.amount);
-          await manager.update(Wallet, toWallet.id, {
-            balance: newToBalance.toString(),
-          });
-
           // Plain self-deposit (installment repayment / overdue-and-quit
-          // collection go through creditInstallmentRepayment above, and
-          // aren't wired into the GL yet — see that method).
+          // collection go through creditInstallmentRepayment above).
           const toWalletFullRef = await this.walletsService.getByIdUnscoped(
             toWallet.id,
           );
@@ -1798,10 +1820,19 @@ export class TransactionsService {
             manager,
             transaction.id,
             'Deposit',
-            await this.ledgerWalletType(toWalletFullRef),
+            await this.ledgerWalletLeg(toWalletFullRef),
             BigInt(transaction.amount),
             GlAccountCode.BANK_CASH,
           );
+          if (toWalletFullRef.repositoryWalletId) {
+            await this.ledgerService.postRepositoryAllocationMirror(
+              manager,
+              transaction.id,
+              'Deposit',
+              { id: toWallet.id, walletType: toWalletFullRef.walletType },
+              BigInt(transaction.amount),
+            );
+          }
         }
 
         transaction.status = TransactionStatus.COMPLETED;
@@ -1897,7 +1928,14 @@ export class TransactionsService {
     supportFunding?: { supportWallet: Wallet; amount: bigint },
   ): Promise<void> {
     const purchaseAmount = BigInt(transaction.amount);
-    let fundedBalance = BigInt(fromWallet.balance);
+    // Sum of whatever externally funded this purchase (support top-up
+    // and/or backing repository) beyond fromWallet's own existing balance —
+    // used below to compute fromWallet's resulting balance for the floor
+    // check. The actual debit legs (which wallets' real balances decrease)
+    // are built separately from support/repositoryDebitLeg, since a
+    // repository-backed wallet's own balance always nets to zero here
+    // regardless of this sum (see ledgerWalletLeg's doc comment).
+    let externallyFunded = 0n;
 
     // Which real wallets the purchase's money actually came out of — a
     // plain purchase draws the whole amount from fromWalletRef itself, but
@@ -1905,15 +1943,18 @@ export class TransactionsService {
     // repository instead (see the GL posting at the end of this method,
     // which builds a single balanced entry: these debits, credited to the
     // merchant).
-    let supportDebitLeg: { walletType: WalletType; amount: bigint } | null =
+    let supportDebitLeg: { wallet: WalletLegInput; amount: bigint } | null =
       null;
-    let repositoryDebitLeg: { walletType: WalletType; amount: bigint } | null =
+    let repositoryDebitLeg: { wallet: WalletLegInput; amount: bigint } | null =
       null;
 
     if (supportFunding && supportFunding.amount > 0n) {
       const { supportWallet, amount } = supportFunding;
-      const newSupportBalance = BigInt(supportWallet.balance) - amount;
-      if (newSupportBalance < 0n) {
+      const currentSupportBalance = await this.ledgerService.getWalletBalance(
+        manager,
+        supportWallet.id,
+      );
+      if (currentSupportBalance - amount < 0n) {
         // Can't happen in practice — the support wallet was credited this
         // exact amount moments ago in the same DB transaction — but guard
         // it anyway rather than letting a balance go negative silently.
@@ -1921,14 +1962,14 @@ export class TransactionsService {
           'The support wallet does not have enough balance to fund this purchase',
         );
       }
-      await manager.update(Wallet, supportWallet.id, {
-        balance: newSupportBalance.toString(),
-      });
-      fundedBalance += amount;
+      externallyFunded += amount;
       const supportWalletRef = await this.walletsService.getByIdUnscoped(
         supportWallet.id,
       );
-      supportDebitLeg = { walletType: supportWalletRef.walletType, amount };
+      supportDebitLeg = {
+        wallet: { id: supportWalletRef.id, walletType: supportWalletRef.walletType },
+        amount,
+      };
       const supportTransfer = manager.create(Transaction, {
         type: TransactionType.TRANSFER,
         fromWalletId: supportWallet.id,
@@ -1965,24 +2006,27 @@ export class TransactionsService {
         manager,
         fromWallet.repositoryWalletId!,
       );
-      const newRepositoryBalance = BigInt(repository.balance) - remainder;
-      if (newRepositoryBalance < 0n) {
+      const currentRepositoryBalance = await this.ledgerService.getWalletBalance(
+        manager,
+        repository.id,
+      );
+      if (currentRepositoryBalance - remainder < 0n) {
         throw new UnprocessableEntityException(
           'The backing repository does not have enough real balance to fund this purchase',
         );
       }
 
-      await manager.update(Wallet, repository.id, {
-        balance: newRepositoryBalance.toString(),
-      });
       await manager.update(Wallet, fromWallet.id, {
         virtualAmount: (availableVirtual - remainder).toString(),
       });
-      fundedBalance += remainder;
+      externallyFunded += remainder;
       const repositoryRef = await this.walletsService.getByIdUnscoped(
         repository.id,
       );
-      repositoryDebitLeg = { walletType: repositoryRef.walletType, amount: remainder };
+      repositoryDebitLeg = {
+        wallet: { id: repositoryRef.id, walletType: repositoryRef.walletType },
+        amount: remainder,
+      };
       const fundingTransfer = manager.create(Transaction, {
         type: TransactionType.TRANSFER,
         fromWalletId: repository.id,
@@ -2015,7 +2059,11 @@ export class TransactionsService {
     const floor = fromWalletRef.walletType.allowNegativeBalance
       ? -BigInt(fromWalletRef.walletType.creditLimit ?? '0')
       : 0n;
-    const newFromBalance = fundedBalance - purchaseAmount;
+    const currentFromBalance = await this.ledgerService.getWalletBalance(
+      manager,
+      fromWallet.id,
+    );
+    const newFromBalance = currentFromBalance + externallyFunded - purchaseAmount;
     if (newFromBalance < floor) {
       transaction.status = TransactionStatus.REVERSED;
       await manager.save(transaction);
@@ -2023,28 +2071,25 @@ export class TransactionsService {
         'Insufficient balance to complete this purchase',
       );
     }
-    const newToBalance = BigInt(toWallet.balance) + purchaseAmount;
-
-    await manager.update(Wallet, fromWallet.id, {
-      balance: newFromBalance.toString(),
-    });
-    await manager.update(Wallet, toWallet.id, {
-      balance: newToBalance.toString(),
-    });
 
     // Debit whichever real wallets actually funded this purchase (support
     // top-up and/or backing repository), or fromWalletRef itself when
     // neither applied (a plain purchase, or a CREDIT wallet drawing
     // directly on its own line with no repository) — credited to the
-    // merchant. See ledgerWalletType's doc comment for why a
+    // merchant. See ledgerWalletLeg's doc comment for why a
     // repository-backed credit wallet never appears here itself.
     const debitLegs =
       supportDebitLeg || repositoryDebitLeg
         ? [supportDebitLeg, repositoryDebitLeg].filter(
-            (leg): leg is { walletType: WalletType; amount: bigint } =>
+            (leg): leg is { wallet: WalletLegInput; amount: bigint } =>
               leg !== null,
           )
-        : [{ walletType: fromWalletRef.walletType, amount: purchaseAmount }];
+        : [
+            {
+              wallet: { id: fromWalletRef.id, walletType: fromWalletRef.walletType },
+              amount: purchaseAmount,
+            },
+          ];
     const merchantWalletRef = await this.walletsService.getByIdUnscoped(
       toWallet.id,
     );
@@ -2053,7 +2098,12 @@ export class TransactionsService {
       transaction.id,
       'Purchase',
       debitLegs,
-      [{ walletType: merchantWalletRef.walletType, amount: purchaseAmount }],
+      [
+        {
+          wallet: { id: merchantWalletRef.id, walletType: merchantWalletRef.walletType },
+          amount: purchaseAmount,
+        },
+      ],
     );
 
     transaction.status = TransactionStatus.COMPLETED;
@@ -2120,12 +2170,6 @@ export class TransactionsService {
     // re-entering here just to rebuild the merchant redirect) from
     // re-crediting the support wallet a second time.
     if (topUp.status !== TransactionStatus.COMPLETED) {
-      await manager.update(Wallet, supportWallet.id, {
-        balance: (BigInt(supportWallet.balance) + topUpAmount).toString(),
-      });
-      supportWallet.balance = (
-        BigInt(supportWallet.balance) + topUpAmount
-      ).toString();
       topUp.toWalletId = supportWallet.id;
       topUp.status = TransactionStatus.COMPLETED;
       await manager.save(topUp);
@@ -2137,7 +2181,7 @@ export class TransactionsService {
         manager,
         topUp.id,
         'Credit shortfall top-up',
-        supportWalletRaw.walletType,
+        { id: supportWalletRaw.id, walletType: supportWalletRaw.walletType },
         topUpAmount,
         GlAccountCode.BANK_CASH,
       );
@@ -2269,22 +2313,21 @@ export class TransactionsService {
         const merchantFloor = merchantWalletRef.walletType.allowNegativeBalance
           ? -BigInt(merchantWalletRef.walletType.creditLimit ?? '0')
           : 0n;
-        const newMerchantBalance =
-          BigInt(merchantWallet.balance) - BigInt(original.amount);
+        const currentMerchantBalance = await this.ledgerService.getWalletBalance(
+          manager,
+          merchantWallet.id,
+        );
+        const newMerchantBalance = currentMerchantBalance - BigInt(original.amount);
         if (newMerchantBalance < merchantFloor) {
           throw new UnprocessableEntityException(
             "Merchant's balance is too low to refund this purchase",
           );
         }
-        const newCustomerBalance =
-          BigInt(customerWallet.balance) + customerCreditAmount;
-
-        await manager.update(Wallet, merchantWallet.id, {
-          balance: newMerchantBalance.toString(),
-        });
-        await manager.update(Wallet, customerWallet.id, {
-          balance: newCustomerBalance.toString(),
-        });
+        const currentCustomerBalance = await this.ledgerService.getWalletBalance(
+          manager,
+          customerWallet.id,
+        );
+        const newCustomerBalance = currentCustomerBalance + customerCreditAmount;
 
         // Which real wallets get the merchant's refund credited to — the
         // customer's own credit-wallet type directly for the genuinely
@@ -2294,11 +2337,11 @@ export class TransactionsService {
         // any. Both are distinct, non-overlapping slices of original.amount
         // — unlike withdraw/transfer, nothing here doubles up with a
         // repository-backed wallet's own balance change, so no
-        // ledgerWalletType redirection is needed.
-        const creditLegs: { walletType: WalletType; amount: bigint }[] = [];
+        // ledgerWalletLeg redirection is needed.
+        const creditLegs: { wallet: WalletLegInput; amount: bigint }[] = [];
         if (customerCreditAmount > 0n) {
           creditLegs.push({
-            walletType: customerWalletRef.walletType,
+            wallet: { id: customerWalletRef.id, walletType: customerWalletRef.walletType },
             amount: customerCreditAmount,
           });
         }
@@ -2308,14 +2351,11 @@ export class TransactionsService {
             manager,
             repositoryFundingLeg.fromWalletId!,
           );
-          await manager.update(Wallet, repository.id, {
-            balance: (BigInt(repository.balance) + repositoryAmount).toString(),
-          });
           const repositoryRef = await this.walletsService.getByIdUnscoped(
             repository.id,
           );
           creditLegs.push({
-            walletType: repositoryRef.walletType,
+            wallet: { id: repositoryRef.id, walletType: repositoryRef.walletType },
             amount: repositoryAmount,
           });
           const restoredVirtual =
@@ -2369,7 +2409,15 @@ export class TransactionsService {
           original.id,
           reversal.id,
           reason ?? 'Refund',
-          [{ walletType: merchantWalletRef.walletType, amount: BigInt(original.amount) }],
+          [
+            {
+              wallet: {
+                id: merchantWalletRef.id,
+                walletType: merchantWalletRef.walletType,
+              },
+              amount: BigInt(original.amount),
+            },
+          ],
           creditLegs,
         );
 
@@ -2461,7 +2509,11 @@ export class TransactionsService {
     return this.dataSource.transaction(async (manager) => {
       const created: Transaction[] = [];
       const wallet = await this.walletsService.lockById(manager, walletId);
-      if (BigInt(wallet.balance) <= 0n) {
+      const balance = await this.ledgerService.getWalletBalance(
+        manager,
+        wallet.id,
+      );
+      if (balance <= 0n) {
         return created;
       }
       const walletRef = await this.walletsService.getByIdUnscoped(walletId);
@@ -2529,18 +2581,17 @@ export class TransactionsService {
         walletDefaults.length > 0 || overridesByPurchase.size > 0;
 
       if (!splitModeActive) {
-        await manager.update(Wallet, wallet.id, { balance: '0' });
         const transaction = manager.create(Transaction, {
           type: TransactionType.WITHDRAW,
           fromWalletId: wallet.id,
           toWalletId: null,
-          amount: wallet.balance,
+          amount: balance.toString(),
           idempotencyKey: `${keyPrefix}:${wallet.id}:${minuteKey}`,
         });
         await manager.save(transaction);
         const cashAccount = await recordRailSettlement(
           transaction,
-          wallet.balance,
+          balance.toString(),
           null,
           null,
         );
@@ -2548,15 +2599,15 @@ export class TransactionsService {
           manager,
           transaction.id,
           'Auto-withdraw sweep',
-          walletRef.walletType,
-          -BigInt(wallet.balance),
+          { id: walletRef.id, walletType: walletRef.walletType },
+          -balance,
           cashAccount,
         );
         created.push(transaction);
         return created;
       }
 
-      let remainingBalance = BigInt(wallet.balance);
+      let remainingBalance = balance;
 
       for (const purchase of unsettledPurchases) {
         const splitRows =
@@ -2596,7 +2647,7 @@ export class TransactionsService {
             manager,
             withdrawal.id,
             'Auto-withdraw settlement',
-            walletRef.walletType,
+            { id: walletRef.id, walletType: walletRef.walletType },
             -item.amount,
             cashAccount,
           );
@@ -2607,9 +2658,6 @@ export class TransactionsService {
         await manager.save(purchase);
       }
 
-      await manager.update(Wallet, wallet.id, {
-        balance: remainingBalance.toString(),
-      });
       return created;
     });
   }
@@ -2623,7 +2671,13 @@ export class TransactionsService {
   // purchases fund the credit wallet from its repository explicitly, up
   // front, inline in verifyPurchase, rather than through this helper — and
   // admin adjustments/purchase refunds intentionally don't cascade here.
-  private async debitLinkedRepository(
+  // Only a sufficiency check now — the repository's own balance is derived
+  // from the GL like any other wallet's, and the actual posting happens via
+  // ledgerWalletLeg's redirect wherever the caller was already posting for
+  // fromWalletRef (see withdraw/transfer). Still takes the repository's row
+  // lock here, before that posting, so two concurrent transactions against
+  // the same repository serialize correctly.
+  private async assertRepositoryCanFund(
     manager: EntityManager,
     fromWalletRef: Wallet,
     amount: bigint,
@@ -2634,33 +2688,32 @@ export class TransactionsService {
       manager,
       fromWalletRef.repositoryWalletId,
     );
-    const newRepositoryBalance = BigInt(repository.balance) - amount;
-    if (newRepositoryBalance < 0n) {
+    const currentBalance = await this.ledgerService.getWalletBalance(
+      manager,
+      repository.id,
+    );
+    if (currentBalance - amount < 0n) {
       throw new UnprocessableEntityException(
         'The backing repository does not have enough real balance to fund this transaction',
       );
     }
-    await manager.update(Wallet, repository.id, {
-      balance: newRepositoryBalance.toString(),
-    });
   }
 
-  // Which wallet type a real balance movement should post against in the
-  // GL. A repository-backed CREDIT wallet's own balance/virtualAmount is a
-  // per-employee sub-ledger of the REPOSITORY's pool — see
-  // debitLinkedRepository above and closeCreditWalletAndReclaim, which hands
-  // an unused ceiling straight back to the repository — not an independent
-  // Packeta receivable from the employee, so it isn't itself GL-relevant;
-  // only the repository's own (real, liability) balance is. Every other
-  // wallet posts against its own type as usual.
-  private async ledgerWalletType(walletRef: Wallet): Promise<WalletType> {
+  // Which wallet a real balance movement should post against in the GL. A
+  // repository-backed CREDIT wallet's own balance is now also posted (see
+  // postRepositoryAllocationMirror), but the *real* money movement — the
+  // one with a genuine external counterparty (bank cash, a merchant, a
+  // sub-repository) — still belongs to the REPOSITORY, since that's what
+  // actually funds the personnel's spend (see WalletsService.grantCredit).
+  // Every other wallet posts against its own id/type as usual.
+  private async ledgerWalletLeg(walletRef: Wallet): Promise<WalletLegInput> {
     if (!walletRef.repositoryWalletId) {
-      return walletRef.walletType;
+      return { id: walletRef.id, walletType: walletRef.walletType };
     }
     const repositoryRef = await this.walletsService.getByIdUnscoped(
       walletRef.repositoryWalletId,
     );
-    return repositoryRef.walletType;
+    return { id: repositoryRef.id, walletType: repositoryRef.walletType };
   }
 
   // Best-effort merchant access controls, only enforceable when the caller
@@ -2840,6 +2893,11 @@ export class TransactionsService {
       );
     }
 
+    const balances = await this.ledgerService.getWalletBalances(
+      this.dataSource.manager,
+      [fromWallet?.id, toWallet?.id].filter((id): id is string => !!id),
+    );
+
     return {
       id: transaction.id,
       type: transaction.type,
@@ -2847,8 +2905,12 @@ export class TransactionsService {
       note: transaction.note,
       idempotencyKey: transaction.idempotencyKey,
       createdAt: transaction.createdAt,
-      fromWallet: fromWallet ? serializeWallet(fromWallet) : null,
-      toWallet: toWallet ? serializeWallet(toWallet) : null,
+      fromWallet: fromWallet
+        ? serializeWallet(fromWallet, (balances.get(fromWallet.id) ?? 0n).toString())
+        : null,
+      toWallet: toWallet
+        ? serializeWallet(toWallet, (balances.get(toWallet.id) ?? 0n).toString())
+        : null,
       direction: ownsFrom && ownsTo ? 'BOTH' : ownsFrom ? 'OUT' : 'IN',
       status: transaction.status,
       expiresAt: transaction.expiresAt,
@@ -2889,6 +2951,11 @@ export class TransactionsService {
         : null,
     ]);
 
+    const balances = await this.ledgerService.getWalletBalances(
+      this.dataSource.manager,
+      [fromWallet?.id, toWallet?.id].filter((id): id is string => !!id),
+    );
+
     return {
       id: transaction.id,
       type: transaction.type,
@@ -2898,7 +2965,10 @@ export class TransactionsService {
       createdAt: transaction.createdAt,
       fromWallet: fromWallet
         ? {
-            ...serializeWallet(fromWallet),
+            ...serializeWallet(
+              fromWallet,
+              (balances.get(fromWallet.id) ?? 0n).toString(),
+            ),
             ownerId: fromWallet.user.id,
             ownerEmail: fromWallet.user.email,
             ownerPhoneNumber: fromWallet.user.phoneNumber,
@@ -2906,7 +2976,10 @@ export class TransactionsService {
         : null,
       toWallet: toWallet
         ? {
-            ...serializeWallet(toWallet),
+            ...serializeWallet(
+              toWallet,
+              (balances.get(toWallet.id) ?? 0n).toString(),
+            ),
             ownerId: toWallet.user.id,
             ownerEmail: toWallet.user.email,
             ownerPhoneNumber: toWallet.user.phoneNumber,
