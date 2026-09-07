@@ -7,6 +7,7 @@ import { Currency } from '../currencies/entities/currency.entity';
 import { Transaction } from '../transactions/entities/transaction.entity';
 import { IdempotencyKey } from '../idempotency/entities/idempotency-key.entity';
 import { PanelRole } from '../panel-roles/entities/panel-role.entity';
+import { RailSettlement } from '../rail-settlements/entities/rail-settlement.entity';
 import { GlAccount } from '../gl/entities/gl-account.entity';
 import { GlJournalEntry } from '../gl/entities/gl-journal-entry.entity';
 import { GlPosting } from '../gl/entities/gl-posting.entity';
@@ -26,6 +27,7 @@ export const AppDataSource = new DataSource({
     Transaction,
     IdempotencyKey,
     PanelRole,
+    RailSettlement,
     GlAccount,
     GlJournalEntry,
     GlPosting,
