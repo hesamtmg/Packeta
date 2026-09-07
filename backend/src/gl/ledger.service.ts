@@ -216,4 +216,64 @@ export class LedgerService {
       legs: [walletLeg, suspenseLeg],
     });
   }
+
+  // General multi-leg entry: several wallets debited, several credited (or
+  // vice versa) — a purchase that draws on more than one funding source
+  // (the wallet's own balance, a support top-up, a backing repository) to
+  // pay a single merchant, or a refund that pays a single merchant's debit
+  // back out to more than one destination. Zero-amount legs are dropped
+  // rather than rejected, since callers build these from optional funding
+  // sources that may not have applied (e.g. a purchase with no repository
+  // funding at all).
+  private multiLegs(
+    debits: Array<{ walletType: WalletType; amount: bigint }>,
+    credits: Array<{ walletType: WalletType; amount: bigint }>,
+  ): LedgerLeg[] {
+    return [
+      ...debits
+        .filter((d) => d.amount > 0n)
+        .map((d) => this.walletLeg(d.walletType, -d.amount)),
+      ...credits
+        .filter((c) => c.amount > 0n)
+        .map((c) => this.walletLeg(c.walletType, c.amount)),
+    ];
+  }
+
+  async postMultiLeg(
+    manager: EntityManager,
+    transactionId: string,
+    description: string,
+    debits: Array<{ walletType: WalletType; amount: bigint }>,
+    credits: Array<{ walletType: WalletType; amount: bigint }>,
+  ): Promise<GlJournalEntry> {
+    return this.postEntry(manager, {
+      transactionId,
+      description,
+      legs: this.multiLegs(debits, credits),
+    });
+  }
+
+  // Same as postMultiLeg, but links back to the journal entry originally
+  // posted for originalTransactionId (if one exists) via reversalOfId — a
+  // refund undoing a purchase that predates this feature, or one of the
+  // not-yet-wired flows, simply won't have an original to link to, which is
+  // fine (reversalOfId is nullable).
+  async postReversal(
+    manager: EntityManager,
+    originalTransactionId: string,
+    reversalTransactionId: string,
+    description: string,
+    debits: Array<{ walletType: WalletType; amount: bigint }>,
+    credits: Array<{ walletType: WalletType; amount: bigint }>,
+  ): Promise<GlJournalEntry> {
+    const original = await manager.findOne(GlJournalEntry, {
+      where: { transactionId: originalTransactionId },
+    });
+    return this.postEntry(manager, {
+      transactionId: reversalTransactionId,
+      description,
+      legs: this.multiLegs(debits, credits),
+      reversalOfId: original?.id,
+    });
+  }
 }

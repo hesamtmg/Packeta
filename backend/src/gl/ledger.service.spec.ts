@@ -30,16 +30,27 @@ const SEEDED_ACCOUNTS: GlAccount[] = [
   account(GlAccountCode.LEDGER_ADJUSTMENTS, GlAccountType.EQUITY),
 ];
 
-function buildManager(accounts: GlAccount[] = SEEDED_ACCOUNTS) {
+function buildManager(
+  accounts: GlAccount[] = SEEDED_ACCOUNTS,
+  existingJournalEntries: Array<{ id: string; transactionId: string }> = [],
+) {
   const savedPostings: any[] = [];
   const savedEntries: any[] = [];
   let idCounter = 0;
   const manager = {
     findOne: jest.fn(async (_entity: unknown, opts: any) => {
+      if (opts.where.code !== undefined) {
+        return (
+          accounts.find(
+            (a) =>
+              a.code === opts.where.code &&
+              a.currencyId === opts.where.currencyId,
+          ) ?? null
+        );
+      }
       return (
-        accounts.find(
-          (a) =>
-            a.code === opts.where.code && a.currencyId === opts.where.currencyId,
+        existingJournalEntries.find(
+          (e) => e.transactionId === opts.where.transactionId,
         ) ?? null
       );
     }),
@@ -245,6 +256,93 @@ describe('LedgerService', () => {
     expect(suspenseLeg).toMatchObject({
       direction: GlPostingDirection.CREDIT,
       amount: '50',
+    });
+  });
+
+  it('postMultiLeg debits several wallets and credits one, staying balanced', async () => {
+    const service = new LedgerService();
+    const { manager, savedPostings } = buildManager();
+    const repositoryType = walletType({ name: 'Repository' });
+    const supportType = walletType({ name: 'Support' });
+    const merchantType = walletType({ name: 'Merchant' });
+
+    await service.postMultiLeg(
+      manager as any,
+      'tx-1',
+      'Purchase',
+      [
+        { walletType: supportType, amount: 50n },
+        { walletType: repositoryType, amount: 100n },
+      ],
+      [{ walletType: merchantType, amount: 150n }],
+    );
+
+    expect(savedPostings).toHaveLength(3);
+    const totalDebit = savedPostings
+      .filter((p) => p.direction === GlPostingDirection.DEBIT)
+      .reduce((sum: bigint, p: any) => sum + BigInt(p.amount), 0n);
+    const totalCredit = savedPostings
+      .filter((p) => p.direction === GlPostingDirection.CREDIT)
+      .reduce((sum: bigint, p: any) => sum + BigInt(p.amount), 0n);
+    expect(totalDebit).toBe(150n);
+    expect(totalCredit).toBe(150n);
+  });
+
+  it('postMultiLeg drops zero-amount legs instead of rejecting them', async () => {
+    const service = new LedgerService();
+    const { manager, savedPostings } = buildManager();
+
+    await service.postMultiLeg(
+      manager as any,
+      'tx-1',
+      'Purchase',
+      [
+        { walletType: walletType({ name: 'Support' }), amount: 0n },
+        { walletType: walletType({ name: 'Repository' }), amount: 150n },
+      ],
+      [{ walletType: walletType({ name: 'Merchant' }), amount: 150n }],
+    );
+
+    expect(savedPostings).toHaveLength(2);
+  });
+
+  it('postReversal links back to the original journal entry when one exists', async () => {
+    const service = new LedgerService();
+    const { manager, savedEntries } = buildManager(SEEDED_ACCOUNTS, [
+      { id: 'journal-original', transactionId: 'purchase-1' },
+    ]);
+
+    await service.postReversal(
+      manager as any,
+      'purchase-1',
+      'reversal-1',
+      'Refund',
+      [{ walletType: walletType({ name: 'Merchant' }), amount: 500n }],
+      [{ walletType: walletType(), amount: 500n }],
+    );
+
+    expect(savedEntries[0]).toMatchObject({
+      transactionId: 'reversal-1',
+      reversalOfId: 'journal-original',
+    });
+  });
+
+  it('postReversal leaves reversalOfId null when no original entry is found', async () => {
+    const service = new LedgerService();
+    const { manager, savedEntries } = buildManager();
+
+    await service.postReversal(
+      manager as any,
+      'purchase-1',
+      'reversal-1',
+      'Refund',
+      [{ walletType: walletType({ name: 'Merchant' }), amount: 500n }],
+      [{ walletType: walletType(), amount: 500n }],
+    );
+
+    expect(savedEntries[0]).toMatchObject({
+      transactionId: 'reversal-1',
+      reversalOfId: null,
     });
   });
 

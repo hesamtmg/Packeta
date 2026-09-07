@@ -271,7 +271,7 @@ export class TransactionsService {
           manager,
           transaction.id,
           `Withdraw via ${railType}`,
-          walletRef.walletType,
+          await this.ledgerWalletType(walletRef),
           -BigInt(amount),
           settlement.status === RailSettlementStatus.COMPLETED
             ? GlAccountCode.BANK_CASH
@@ -416,7 +416,7 @@ export class TransactionsService {
           manager,
           transaction.id,
           'Transfer',
-          fromWalletRef.walletType,
+          await this.ledgerWalletType(fromWalletRef),
           toWalletFullRef.walletType,
           BigInt(amount),
         );
@@ -1741,7 +1741,7 @@ export class TransactionsService {
             manager,
             transaction.id,
             'Deposit',
-            toWalletFullRef.walletType,
+            await this.ledgerWalletType(toWalletFullRef),
             BigInt(transaction.amount),
             GlAccountCode.BANK_CASH,
           );
@@ -1842,6 +1842,17 @@ export class TransactionsService {
     const purchaseAmount = BigInt(transaction.amount);
     let fundedBalance = BigInt(fromWallet.balance);
 
+    // Which real wallets the purchase's money actually came out of — a
+    // plain purchase draws the whole amount from fromWalletRef itself, but
+    // a credit-funded one can draw from a support top-up and/or a backing
+    // repository instead (see the GL posting at the end of this method,
+    // which builds a single balanced entry: these debits, credited to the
+    // merchant).
+    let supportDebitLeg: { walletType: WalletType; amount: bigint } | null =
+      null;
+    let repositoryDebitLeg: { walletType: WalletType; amount: bigint } | null =
+      null;
+
     if (supportFunding && supportFunding.amount > 0n) {
       const { supportWallet, amount } = supportFunding;
       const newSupportBalance = BigInt(supportWallet.balance) - amount;
@@ -1857,6 +1868,10 @@ export class TransactionsService {
         balance: newSupportBalance.toString(),
       });
       fundedBalance += amount;
+      const supportWalletRef = await this.walletsService.getByIdUnscoped(
+        supportWallet.id,
+      );
+      supportDebitLeg = { walletType: supportWalletRef.walletType, amount };
       const supportTransfer = manager.create(Transaction, {
         type: TransactionType.TRANSFER,
         fromWalletId: supportWallet.id,
@@ -1907,6 +1922,10 @@ export class TransactionsService {
         virtualAmount: (availableVirtual - remainder).toString(),
       });
       fundedBalance += remainder;
+      const repositoryRef = await this.walletsService.getByIdUnscoped(
+        repository.id,
+      );
+      repositoryDebitLeg = { walletType: repositoryRef.walletType, amount: remainder };
       const fundingTransfer = manager.create(Transaction, {
         type: TransactionType.TRANSFER,
         fromWalletId: repository.id,
@@ -1955,6 +1974,30 @@ export class TransactionsService {
     await manager.update(Wallet, toWallet.id, {
       balance: newToBalance.toString(),
     });
+
+    // Debit whichever real wallets actually funded this purchase (support
+    // top-up and/or backing repository), or fromWalletRef itself when
+    // neither applied (a plain purchase, or a CREDIT wallet drawing
+    // directly on its own line with no repository) — credited to the
+    // merchant. See ledgerWalletType's doc comment for why a
+    // repository-backed credit wallet never appears here itself.
+    const debitLegs =
+      supportDebitLeg || repositoryDebitLeg
+        ? [supportDebitLeg, repositoryDebitLeg].filter(
+            (leg): leg is { walletType: WalletType; amount: bigint } =>
+              leg !== null,
+          )
+        : [{ walletType: fromWalletRef.walletType, amount: purchaseAmount }];
+    const merchantWalletRef = await this.walletsService.getByIdUnscoped(
+      toWallet.id,
+    );
+    await this.ledgerService.postMultiLeg(
+      manager,
+      transaction.id,
+      'Purchase',
+      debitLegs,
+      [{ walletType: merchantWalletRef.walletType, amount: purchaseAmount }],
+    );
 
     transaction.status = TransactionStatus.COMPLETED;
     await manager.save(transaction);
@@ -2029,6 +2072,18 @@ export class TransactionsService {
       topUp.toWalletId = supportWallet.id;
       topUp.status = TransactionStatus.COMPLETED;
       await manager.save(topUp);
+
+      // The ZarinPal money landing in the support wallet is its own real
+      // cash-in event — settleCreditFundedPurchase below posts the separate
+      // (also real) event of that money then being spent on the purchase.
+      await this.ledgerService.postCashMovement(
+        manager,
+        topUp.id,
+        'Credit shortfall top-up',
+        supportWalletRaw.walletType,
+        topUpAmount,
+        GlAccountCode.BANK_CASH,
+      );
     }
 
     const merchantWalletRef = await this.walletsService.getByIdUnscoped(
@@ -2142,6 +2197,9 @@ export class TransactionsService {
         }
         const customerWallet = locked.get(original.fromWalletId!)!;
         const merchantWallet = locked.get(original.toWalletId!)!;
+        const customerWalletRef = await this.walletsService.getByIdUnscoped(
+          original.fromWalletId!,
+        );
 
         const repositoryFundingLeg = await manager.findOne(Transaction, {
           where: { idempotencyKey: `credit-fund:${original.id}` },
@@ -2171,6 +2229,23 @@ export class TransactionsService {
           balance: newCustomerBalance.toString(),
         });
 
+        // Which real wallets get the merchant's refund credited to — the
+        // customer's own credit-wallet type directly for the genuinely
+        // real-money slice (own balance or a support top-up: never routed
+        // back to the transient support wallet, per the comment above), and
+        // the repository's own type for the repository-funded slice, if
+        // any. Both are distinct, non-overlapping slices of original.amount
+        // — unlike withdraw/transfer, nothing here doubles up with a
+        // repository-backed wallet's own balance change, so no
+        // ledgerWalletType redirection is needed.
+        const creditLegs: { walletType: WalletType; amount: bigint }[] = [];
+        if (customerCreditAmount > 0n) {
+          creditLegs.push({
+            walletType: customerWalletRef.walletType,
+            amount: customerCreditAmount,
+          });
+        }
+
         if (repositoryFundingLeg && repositoryAmount > 0n) {
           const repository = await this.walletsService.lockById(
             manager,
@@ -2178,6 +2253,13 @@ export class TransactionsService {
           );
           await manager.update(Wallet, repository.id, {
             balance: (BigInt(repository.balance) + repositoryAmount).toString(),
+          });
+          const repositoryRef = await this.walletsService.getByIdUnscoped(
+            repository.id,
+          );
+          creditLegs.push({
+            walletType: repositoryRef.walletType,
+            amount: repositoryAmount,
           });
           const restoredVirtual =
             (customerWallet.virtualAmount
@@ -2224,6 +2306,15 @@ export class TransactionsService {
           relatedTransactionId: original.id,
         });
         await manager.save(reversal);
+
+        await this.ledgerService.postReversal(
+          manager,
+          original.id,
+          reversal.id,
+          reason ?? 'Refund',
+          [{ walletType: merchantWalletRef.walletType, amount: BigInt(original.amount) }],
+          creditLegs,
+        );
 
         return {
           transactionId: reversal.id,
@@ -2316,6 +2407,7 @@ export class TransactionsService {
       if (BigInt(wallet.balance) <= 0n) {
         return created;
       }
+      const walletRef = await this.walletsService.getByIdUnscoped(walletId);
 
       const now = new Date();
       const minuteKey = now.toISOString().slice(0, 16);
@@ -2327,13 +2419,19 @@ export class TransactionsService {
         wallet.id,
       );
 
+      // Returns which GL account the withdrawal's cash leg should land in —
+      // BANK_CASH outright for a wallet with no rail configured (the legacy
+      // autoWithdrawTimes-only path has no provider to model a failure for),
+      // or based on the mocked rail provider's synchronous outcome
+      // otherwise. See withdraw()'s own postCashMovement call for the same
+      // reasoning.
       const recordRailSettlement = async (
         transaction: Transaction,
         amount: string,
         destinationIban: string | null,
         label: string | null,
-      ): Promise<void> => {
-        if (!wallet.railType) return;
+      ): Promise<GlAccountCode.BANK_CASH | GlAccountCode.SETTLEMENT_CLEARING> => {
+        if (!wallet.railType) return GlAccountCode.BANK_CASH;
         const settlement = await this.railSettlementsService.createForSweep(
           manager,
           {
@@ -2349,6 +2447,9 @@ export class TransactionsService {
         await manager.update(Transaction, transaction.id, {
           railSettlementId: settlement.id,
         });
+        return settlement.status === RailSettlementStatus.COMPLETED
+          ? GlAccountCode.BANK_CASH
+          : GlAccountCode.SETTLEMENT_CLEARING;
       };
 
       const unsettledPurchases = await manager
@@ -2380,7 +2481,20 @@ export class TransactionsService {
           idempotencyKey: `${keyPrefix}:${wallet.id}:${minuteKey}`,
         });
         await manager.save(transaction);
-        await recordRailSettlement(transaction, wallet.balance, null, null);
+        const cashAccount = await recordRailSettlement(
+          transaction,
+          wallet.balance,
+          null,
+          null,
+        );
+        await this.ledgerService.postCashMovement(
+          manager,
+          transaction.id,
+          'Auto-withdraw sweep',
+          walletRef.walletType,
+          -BigInt(wallet.balance),
+          cashAccount,
+        );
         created.push(transaction);
         return created;
       }
@@ -2415,11 +2529,19 @@ export class TransactionsService {
             note: item.label,
           });
           await manager.save(withdrawal);
-          await recordRailSettlement(
+          const cashAccount = await recordRailSettlement(
             withdrawal,
             item.amount.toString(),
             item.iban,
             item.label,
+          );
+          await this.ledgerService.postCashMovement(
+            manager,
+            withdrawal.id,
+            'Auto-withdraw settlement',
+            walletRef.walletType,
+            -item.amount,
+            cashAccount,
           );
           created.push(withdrawal);
         }
@@ -2464,6 +2586,24 @@ export class TransactionsService {
     await manager.update(Wallet, repository.id, {
       balance: newRepositoryBalance.toString(),
     });
+  }
+
+  // Which wallet type a real balance movement should post against in the
+  // GL. A repository-backed CREDIT wallet's own balance/virtualAmount is a
+  // per-employee sub-ledger of the REPOSITORY's pool — see
+  // debitLinkedRepository above and closeCreditWalletAndReclaim, which hands
+  // an unused ceiling straight back to the repository — not an independent
+  // Packeta receivable from the employee, so it isn't itself GL-relevant;
+  // only the repository's own (real, liability) balance is. Every other
+  // wallet posts against its own type as usual.
+  private async ledgerWalletType(walletRef: Wallet): Promise<WalletType> {
+    if (!walletRef.repositoryWalletId) {
+      return walletRef.walletType;
+    }
+    const repositoryRef = await this.walletsService.getByIdUnscoped(
+      walletRef.repositoryWalletId,
+    );
+    return repositoryRef.walletType;
   }
 
   // Best-effort merchant access controls, only enforceable when the caller
