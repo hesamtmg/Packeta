@@ -181,6 +181,39 @@ describe('LedgerService', () => {
     });
   });
 
+  it('postCashInMultiLeg debits cash once and splits the credit across several wallets', async () => {
+    const service = new LedgerService();
+    const { manager, savedPostings } = buildManager();
+    const repositoryType = walletType({ name: 'Repository' });
+    const feeRepoType = walletType({ name: 'Fee repo' });
+
+    await service.postCashInMultiLeg(
+      manager as any,
+      'tx-1',
+      'Installment repayment',
+      GlAccountCode.BANK_CASH,
+      USD_ID,
+      400n,
+      [
+        { walletType: repositoryType, amount: 350n },
+        { walletType: feeRepoType, amount: 50n },
+      ],
+    );
+
+    expect(savedPostings).toHaveLength(3);
+    const bankLeg = savedPostings.find(
+      (p) => p.accountId === `account-${GlAccountCode.BANK_CASH}-${USD_ID}`,
+    );
+    expect(bankLeg).toMatchObject({
+      direction: GlPostingDirection.DEBIT,
+      amount: '400',
+    });
+    const totalCredit = savedPostings
+      .filter((p) => p.direction === GlPostingDirection.CREDIT)
+      .reduce((sum: bigint, p: any) => sum + BigInt(p.amount), 0n);
+    expect(totalCredit).toBe(400n);
+  });
+
   it('a repayment into a CREDIT wallet credits (shrinks) CREDIT_RECEIVABLE rather than CUSTOMER_WALLETS', async () => {
     const service = new LedgerService();
     const { manager, savedPostings } = buildManager();

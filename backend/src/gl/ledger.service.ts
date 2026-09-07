@@ -170,6 +170,35 @@ export class LedgerService {
     });
   }
 
+  // Same idea as postCashMovement, but for a single cash-in landing on
+  // several wallets at once — an installment repayment whose fee/penalty/
+  // unblock-fee slices are routed to their own dedicated sub-repositories
+  // (see TransactionsService.creditFeeSplitLegs) alongside the principal
+  // landing on the main repository. totalAmount must equal the sum of
+  // walletCredits' amounts.
+  async postCashInMultiLeg(
+    manager: EntityManager,
+    transactionId: string,
+    description: string,
+    cashAccountCode: GlAccountCode.BANK_CASH | GlAccountCode.SETTLEMENT_CLEARING,
+    currencyId: string,
+    totalAmount: bigint,
+    walletCredits: Array<{ walletType: WalletType; amount: bigint }>,
+  ): Promise<GlJournalEntry> {
+    const legs: LedgerLeg[] = [
+      {
+        code: cashAccountCode,
+        currencyId,
+        direction: GlPostingDirection.DEBIT,
+        amount: totalAmount,
+      },
+      ...walletCredits
+        .filter((c) => c.amount > 0n)
+        .map((c) => this.walletLeg(c.walletType, c.amount)),
+    ];
+    return this.postEntry(manager, { transactionId, description, legs });
+  }
+
   // A purely internal reallocation between two wallets (TRANSFER, or a
   // PURCHASE moving money from buyer to merchant) — no cash account
   // involved, both legs are wallet-mapped accounts.

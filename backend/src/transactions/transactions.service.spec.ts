@@ -41,6 +41,7 @@ const i18nStub = {
 function buildLedgerServiceStub() {
   return {
     postCashMovement: jest.fn().mockResolvedValue(undefined),
+    postCashInMultiLeg: jest.fn().mockResolvedValue(undefined),
     postWalletToWallet: jest.fn().mockResolvedValue(undefined),
     postAdjustment: jest.fn().mockResolvedValue(undefined),
     postMultiLeg: jest.fn().mockResolvedValue(undefined),
@@ -1624,7 +1625,7 @@ describe('TransactionsService.verifyPurchase', () => {
       markPaid: jest.fn(async () => undefined),
       computeRepaymentSplit: jest.fn(computeRepaymentSplitFixture),
     };
-    const { service, manager, walletsService } = buildService({
+    const { service, manager, walletsService, ledgerService } = buildService({
       senderWallet: repositoryWallet,
       recipientWallet: creditWallet,
       installmentsService: installmentsService as any,
@@ -1633,6 +1634,13 @@ describe('TransactionsService.verifyPurchase', () => {
       async (_manager: unknown, id: string) => {
         if (id === feeRepo.id) return feeRepo;
         return repositoryWallet;
+      },
+    );
+    (walletsService.getByIdUnscoped as jest.Mock).mockImplementation(
+      async (id: string) => {
+        if (id === feeRepo.id) return feeRepo;
+        if (id === repositoryWallet.id) return repositoryWallet;
+        return creditWallet;
       },
     );
 
@@ -1679,6 +1687,20 @@ describe('TransactionsService.verifyPurchase', () => {
       balance: '50',
     });
     expect(pendingPurchase.amount).toBe('350');
+    // The whole 400 ZarinPal charge is one cash-in, split across the
+    // repository (principal, 350) and the fee sub-repository (50).
+    expect(ledgerService.postCashInMultiLeg).toHaveBeenCalledWith(
+      manager,
+      'installment-tx-2',
+      expect.any(String),
+      'BANK_CASH',
+      repositoryWallet.walletType.currencyId,
+      400n,
+      [
+        { walletType: repositoryWallet.walletType, amount: 350n },
+        { walletType: feeRepo.walletType, amount: 50n },
+      ],
+    );
   });
 
   it('verifies an admin overdue-collection payment and settles every outstanding installment on the wallet', async () => {
@@ -1704,7 +1726,7 @@ describe('TransactionsService.verifyPurchase', () => {
       ]),
       computeRepaymentSplit: jest.fn(computeRepaymentSplitFixture),
     };
-    const { service, manager } = buildService({
+    const { service, manager, ledgerService } = buildService({
       senderWallet: repositoryWallet,
       recipientWallet: creditWallet,
       installmentsService: installmentsService as any,
@@ -1744,6 +1766,15 @@ describe('TransactionsService.verifyPurchase', () => {
       manager,
       'credit-1',
       'collection-tx-1',
+    );
+    expect(ledgerService.postCashInMultiLeg).toHaveBeenCalledWith(
+      manager,
+      'collection-tx-1',
+      expect.any(String),
+      'BANK_CASH',
+      repositoryWallet.walletType.currencyId,
+      750n,
+      [{ walletType: repositoryWallet.walletType, amount: 750n }],
     );
   });
 });
@@ -2259,7 +2290,8 @@ describe('TransactionsService overdue-collection methods', () => {
   });
 
   it('collectOverdueFromRepository writes off the principal and leaves fee/penalty/unblockFee on the repository when no sub-repositories are configured', async () => {
-    const { service, manager, installmentsService } = buildOverdueService();
+    const { service, manager, installmentsService, ledgerService } =
+      buildOverdueService();
 
     const result = await service.collectOverdueFromRepository(
       'admin-1',
@@ -2292,6 +2324,10 @@ describe('TransactionsService overdue-collection methods', () => {
       'credit-1',
       undefined,
     );
+    // Nothing real moved (nowhere configured to route to, and the
+    // written-off principal was never Packeta's own receivable), so no GL
+    // entry at all.
+    expect(ledgerService.postMultiLeg).not.toHaveBeenCalled();
   });
 
   it('collectOverdueFromRepository routes fee/penalty/unblockFee to their configured sub-repositories instead of the main repository', async () => {
@@ -2328,7 +2364,7 @@ describe('TransactionsService overdue-collection methods', () => {
       markAllPaidAndUnblock: jest.fn(async () => undefined),
       computeRepaymentSplit: jest.fn(computeRepaymentSplitFixture),
     };
-    const { service, manager, walletsService } = buildService({
+    const { service, manager, walletsService, ledgerService } = buildService({
       senderWallet: wired,
       repositoryWallet,
       installmentsService: installmentsService as any,
@@ -2339,6 +2375,15 @@ describe('TransactionsService overdue-collection methods', () => {
         if (id === penaltyRepo.id) return penaltyRepo;
         if (id === unblockRepo.id) return unblockRepo;
         return repositoryWallet;
+      },
+    );
+    (walletsService.getByIdUnscoped as jest.Mock).mockImplementation(
+      async (id: string) => {
+        if (id === feeRepo.id) return feeRepo;
+        if (id === penaltyRepo.id) return penaltyRepo;
+        if (id === unblockRepo.id) return unblockRepo;
+        if (id === repositoryWallet.id) return repositoryWallet;
+        return wired;
       },
     );
 
@@ -2369,6 +2414,17 @@ describe('TransactionsService overdue-collection methods', () => {
       expect.anything(),
       unblockRepo.id,
       { balance: '50' },
+    );
+    expect(ledgerService.postMultiLeg).toHaveBeenCalledWith(
+      manager,
+      result.transactionId,
+      expect.any(String),
+      [{ walletType: repositoryWallet.walletType, amount: 150n }],
+      [
+        { walletType: feeRepo.walletType, amount: 80n },
+        { walletType: penaltyRepo.walletType, amount: 20n },
+        { walletType: unblockRepo.walletType, amount: 50n },
+      ],
     );
   });
 
@@ -2405,6 +2461,13 @@ describe('TransactionsService overdue-collection methods', () => {
     (walletsService.lockById as jest.Mock).mockImplementation(
       async (_manager: unknown, id: string) =>
         id === feeRepo.id ? feeRepo : poorRepository,
+    );
+    (walletsService.getByIdUnscoped as jest.Mock).mockImplementation(
+      async (id: string) => {
+        if (id === feeRepo.id) return feeRepo;
+        if (id === poorRepository.id) return poorRepository;
+        return wired;
+      },
     );
 
     await expect(

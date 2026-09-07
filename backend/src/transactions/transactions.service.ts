@@ -828,7 +828,10 @@ export class TransactionsService {
     parts: { fee: bigint; penalty: bigint; unblockFee: bigint },
     legType: TransactionType.DEPOSIT | TransactionType.TRANSFER,
     keyPrefix: string,
-  ): Promise<bigint> {
+  ): Promise<{
+    unrouted: bigint;
+    routedLegs: Array<{ walletType: WalletType; amount: bigint }>;
+  }> {
     const legs: [bigint, string | null, string][] = [
       [parts.fee, walletType.feeRepositoryWalletId, 'fee'],
       [parts.penalty, walletType.penaltyRepositoryWalletId, 'penalty'],
@@ -839,6 +842,7 @@ export class TransactionsService {
       ],
     ];
     let unrouted = 0n;
+    const routedLegs: Array<{ walletType: WalletType; amount: bigint }> = [];
     for (const [amount, subRepositoryId, label] of legs) {
       if (amount <= 0n) continue;
       if (!subRepositoryId) {
@@ -866,8 +870,11 @@ export class TransactionsService {
         note: `Installment ${label} routed to its dedicated repository`,
       });
       await manager.save(leg);
+      const subRepositoryRef =
+        await this.walletsService.getByIdUnscoped(subRepositoryId);
+      routedLegs.push({ walletType: subRepositoryRef.walletType, amount });
     }
-    return unrouted;
+    return { unrouted, routedLegs };
   }
 
   // Called from verifyPurchase's real-money-in branch once `repository`
@@ -905,11 +912,12 @@ export class TransactionsService {
     const { principal, fee, penalty } =
       this.installmentsService.computeRepaymentSplit(installments);
     const unblockFee = BigInt(transaction.amount) - principal - fee - penalty;
+    const zarinpalAmount = BigInt(transaction.amount);
 
     const creditWallet =
       await this.walletsService.getByIdUnscoped(creditWalletId);
 
-    const unrouted = await this.creditFeeSplitLegs(
+    const { unrouted, routedLegs } = await this.creditFeeSplitLegs(
       manager,
       repository,
       creditWallet.walletType,
@@ -923,6 +931,22 @@ export class TransactionsService {
         balance: (BigInt(repository.balance) + toRepository).toString(),
       });
     }
+
+    // The whole ZarinPal charge is one cash-in event, landing on however
+    // many wallets it was split across (the main repository plus whichever
+    // sub-repositories fee/penalty/unblockFee actually routed to).
+    const repositoryRef = await this.walletsService.getByIdUnscoped(
+      repository.id,
+    );
+    await this.ledgerService.postCashInMultiLeg(
+      manager,
+      transaction.id,
+      'Installment repayment',
+      GlAccountCode.BANK_CASH,
+      repositoryRef.walletType.currencyId,
+      zarinpalAmount,
+      [{ walletType: repositoryRef.walletType, amount: toRepository }, ...routedLegs],
+    );
 
     // The transaction row was created (and verified against the gateway)
     // with the full charge as its amount, but only `toRepository` of that
@@ -1055,7 +1079,7 @@ export class TransactionsService {
         // (`unrouted`, no destination configured for it) never needs to
         // leave the main repository at all, so only the routed portion gets
         // debited from it below.
-        const unrouted = await this.creditFeeSplitLegs(
+        const { unrouted, routedLegs } = await this.creditFeeSplitLegs(
           manager,
           repository,
           creditWallet.walletType,
@@ -1090,6 +1114,24 @@ export class TransactionsService {
           performedByUserId: adminUserId,
         });
         await manager.save(transaction);
+
+        // Only the routed fee/penalty/unblockFee slices actually move real
+        // money (out of the repository, into its sub-repositories) — the
+        // written-off principal never touched Packeta's books in the first
+        // place (see ledgerWalletType's doc comment), so there's nothing to
+        // post for it.
+        if (routedLegs.length > 0) {
+          const repositoryRef = await this.walletsService.getByIdUnscoped(
+            repository.id,
+          );
+          await this.ledgerService.postMultiLeg(
+            manager,
+            transaction.id,
+            'Overdue debt absorbed by repository',
+            [{ walletType: repositoryRef.walletType, amount: routedTotal }],
+            routedLegs,
+          );
+        }
 
         await this.installmentsService.markAllPaidAndUnblock(
           manager,
@@ -1209,7 +1251,7 @@ export class TransactionsService {
           creditWallet.repositoryWalletId!,
         );
 
-        const unrouted = await this.creditFeeSplitLegs(
+        const { unrouted, routedLegs } = await this.creditFeeSplitLegs(
           manager,
           repository,
           creditWallet.walletType,
@@ -1244,6 +1286,21 @@ export class TransactionsService {
           performedByUserId: adminUserId,
         });
         await manager.save(transaction);
+
+        // Same reasoning as collectOverdueFromRepository: only the routed
+        // fee/penalty slices are real money movements.
+        if (routedLegs.length > 0) {
+          const repositoryRef = await this.walletsService.getByIdUnscoped(
+            repository.id,
+          );
+          await this.ledgerService.postMultiLeg(
+            manager,
+            transaction.id,
+            'Offboarding debt absorbed by repository',
+            [{ walletType: repositoryRef.walletType, amount: routedTotal }],
+            routedLegs,
+          );
+        }
 
         await this.installmentsService.markAllPaidAndUnblock(
           manager,
