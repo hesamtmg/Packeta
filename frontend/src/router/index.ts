@@ -21,6 +21,7 @@ import AdminInstallmentsView from '../views/admin/AdminInstallmentsView.vue';
 import AdminSchedulerLogsView from '../views/admin/AdminSchedulerLogsView.vue';
 import AdminOffboardingView from '../views/admin/AdminOffboardingView.vue';
 import AdminWalletDetailView from '../views/admin/AdminWalletDetailView.vue';
+import AdminGeneralLedgerView from '../views/admin/AdminGeneralLedgerView.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -149,6 +150,12 @@ const router = createRouter({
       name: 'admin-offboarding',
       component: AdminOffboardingView,
       meta: { requiresAuth: true, requiresAdmin: true, requiresSection: 'offboarding' },
+    },
+    {
+      path: '/admin/general-ledger',
+      name: 'admin-general-ledger',
+      component: AdminGeneralLedgerView,
+      meta: { requiresAuth: true, requiresAdmin: true, requiresSection: 'generalLedger' },
     },
   ],
 });

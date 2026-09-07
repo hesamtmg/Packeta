@@ -16,7 +16,8 @@
     "migration:generate": "npm run typeorm -- migration:generate",
     "migration:run": "npm run typeorm -- migration:run",
     "migration:revert": "npm run typeorm -- migration:revert",
-    "promote-admin": "ts-node -r tsconfig-paths/register src/scripts/promote-to-admin.ts"
+    "promote-admin": "ts-node -r tsconfig-paths/register src/scripts/promote-to-admin.ts",
+    "backfill-gl": "ts-node -r tsconfig-paths/register src/scripts/backfill-gl.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.0",

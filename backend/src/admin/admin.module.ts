@@ -8,6 +8,7 @@ import { LoggingModule } from '../logging/logging.module';
 import { AdminGuardModule } from '../auth/admin-guard.module';
 import { PanelRolesModule } from '../panel-roles/panel-roles.module';
 import { SettlementModule } from '../settlement/settlement.module';
+import { GlModule } from '../gl/gl.module';
 import { AdminController } from './admin.controller';
 import { BatchImportService } from './batch-import.service';
 import { SectionGuard } from './guards/section.guard';
@@ -23,6 +24,7 @@ import { SectionGuard } from './guards/section.guard';
     AdminGuardModule,
     PanelRolesModule,
     SettlementModule,
+    GlModule,
   ],
   controllers: [AdminController],
   providers: [BatchImportService, SectionGuard],

@@ -26,6 +26,7 @@ import { serializeWallet } from './wallet.serializer';
 import { SettlementService } from '../settlement/settlement.service';
 import { CustomerActionGuard } from '../admin/guards/customer-action.guard';
 import { RequireCustomerAction } from '../admin/decorators/require-customer-action.decorator';
+import { LedgerService } from '../gl/ledger.service';
 
 @Controller('wallets')
 @UseGuards(JwtAuthGuard, CustomerActionGuard)
@@ -34,6 +35,7 @@ export class WalletsController {
     private readonly walletsService: WalletsService,
     private readonly walletTypesService: WalletTypesService,
     private readonly settlementService: SettlementService,
+    private readonly ledgerService: LedgerService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -42,13 +44,21 @@ export class WalletsController {
     const wallets = (await this.walletsService.listForUser(user.userId)).filter(
       (wallet) => !wallet.walletType.hiddenFromCustomer,
     );
+    const balances = await this.ledgerService.getWalletBalances(
+      this.dataSource.manager,
+      wallets.map((wallet) => wallet.id),
+    );
     return Promise.all(
       wallets.map(async (wallet) => {
         const settlementAccounts = await this.settlementService.findForWallet(
           this.dataSource.manager,
           wallet.id,
         );
-        return serializeWallet(wallet, settlementAccounts);
+        return serializeWallet(
+          wallet,
+          (balances.get(wallet.id) ?? 0n).toString(),
+          settlementAccounts,
+        );
       }),
     );
   }
@@ -59,11 +69,11 @@ export class WalletsController {
     @Param('id') id: string,
   ) {
     const wallet = await this.walletsService.getById(user.userId, id);
-    const settlementAccounts = await this.settlementService.findForWallet(
-      this.dataSource.manager,
-      wallet.id,
-    );
-    return serializeWallet(wallet, settlementAccounts);
+    const [settlementAccounts, balance] = await Promise.all([
+      this.settlementService.findForWallet(this.dataSource.manager, wallet.id),
+      this.ledgerService.getWalletBalance(this.dataSource.manager, wallet.id),
+    ]);
+    return serializeWallet(wallet, balance.toString(), settlementAccounts);
   }
 
   @Post()
@@ -142,7 +152,11 @@ export class WalletsController {
       this.dataSource.manager,
       wallet.id,
     );
-    return serializeWallet({ ...wallet, walletType }, settlementAccounts);
+    return serializeWallet(
+      { ...wallet, walletType },
+      '0',
+      settlementAccounts,
+    );
   }
 
   // A repository owner splits off some of their unallocated virtual pool
@@ -226,17 +240,17 @@ export class WalletsController {
         railScheduleTimes: dto.railScheduleTimes,
       }),
     );
-    const settlementAccounts = await this.settlementService.findForWallet(
-      this.dataSource.manager,
-      wallet.id,
-    );
-    return serializeWallet(wallet, settlementAccounts);
+    const [settlementAccounts, balance] = await Promise.all([
+      this.settlementService.findForWallet(this.dataSource.manager, wallet.id),
+      this.ledgerService.getWalletBalance(this.dataSource.manager, wallet.id),
+    ]);
+    return serializeWallet(wallet, balance.toString(), settlementAccounts);
   }
 
   @Delete(':id')
   async close(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     const wallet = await this.walletsService.closeForUser(user.userId, id);
-    return serializeWallet(wallet);
+    return serializeWallet(wallet, '0');
   }
 
   private assertAutoWithdrawCapable(

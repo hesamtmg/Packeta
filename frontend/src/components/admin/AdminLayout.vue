@@ -95,6 +95,12 @@ const allNavItems = computed<NavItem[]>(() => [
     label: t('adminNav.offboarding'),
     icon: 'M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3',
   },
+  {
+    name: 'admin-general-ledger',
+    section: 'generalLedger',
+    label: t('adminNav.generalLedger'),
+    icon: 'M4 5a2 2 0 012-2h12a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V5zM8 8h8M8 12h8M8 16h5',
+  },
 ]);
 
 const navItems = computed(() =>

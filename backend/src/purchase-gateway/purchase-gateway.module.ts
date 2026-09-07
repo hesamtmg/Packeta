@@ -5,9 +5,10 @@ import { PurchaseGatewayService } from './purchase-gateway.service';
 import { PurchaseGatewayController } from './purchase-gateway.controller';
 import { OtpService } from './otp.service';
 import { CaptchaService } from './captcha.service';
+import { GlModule } from '../gl/gl.module';
 
 @Module({
-  imports: [TransactionsModule, WalletsModule],
+  imports: [TransactionsModule, WalletsModule, GlModule],
   controllers: [PurchaseGatewayController],
   providers: [PurchaseGatewayService, OtpService, CaptchaService],
 })

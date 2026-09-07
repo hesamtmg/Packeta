@@ -49,9 +49,24 @@ interface AdminTransactionDetail {
   settlesWalletId: string | null;
 }
 
+interface GlPostingDetail {
+  direction: 'DEBIT' | 'CREDIT';
+  amount: string;
+  account: { code: string; name: string; currencyCode: string };
+}
+interface GlJournalEntryDetail {
+  id: string;
+  description: string;
+  reversalOfId: string | null;
+  createdAt: string;
+  postings: GlPostingDetail[];
+}
+
 const route = useRoute();
 const transaction = ref<AdminTransactionDetail | null>(null);
 const error = ref('');
+const glEntries = ref<GlJournalEntryDetail[]>([]);
+const glError = ref('');
 
 const currency = computed(
   () =>
@@ -72,6 +87,19 @@ async function load() {
     );
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : t('admin.transactionDetail.loadFailed');
+    return;
+  }
+
+  // Best-effort: a regular admin may have "transactions" access but not
+  // "generalLedger", in which case this 403s and the section just doesn't
+  // render rather than failing the whole page.
+  try {
+    glEntries.value = await apiRequest<GlJournalEntryDetail[]>(
+      `/admin/transactions/${route.params.id}/gl-entries`,
+    );
+  } catch (err) {
+    glError.value =
+      err instanceof ApiError ? err.message : t('admin.transactionDetail.glEntriesLoadFailed');
   }
 }
 
@@ -195,6 +223,39 @@ onMounted(load);
         <dd>{{ formatDateTime(transaction.createdAt) }}</dd>
       </dl>
     </section>
+
+    <section v-if="transaction" class="admin-card">
+      <h2>{{ t('admin.transactionDetail.glEntriesHeading') }}</h2>
+      <p v-if="glError" class="admin-error">{{ glError }}</p>
+      <p v-else-if="!glEntries.length" class="mono">{{ t('admin.transactionDetail.glEntriesNone') }}</p>
+      <div v-else class="gl-entries">
+        <div v-for="entry in glEntries" :key="entry.id" class="gl-entry">
+          <div class="gl-entry-header">
+            <span>{{ entry.description }}</span>
+            <span class="mono">{{ formatDateTime(entry.createdAt) }}</span>
+          </div>
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>{{ t('admin.generalLedger.colDirection') }}</th>
+                <th>{{ t('admin.generalLedger.colAmount') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(posting, i) in entry.postings" :key="i">
+                <td>
+                  <span class="admin-badge" :class="posting.direction === 'DEBIT' ? 'debit' : 'credit'">
+                    {{ posting.direction }}
+                  </span>
+                  {{ posting.account.name }}
+                </td>
+                <td>{{ currency ? formatAmount(posting.amount, currency) : posting.amount }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
   </AdminLayout>
 </template>
 
@@ -204,6 +265,25 @@ onMounted(load);
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+.gl-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.gl-entry-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.admin-badge.debit {
+  background: rgba(255, 107, 107, 0.15);
+  color: var(--accent-red);
+}
+.admin-badge.credit {
+  background: rgba(122, 162, 255, 0.15);
+  color: var(--accent-blue);
 }
 .amount {
   font-size: 2rem;

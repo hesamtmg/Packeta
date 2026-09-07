@@ -12,12 +12,15 @@ import { User } from '../../users/entities/user.entity';
 import { WalletType } from '../../wallet-types/entities/wallet-type.entity';
 import { SettlementRailType } from '../../rail-settlements/entities/rail-settlement.entity';
 
-// balance is stored in minor units (e.g. cents) as a bigint to avoid float
-// rounding errors; typeorm maps postgres bigint to a JS string. A user can
-// hold several wallets of the same type. The balance floor (0, or
-// -creditLimit for types that allow going negative) is enforced by a DB
-// trigger keyed off walletTypeId — see the AddWalletTypesAndMultiWallet
-// migration — since a static CHECK constraint can't reference another table.
+// A user can hold several wallets of the same type. Balance is no longer a
+// column here — see LedgerService.getWalletBalance, which derives it (minor
+// units, as a bigint-valued string) by summing this wallet's own
+// gl_postings: a CREDIT posting increases it, a DEBIT decreases it, the
+// same rule for every wallet type. The balance floor (0, or -creditLimit
+// for types that allow going negative) is enforced in application code
+// (TransactionsService) against that derived value before a money movement
+// is allowed to post, now that there's no stored column for a DB trigger to
+// check.
 @Entity('wallets')
 export class Wallet {
   @PrimaryGeneratedColumn('uuid')
@@ -38,9 +41,6 @@ export class Wallet {
   @ManyToOne(() => WalletType)
   @JoinColumn({ name: 'walletTypeId' })
   walletType: WalletType;
-
-  @Column({ type: 'bigint', default: 0 })
-  balance: string;
 
   // Customer-chosen display name for this specific wallet (e.g. "Rent
   // savings"), shown in place of the wallet type's name wherever this

@@ -52,6 +52,7 @@ function buildScopedWalletsService(wallets: ScopedTestWallet[]) {
     {} as any,
     {} as any,
     {} as any,
+    {} as any,
   );
   return { service, walletsRepository };
 }
@@ -170,6 +171,7 @@ describe('WalletsService.createDefaultWalletsForUser', () => {
       {} as any,
       {} as any,
       {} as any,
+      {} as any,
     );
 
     const wallets = await service.createDefaultWalletsForUser(
@@ -178,8 +180,8 @@ describe('WalletsService.createDefaultWalletsForUser', () => {
     );
 
     expect(wallets).toEqual([
-      { userId: 'user-1', walletTypeId: 'usd-starter', balance: '0' },
-      { userId: 'user-1', walletTypeId: 'irr-starter', balance: '0' },
+      { userId: 'user-1', walletTypeId: 'usd-starter' },
+      { userId: 'user-1', walletTypeId: 'irr-starter' },
     ]);
   });
 
@@ -190,6 +192,7 @@ describe('WalletsService.createDefaultWalletsForUser', () => {
       save: jest.fn(async (wallets: unknown) => wallets),
     };
     const service = new WalletsService(
+      {} as any,
       {} as any,
       {} as any,
       {} as any,
@@ -217,22 +220,28 @@ function buildService(wallet: {
     update: jest.fn(async (_id: string, patch: Partial<typeof wallet>) => {
       Object.assign(wallet, patch);
     }),
+    manager: {} as any,
   };
   const settlementService = {};
   const walletTypesService = {};
   const usersService = {};
+  const ledgerService = {
+    getWalletBalance: jest.fn(async () => BigInt(wallet.balance)),
+  };
   const service = new WalletsService(
     walletsRepository as any,
     settlementService as any,
     walletTypesService as any,
     usersService as any,
     {} as any,
+    ledgerService as any,
   );
   return { service, walletsRepository };
 }
 
 describe('WalletsService.isCounterpartyAllowed', () => {
   const service = new WalletsService(
+    {} as any,
     {} as any,
     {} as any,
     {} as any,
@@ -380,6 +389,7 @@ describe('WalletsService.assertWithinTransactionLimits', () => {
     {} as any,
     {} as any,
     {} as any,
+    {} as any,
   );
 
   function wallet(min: string | null, max: string | null) {
@@ -432,6 +442,7 @@ describe('WalletsService.createForUser / updateForUser limit validation', () => 
       {} as any,
       {} as any,
       {} as any,
+      {} as any,
     );
 
     await expect(
@@ -470,6 +481,7 @@ describe('WalletsService.createForUser / updateForUser rail validation', () => {
       {} as any,
       {} as any,
       {} as any,
+      {} as any,
     );
 
     await expect(
@@ -486,6 +498,7 @@ describe('WalletsService.createForUser / updateForUser rail validation', () => {
       save: jest.fn(async (data: any) => data),
     };
     const service = new WalletsService(
+      {} as any,
       {} as any,
       {} as any,
       {} as any,
@@ -514,6 +527,7 @@ describe('WalletsService.createForUser / updateForUser rail validation', () => {
       save: jest.fn(async (data: any) => data),
     };
     const service = new WalletsService(
+      {} as any,
       {} as any,
       {} as any,
       {} as any,
@@ -612,6 +626,7 @@ describe('WalletsService.grantCredit', () => {
       walletTypesService as any,
       usersService as any,
       idempotencyService as any,
+      {} as any,
     );
     const created = { id: 'credit-wallet-1' };
     const found = {

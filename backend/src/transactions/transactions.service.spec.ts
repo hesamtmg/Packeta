@@ -7,7 +7,10 @@ import {
 } from '@nestjs/common';
 import { TransactionsService } from './transactions.service';
 import { TransactionType } from './entities/transaction.entity';
-import { SettlementRailType } from '../rail-settlements/entities/rail-settlement.entity';
+import {
+  RailSettlementStatus,
+  SettlementRailType,
+} from '../rail-settlements/entities/rail-settlement.entity';
 
 // Minimal stand-in for nestjs-i18n's I18nService: resolves against the real
 // English translation files (so message-dependent assertions, e.g. the
@@ -31,6 +34,131 @@ const i18nStub = {
     return text;
   },
 };
+
+// GL posting itself is verified separately (see ledger.service.spec.ts) —
+// what these unit tests need is a stand-in that both (a) records call args
+// for assertions and (b) actually behaves like a ledger for
+// getWalletBalance, since there's no wallets.balance column to read
+// anymore. Seeded from each wallet fixture's own (otherwise now-dead)
+// `balance` field and then updated by whichever posting method actually
+// runs, mirroring LedgerService's own delta rules (CREDIT/funds-in moves a
+// balance up, DEBIT/funds-out moves it down) — this matters whenever a
+// test's scenario reads a wallet's balance mid-flow, after an earlier
+// posting in the same call already moved it (e.g. a support wallet credited
+// by one posting and immediately spent by the next).
+function buildLedgerServiceStub(wallets: Array<{ id: string; balance: string }>) {
+  const balances = new Map<string, bigint>(
+    wallets.map((w) => [w.id, BigInt(w.balance)]),
+  );
+  const applyDelta = (wallet: { id: string }, delta: bigint) => {
+    balances.set(wallet.id, (balances.get(wallet.id) ?? 0n) + delta);
+  };
+  const applyLegs = (
+    debits: Array<{ wallet: { id: string }; amount: bigint }>,
+    credits: Array<{ wallet: { id: string }; amount: bigint }>,
+  ) => {
+    for (const d of debits) applyDelta(d.wallet, -d.amount);
+    for (const c of credits) applyDelta(c.wallet, c.amount);
+  };
+
+  return {
+    postCashMovement: jest.fn(
+      async (
+        _manager: unknown,
+        _transactionId: string,
+        _description: string,
+        wallet: { id: string },
+        delta: bigint,
+      ) => {
+        applyDelta(wallet, delta);
+      },
+    ),
+    postCashInMultiLeg: jest.fn(
+      async (
+        _manager: unknown,
+        _transactionId: string,
+        _description: string,
+        _cashAccountCode: unknown,
+        _currencyId: string,
+        _totalAmount: bigint,
+        walletCredits: Array<{ wallet: { id: string }; amount: bigint }>,
+      ) => {
+        for (const credit of walletCredits) applyDelta(credit.wallet, credit.amount);
+      },
+    ),
+    postWalletToWallet: jest.fn(
+      async (
+        _manager: unknown,
+        _transactionId: string,
+        _description: string,
+        fromWallet: { id: string },
+        toWallet: { id: string },
+        amount: bigint,
+      ) => {
+        applyDelta(fromWallet, -amount);
+        applyDelta(toWallet, amount);
+      },
+    ),
+    postAdjustment: jest.fn(
+      async (
+        _manager: unknown,
+        _transactionId: string,
+        _description: string,
+        wallet: { id: string },
+        delta: bigint,
+      ) => {
+        applyDelta(wallet, delta);
+      },
+    ),
+    postMultiLeg: jest.fn(
+      async (
+        _manager: unknown,
+        _transactionId: string,
+        _description: string,
+        debits: Array<{ wallet: { id: string }; amount: bigint }>,
+        credits: Array<{ wallet: { id: string }; amount: bigint }>,
+      ) => {
+        applyLegs(debits, credits);
+      },
+    ),
+    postReversal: jest.fn(
+      async (
+        _manager: unknown,
+        _originalTransactionId: string,
+        _reversalTransactionId: string,
+        _description: string,
+        debits: Array<{ wallet: { id: string }; amount: bigint }>,
+        credits: Array<{ wallet: { id: string }; amount: bigint }>,
+      ) => {
+        applyLegs(debits, credits);
+      },
+    ),
+    postRepositoryAllocationMirror: jest.fn(
+      async (
+        _manager: unknown,
+        _transactionId: string,
+        _description: string,
+        wallet: { id: string },
+        delta: bigint,
+      ) => {
+        if (delta === 0n) return null;
+        applyDelta(wallet, delta);
+        return undefined;
+      },
+    ),
+    postEntry: jest.fn().mockResolvedValue(undefined),
+    getWalletBalance: jest.fn(async (_manager: unknown, walletId: string) =>
+      balances.get(walletId) ?? 0n,
+    ),
+    getWalletBalances: jest.fn(
+      async (_manager: unknown, walletIds: string[]) => {
+        const result = new Map<string, bigint>();
+        for (const id of walletIds) result.set(id, balances.get(id) ?? 0n);
+        return result;
+      },
+    ),
+  };
+}
 
 interface WalletTypeFixture {
   code?: string;
@@ -69,6 +197,7 @@ function buildService(options: {
   supportWallet?: WalletFixture | null;
   ipgOverrides?: Record<string, jest.Mock>;
   installmentsService?: Record<string, jest.Mock>;
+  railSettlementStatus?: RailSettlementStatus;
 }) {
   const {
     senderWallet,
@@ -77,6 +206,7 @@ function buildService(options: {
     supportWallet,
     ipgOverrides,
     installmentsService,
+    railSettlementStatus,
   } = options;
   const lockCalls: string[] = [];
 
@@ -196,8 +326,13 @@ function buildService(options: {
   };
 
   const railSettlementsService = {
-    createForSweep: jest.fn().mockResolvedValue({ id: 'rail-settlement-1' }),
+    createForSweep: jest.fn().mockResolvedValue({
+      id: 'rail-settlement-1',
+      status: railSettlementStatus ?? RailSettlementStatus.COMPLETED,
+    }),
   };
+
+  const ledgerService = buildLedgerServiceStub(Array.from(walletsById.values()));
 
   const service = new TransactionsService(
     dataSource as any,
@@ -211,6 +346,7 @@ function buildService(options: {
     settlementService as any,
     (installmentsService ?? {}) as any,
     railSettlementsService as any,
+    ledgerService as any,
     {} as any,
     i18nStub as any,
   );
@@ -223,6 +359,7 @@ function buildService(options: {
     zarinpalClientService,
     railSettlementsService,
     walletsService,
+    ledgerService,
   };
 }
 
@@ -449,6 +586,40 @@ describe('TransactionsService.transfer', () => {
     );
 
     expect(lockCalls).toEqual(['wallet-a', 'wallet-b']);
+  });
+
+  it('posts a wallet-to-wallet GL entry with no cash leg', async () => {
+    const senderWallet: WalletFixture = {
+      id: 'wallet-b',
+      balance: '500',
+      walletType: walletType(),
+    };
+    const recipientWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '0',
+      walletType: walletType({ name: 'Sell', allowP2pOut: false }),
+    };
+    const { service, manager, ledgerService } = buildService({
+      senderWallet,
+      recipientWallet,
+    });
+
+    const result = await service.transfer(
+      'sender',
+      senderWallet.id,
+      'recipient@example.com',
+      100,
+      'idem-gl-transfer-1',
+    );
+
+    expect(ledgerService.postWalletToWallet).toHaveBeenCalledWith(
+      manager,
+      result.transactionId,
+      expect.any(String),
+      { id: senderWallet.id, walletType: senderWallet.walletType },
+      { id: recipientWallet.id, walletType: recipientWallet.walletType },
+      100n,
+    );
   });
 
   it('rejects a transfer that exceeds the sender balance', async () => {
@@ -681,6 +852,66 @@ describe('TransactionsService.withdraw', () => {
     );
   });
 
+  it('posts a WITHDRAW to bank cash when the rail settlement completes', async () => {
+    const senderWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '1000',
+      walletType: walletType({ name: 'Buy' }),
+    };
+    const { service, manager, ledgerService } = buildService({
+      senderWallet,
+      railSettlementStatus: RailSettlementStatus.COMPLETED,
+    });
+
+    const result = await service.withdraw(
+      'sender',
+      senderWallet.id,
+      300,
+      SettlementRailType.POL_PAY,
+      'IR000000000000000000000001',
+      'idem-gl-withdraw-1',
+    );
+
+    expect(ledgerService.postCashMovement).toHaveBeenCalledWith(
+      manager,
+      result.transactionId,
+      expect.any(String),
+      { id: senderWallet.id, walletType: senderWallet.walletType },
+      -300n,
+      'BANK_CASH',
+    );
+  });
+
+  it('parks a WITHDRAW in settlement clearing (not bank cash) when the rail settlement fails', async () => {
+    const senderWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '1000',
+      walletType: walletType({ name: 'Buy' }),
+    };
+    const { service, manager, ledgerService } = buildService({
+      senderWallet,
+      railSettlementStatus: RailSettlementStatus.FAILED,
+    });
+
+    const result = await service.withdraw(
+      'sender',
+      senderWallet.id,
+      300,
+      SettlementRailType.POL_PAY,
+      'IR000000000000000000000001',
+      'idem-gl-withdraw-2',
+    );
+
+    expect(ledgerService.postCashMovement).toHaveBeenCalledWith(
+      manager,
+      result.transactionId,
+      expect.any(String),
+      { id: senderWallet.id, walletType: senderWallet.walletType },
+      -300n,
+      'SETTLEMENT_CLEARING',
+    );
+  });
+
   it('rejects withdrawing a credit wallet beyond its credit limit', async () => {
     const senderWallet: WalletFixture = {
       id: 'wallet-a',
@@ -717,7 +948,7 @@ describe('TransactionsService.withdraw', () => {
       walletType: walletType({ name: 'Credit' }),
       repositoryWalletId: 'repo-1',
     };
-    const { service, manager } = buildService({
+    const { service, manager, ledgerService } = buildService({
       senderWallet,
       repositoryWallet,
     });
@@ -732,9 +963,25 @@ describe('TransactionsService.withdraw', () => {
     );
 
     expect(result.balance).toBe('700');
-    expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'repo-1', {
-      balance: '4700',
-    });
+    // The real cash movement redirects to the repository (the actual money
+    // funding this withdrawal), not the credit wallet's own type.
+    expect(ledgerService.postCashMovement).toHaveBeenCalledWith(
+      manager,
+      result.transactionId,
+      expect.any(String),
+      { id: repositoryWallet.id, walletType: repositoryWallet.walletType },
+      -300n,
+      expect.any(String),
+    );
+    // The credit wallet's own balance also mirrors the movement, offset
+    // through REPOSITORY_ALLOCATIONS.
+    expect(ledgerService.postRepositoryAllocationMirror).toHaveBeenCalledWith(
+      manager,
+      result.transactionId,
+      expect.any(String),
+      { id: senderWallet.id, walletType: senderWallet.walletType },
+      -300n,
+    );
   });
 
   it('rejects a withdrawal when the linked repository lacks enough real balance to fund it', async () => {
@@ -792,7 +1039,9 @@ describe('TransactionsService.adjust', () => {
       balance: '100',
       walletType: walletType({ name: 'Gift', allowWithdraw: false }),
     };
-    const { service } = buildService({ senderWallet: wallet });
+    const { service, manager, ledgerService } = buildService({
+      senderWallet: wallet,
+    });
 
     const result = await service.adjust(
       'admin-1',
@@ -805,6 +1054,13 @@ describe('TransactionsService.adjust', () => {
     expect(result.balance).toBe('150');
     expect(result.toWalletId).toBe(wallet.id);
     expect(result.fromWalletId).toBeNull();
+    expect(ledgerService.postAdjustment).toHaveBeenCalledWith(
+      manager,
+      result.transactionId,
+      'Promo credit',
+      { id: wallet.id, walletType: wallet.walletType },
+      50n,
+    );
   });
 
   it('debits a wallet down to but not past its floor', async () => {
@@ -813,7 +1069,9 @@ describe('TransactionsService.adjust', () => {
       balance: '100',
       walletType: walletType({ name: 'Buy' }),
     };
-    const { service } = buildService({ senderWallet: wallet });
+    const { service, manager, ledgerService } = buildService({
+      senderWallet: wallet,
+    });
 
     const result = await service.adjust(
       'admin-1',
@@ -824,6 +1082,13 @@ describe('TransactionsService.adjust', () => {
     );
     expect(result.balance).toBe('0');
     expect(result.fromWalletId).toBe(wallet.id);
+    expect(ledgerService.postAdjustment).toHaveBeenCalledWith(
+      manager,
+      result.transactionId,
+      'Correcting duplicate deposit',
+      { id: wallet.id, walletType: wallet.walletType },
+      -100n,
+    );
   });
 
   it('rejects a debit that would take the wallet past its floor', async () => {
@@ -964,18 +1229,20 @@ function buildSweepService(options: {
     id: 'wallet-1',
     balance: options.walletBalance,
     railType: options.railType ?? null,
+    walletType: walletType({ name: 'Merchant', supportsAutoWithdraw: true }),
   };
   const savedTransactions: any[] = [];
   const savedPurchases: any[] = [];
-  const updatedBalances: string[] = [];
   const railSettlementLinks: any[] = [];
   let idCounter = 0;
 
-  const walletsService = { lockById: jest.fn(async () => wallet) };
+  const walletsService = {
+    lockById: jest.fn(async () => wallet),
+    getByIdUnscoped: jest.fn(async () => wallet),
+  };
 
   const manager = {
     update: jest.fn(async (_entity: unknown, _id: string, patch: any) => {
-      if (patch.balance !== undefined) updatedBalances.push(patch.balance);
       if (patch.railSettlementId !== undefined) {
         railSettlementLinks.push({ id: _id, ...patch });
       }
@@ -1025,9 +1292,15 @@ function buildSweepService(options: {
   const railSettlementsService = {
     createForSweep: jest.fn(async (_manager: unknown, input: any) => {
       railSettlementsCreated.push(input);
-      return { id: `rail-settlement-${++railSettlementCounter}`, ...input };
+      return {
+        id: `rail-settlement-${++railSettlementCounter}`,
+        status: RailSettlementStatus.COMPLETED,
+        ...input,
+      };
     }),
   };
+
+  const ledgerService = buildLedgerServiceStub([wallet]);
 
   const service = new TransactionsService(
     dataSource as any,
@@ -1041,6 +1314,7 @@ function buildSweepService(options: {
     settlementService as any,
     {} as any,
     railSettlementsService as any,
+    ledgerService as any,
     {} as any,
     i18nStub as any,
   );
@@ -1049,9 +1323,9 @@ function buildSweepService(options: {
     service,
     savedTransactions,
     savedPurchases,
-    updatedBalances,
     railSettlementsCreated,
     railSettlementLinks,
+    ledgerService,
   };
 }
 
@@ -1074,7 +1348,7 @@ describe('TransactionsService.verifyPurchase', () => {
       balance: '0',
       walletType: walletType({ allowPurchaseIn: true }),
     };
-    const { service, manager } = buildService({
+    const { service, manager, ledgerService } = buildService({
       senderWallet: creditWallet,
       recipientWallet: merchantWallet,
       repositoryWallet,
@@ -1103,11 +1377,26 @@ describe('TransactionsService.verifyPurchase', () => {
     const result = await service.verifyPurchase('purchase-tx-1');
 
     expect(result.status).toBe('COMPLETED');
-    // 1. repository's real balance is debited to fund the purchase.
-    expect(manager.update).toHaveBeenCalledWith(
-      expect.anything(),
-      repositoryWallet.id,
-      { balance: '4850' },
+    // The GL debits the REPOSITORY (the real money), never the credit
+    // wallet's own type — see ledgerWalletType's doc comment for why. This
+    // also captures 1. the repository's real balance being debited to fund
+    // the purchase.
+    expect(ledgerService.postMultiLeg).toHaveBeenCalledWith(
+      manager,
+      'purchase-tx-1',
+      expect.any(String),
+      [
+        {
+          wallet: { id: repositoryWallet.id, walletType: repositoryWallet.walletType },
+          amount: 150n,
+        },
+      ],
+      [
+        {
+          wallet: { id: merchantWallet.id, walletType: merchantWallet.walletType },
+          amount: 150n,
+        },
+      ],
     );
     // 2. the credit wallet's remaining credit ceiling (virtualAmount) is
     // drawn down by the repository-funded amount.
@@ -1140,17 +1429,10 @@ describe('TransactionsService.verifyPurchase', () => {
       }),
     );
     // 3. only now does the purchase itself debit the (now-funded) credit
-    // wallet and credit the merchant, same as any regular purchase.
-    expect(manager.update).toHaveBeenCalledWith(
-      expect.anything(),
-      creditWallet.id,
-      { balance: '0' },
-    );
-    expect(manager.update).toHaveBeenCalledWith(
-      expect.anything(),
-      merchantWallet.id,
-      { balance: '150' },
-    );
+    // wallet and credit the merchant, same as any regular purchase — already
+    // captured by the postMultiLeg assertion above, which debits only the
+    // repository (never the credit wallet's own account) and credits only
+    // the merchant.
   });
 
   it('rejects a CREDIT purchase that exceeds the remaining credit line', async () => {
@@ -1262,7 +1544,7 @@ describe('TransactionsService.verifyPurchase', () => {
       balance: '0',
       walletType: walletType({ allowPurchaseIn: true }),
     };
-    const { service, manager } = buildService({
+    const { service, manager, ledgerService } = buildService({
       senderWallet: buyWallet,
       recipientWallet: merchantWallet,
     });
@@ -1289,6 +1571,20 @@ describe('TransactionsService.verifyPurchase', () => {
 
     await service.verifyPurchase('purchase-tx-2');
 
+    // A plain purchase (no repository/support funding) debits the buyer's
+    // own wallet type directly.
+    expect(ledgerService.postMultiLeg).toHaveBeenCalledWith(
+      manager,
+      'purchase-tx-2',
+      expect.any(String),
+      [{ wallet: { id: buyWallet.id, walletType: buyWallet.walletType }, amount: 150n }],
+      [
+        {
+          wallet: { id: merchantWallet.id, walletType: merchantWallet.walletType },
+          amount: 150n,
+        },
+      ],
+    );
     expect(manager.update).not.toHaveBeenCalledWith(
       expect.anything(),
       buyWallet.id,
@@ -1319,12 +1615,17 @@ describe('TransactionsService.verifyPurchase', () => {
       markPaid: jest.fn(async () => undefined),
       computeRepaymentSplit: jest.fn(computeRepaymentSplitFixture),
     };
-    const { service, manager, ipgClientService, zarinpalClientService } =
-      buildService({
-        senderWallet: repositoryWallet,
-        recipientWallet: creditWallet,
-        installmentsService: installmentsService as any,
-      });
+    const {
+      service,
+      manager,
+      ipgClientService,
+      zarinpalClientService,
+      ledgerService,
+    } = buildService({
+      senderWallet: repositoryWallet,
+      recipientWallet: creditWallet,
+      installmentsService: installmentsService as any,
+    });
 
     const pendingPurchase = {
       id: 'installment-tx-1',
@@ -1366,15 +1667,75 @@ describe('TransactionsService.verifyPurchase', () => {
       '400',
     );
     expect(ipgClientService.verifyPayment).not.toHaveBeenCalled();
-    expect(manager.update).toHaveBeenCalledWith(
-      expect.anything(),
-      repositoryWallet.id,
-      { balance: '1400' },
+    // No fee sub-repository configured, so the whole 400 (principal 350 +
+    // unrouted fee 50) lands on the main repository as one cash-in.
+    expect(ledgerService.postCashInMultiLeg).toHaveBeenCalledWith(
+      manager,
+      'installment-tx-1',
+      expect.any(String),
+      'BANK_CASH',
+      repositoryWallet.walletType.currencyId,
+      400n,
+      [
+        {
+          wallet: { id: repositoryWallet.id, walletType: repositoryWallet.walletType },
+          amount: 400n,
+        },
+      ],
     );
     expect(installmentsService.markPaid).toHaveBeenCalledWith(
       manager,
       'installment-1',
       'installment-tx-1',
+    );
+  });
+
+  it('verifies a plain self-deposit and posts it to the GL as a bank-cash inflow', async () => {
+    const depositWallet: WalletFixture = {
+      id: 'wallet-a',
+      balance: '200',
+      walletType: walletType({ name: 'Buy' }),
+    };
+    const { service, manager, zarinpalClientService, ledgerService } =
+      buildService({ senderWallet: depositWallet });
+
+    const pendingDeposit = {
+      id: 'deposit-tx-1',
+      type: TransactionType.DEPOSIT,
+      status: 'PENDING',
+      fromWalletId: null,
+      toWalletId: depositWallet.id,
+      amount: '300',
+      installmentId: null,
+      settlesWalletId: null,
+      completesPurchaseId: null,
+      expiresAt: null,
+      ipgAuthority: 'zarinpal-auth-1',
+    };
+    manager.createQueryBuilder = jest.fn(() => {
+      const builder: any = {
+        setLock: () => builder,
+        where: () => builder,
+        andWhere: () => builder,
+        getOne: async () => pendingDeposit,
+      };
+      return builder;
+    });
+
+    const result = await service.verifyPurchase('deposit-tx-1');
+
+    expect(result.status).toBe('COMPLETED');
+    expect(zarinpalClientService.verifyPayment).toHaveBeenCalledWith(
+      'zarinpal-auth-1',
+      '300',
+    );
+    expect(ledgerService.postCashMovement).toHaveBeenCalledWith(
+      manager,
+      'deposit-tx-1',
+      expect.any(String),
+      { id: depositWallet.id, walletType: depositWallet.walletType },
+      300n,
+      'BANK_CASH',
     );
   });
 
@@ -1402,7 +1763,7 @@ describe('TransactionsService.verifyPurchase', () => {
       markPaid: jest.fn(async () => undefined),
       computeRepaymentSplit: jest.fn(computeRepaymentSplitFixture),
     };
-    const { service, manager, walletsService } = buildService({
+    const { service, manager, walletsService, ledgerService } = buildService({
       senderWallet: repositoryWallet,
       recipientWallet: creditWallet,
       installmentsService: installmentsService as any,
@@ -1411,6 +1772,13 @@ describe('TransactionsService.verifyPurchase', () => {
       async (_manager: unknown, id: string) => {
         if (id === feeRepo.id) return feeRepo;
         return repositoryWallet;
+      },
+    );
+    (walletsService.getByIdUnscoped as jest.Mock).mockImplementation(
+      async (id: string) => {
+        if (id === feeRepo.id) return feeRepo;
+        if (id === repositoryWallet.id) return repositoryWallet;
+        return creditWallet;
       },
     );
 
@@ -1448,15 +1816,24 @@ describe('TransactionsService.verifyPurchase', () => {
     // Only the 350 principal lands on the repository (1000 -> 1350), not
     // the full 400 charge — the 50 fee goes to feeRepo instead, and the
     // transaction row itself is shrunk to match what actually landed here.
-    expect(manager.update).toHaveBeenCalledWith(
-      expect.anything(),
-      repositoryWallet.id,
-      { balance: '1350' },
-    );
-    expect(manager.update).toHaveBeenCalledWith(expect.anything(), feeRepo.id, {
-      balance: '50',
-    });
     expect(pendingPurchase.amount).toBe('350');
+    // The whole 400 ZarinPal charge is one cash-in, split across the
+    // repository (principal, 350) and the fee sub-repository (50).
+    expect(ledgerService.postCashInMultiLeg).toHaveBeenCalledWith(
+      manager,
+      'installment-tx-2',
+      expect.any(String),
+      'BANK_CASH',
+      repositoryWallet.walletType.currencyId,
+      400n,
+      [
+        {
+          wallet: { id: repositoryWallet.id, walletType: repositoryWallet.walletType },
+          amount: 350n,
+        },
+        { wallet: { id: feeRepo.id, walletType: feeRepo.walletType }, amount: 50n },
+      ],
+    );
   });
 
   it('verifies an admin overdue-collection payment and settles every outstanding installment on the wallet', async () => {
@@ -1482,7 +1859,7 @@ describe('TransactionsService.verifyPurchase', () => {
       ]),
       computeRepaymentSplit: jest.fn(computeRepaymentSplitFixture),
     };
-    const { service, manager } = buildService({
+    const { service, manager, ledgerService } = buildService({
       senderWallet: repositoryWallet,
       recipientWallet: creditWallet,
       installmentsService: installmentsService as any,
@@ -1513,15 +1890,24 @@ describe('TransactionsService.verifyPurchase', () => {
     const result = await service.verifyPurchase('collection-tx-1');
 
     expect(result.status).toBe('COMPLETED');
-    expect(manager.update).toHaveBeenCalledWith(
-      expect.anything(),
-      repositoryWallet.id,
-      { balance: '1750' },
-    );
     expect(installmentsService.markAllPaidAndUnblock).toHaveBeenCalledWith(
       manager,
       'credit-1',
       'collection-tx-1',
+    );
+    expect(ledgerService.postCashInMultiLeg).toHaveBeenCalledWith(
+      manager,
+      'collection-tx-1',
+      expect.any(String),
+      'BANK_CASH',
+      repositoryWallet.walletType.currencyId,
+      750n,
+      [
+        {
+          wallet: { id: repositoryWallet.id, walletType: repositoryWallet.walletType },
+          amount: 750n,
+        },
+      ],
     );
   });
 });
@@ -1601,7 +1987,7 @@ describe('TransactionsService.verifyPurchase support top-up completion', () => {
   }
 
   it('credits the support wallet, completes the purchase, and redirects to the merchant callback', async () => {
-    const { service, manager } = buildService({
+    const { service, manager, ledgerService } = buildService({
       senderWallet: creditWallet,
       recipientWallet: merchantWallet,
       repositoryWallet,
@@ -1621,15 +2007,36 @@ describe('TransactionsService.verifyPurchase support top-up completion', () => {
       redirectUrl:
         'https://merchant.example.com/return?transactionId=purchase-tx-1&status=COMPLETED',
     });
-    expect(manager.update).toHaveBeenCalledWith(
-      expect.anything(),
-      supportWallet.id,
-      { balance: '50' },
+    // The ZarinPal top-up landing in the support wallet is its own cash-in
+    // event, separate from the purchase it goes on to fund.
+    expect(ledgerService.postCashMovement).toHaveBeenCalledWith(
+      manager,
+      'topup-tx-1',
+      expect.any(String),
+      { id: supportWallet.id, walletType: supportWallet.walletType },
+      50n,
+      'BANK_CASH',
     );
-    expect(manager.update).toHaveBeenCalledWith(
-      expect.anything(),
-      merchantWallet.id,
-      { balance: '150' },
+    // The purchase itself debits both real funding sources — the support
+    // wallet for its slice, the repository for the rest — never the credit
+    // wallet's own type.
+    expect(ledgerService.postMultiLeg).toHaveBeenCalledWith(
+      manager,
+      'purchase-tx-1',
+      expect.any(String),
+      [
+        { wallet: { id: supportWallet.id, walletType: supportWallet.walletType }, amount: 50n },
+        {
+          wallet: { id: repositoryWallet.id, walletType: repositoryWallet.walletType },
+          amount: 100n,
+        },
+      ],
+      [
+        {
+          wallet: { id: merchantWallet.id, walletType: merchantWallet.walletType },
+          amount: 150n,
+        },
+      ],
     );
   });
 
@@ -1664,12 +2071,13 @@ describe('TransactionsService.verifyPurchase support top-up completion', () => {
 
 describe('TransactionsService.sweepAutoWithdraw', () => {
   it('falls back to a single full-balance WITHDRAW when no settlement split is configured (legacy behavior)', async () => {
-    const { service, savedTransactions, updatedBalances } = buildSweepService({
-      walletBalance: '5000',
-      walletDefaults: [],
-      unsettledPurchases: [],
-      overridesByPurchase: new Map(),
-    });
+    const { service, savedTransactions, ledgerService } =
+      buildSweepService({
+        walletBalance: '5000',
+        walletDefaults: [],
+        unsettledPurchases: [],
+        overridesByPurchase: new Map(),
+      });
 
     await service.sweepAutoWithdraw('wallet-1');
 
@@ -1679,7 +2087,17 @@ describe('TransactionsService.sweepAutoWithdraw', () => {
       fromWalletId: 'wallet-1',
       amount: '5000',
     });
-    expect(updatedBalances).toEqual(['0']);
+    expect(ledgerService.postCashMovement).toHaveBeenCalledWith(
+      expect.anything(),
+      'withdraw-1',
+      expect.any(String),
+      expect.objectContaining({
+        id: 'wallet-1',
+        walletType: expect.objectContaining({ name: 'Merchant' }),
+      }),
+      -5000n,
+      'BANK_CASH',
+    );
   });
 
   it('splits each unsettled purchase individually — its own override if it has one, else the wallet default', async () => {
@@ -1696,7 +2114,7 @@ describe('TransactionsService.sweepAutoWithdraw', () => {
     const overrideRows = [{ iban: 'override-iban', label: null }];
     const defaultRows = [{ iban: 'default-iban', label: null }];
 
-    const { service, savedTransactions, savedPurchases, updatedBalances } =
+    const { service, savedTransactions, savedPurchases } =
       buildSweepService({
         walletBalance: '3000',
         walletDefaults: defaultRows,
@@ -1718,7 +2136,6 @@ describe('TransactionsService.sweepAutoWithdraw', () => {
       amount: '2000',
     });
     expect(savedPurchases.every((p) => p.settledAt instanceof Date)).toBe(true);
-    expect(updatedBalances).toEqual(['0']);
   });
 
   it('falls back to a single plain WITHDRAW for a purchase with neither override nor wallet default, while split mode is active for the wallet', async () => {
@@ -2005,7 +2422,8 @@ describe('TransactionsService overdue-collection methods', () => {
   });
 
   it('collectOverdueFromRepository writes off the principal and leaves fee/penalty/unblockFee on the repository when no sub-repositories are configured', async () => {
-    const { service, manager, installmentsService } = buildOverdueService();
+    const { service, manager, installmentsService, ledgerService } =
+      buildOverdueService();
 
     const result = await service.collectOverdueFromRepository(
       'admin-1',
@@ -2038,6 +2456,10 @@ describe('TransactionsService overdue-collection methods', () => {
       'credit-1',
       undefined,
     );
+    // Nothing real moved (nowhere configured to route to, and the
+    // written-off principal was never Packeta's own receivable), so no GL
+    // entry at all.
+    expect(ledgerService.postMultiLeg).not.toHaveBeenCalled();
   });
 
   it('collectOverdueFromRepository routes fee/penalty/unblockFee to their configured sub-repositories instead of the main repository', async () => {
@@ -2074,7 +2496,7 @@ describe('TransactionsService overdue-collection methods', () => {
       markAllPaidAndUnblock: jest.fn(async () => undefined),
       computeRepaymentSplit: jest.fn(computeRepaymentSplitFixture),
     };
-    const { service, manager, walletsService } = buildService({
+    const { service, manager, walletsService, ledgerService } = buildService({
       senderWallet: wired,
       repositoryWallet,
       installmentsService: installmentsService as any,
@@ -2085,6 +2507,15 @@ describe('TransactionsService overdue-collection methods', () => {
         if (id === penaltyRepo.id) return penaltyRepo;
         if (id === unblockRepo.id) return unblockRepo;
         return repositoryWallet;
+      },
+    );
+    (walletsService.getByIdUnscoped as jest.Mock).mockImplementation(
+      async (id: string) => {
+        if (id === feeRepo.id) return feeRepo;
+        if (id === penaltyRepo.id) return penaltyRepo;
+        if (id === unblockRepo.id) return unblockRepo;
+        if (id === repositoryWallet.id) return repositoryWallet;
+        return wired;
       },
     );
 
@@ -2100,21 +2531,21 @@ describe('TransactionsService overdue-collection methods', () => {
     // configured destination this time, so the whole 150 leaves the main
     // repository (5000 -> 4850) and lands on the 3 sub-repositories.
     expect(result.balance).toBe('4850');
-    expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'repo-1', {
-      balance: '4850',
-    });
-    expect(manager.update).toHaveBeenCalledWith(expect.anything(), feeRepo.id, {
-      balance: '80',
-    });
-    expect(manager.update).toHaveBeenCalledWith(
-      expect.anything(),
-      penaltyRepo.id,
-      { balance: '20' },
-    );
-    expect(manager.update).toHaveBeenCalledWith(
-      expect.anything(),
-      unblockRepo.id,
-      { balance: '50' },
+    expect(ledgerService.postMultiLeg).toHaveBeenCalledWith(
+      manager,
+      result.transactionId,
+      expect.any(String),
+      [
+        {
+          wallet: { id: repositoryWallet.id, walletType: repositoryWallet.walletType },
+          amount: 150n,
+        },
+      ],
+      [
+        { wallet: { id: feeRepo.id, walletType: feeRepo.walletType }, amount: 80n },
+        { wallet: { id: penaltyRepo.id, walletType: penaltyRepo.walletType }, amount: 20n },
+        { wallet: { id: unblockRepo.id, walletType: unblockRepo.walletType }, amount: 50n },
+      ],
     );
   });
 
@@ -2151,6 +2582,13 @@ describe('TransactionsService overdue-collection methods', () => {
     (walletsService.lockById as jest.Mock).mockImplementation(
       async (_manager: unknown, id: string) =>
         id === feeRepo.id ? feeRepo : poorRepository,
+    );
+    (walletsService.getByIdUnscoped as jest.Mock).mockImplementation(
+      async (id: string) => {
+        if (id === feeRepo.id) return feeRepo;
+        if (id === poorRepository.id) return poorRepository;
+        return wired;
+      },
     );
 
     await expect(
@@ -2394,6 +2832,7 @@ describe('TransactionsService.getHistory', () => {
       {} as any,
       {} as any,
       {} as any,
+      {} as any,
       transactionsRepository as any,
       i18nStub as any,
     );
@@ -2486,7 +2925,7 @@ describe('TransactionsService.reverseTransaction', () => {
       balance: '500',
       walletType: walletType({ allowPurchaseIn: true }),
     };
-    const { service, manager } = buildService({
+    const { service, manager, ledgerService } = buildService({
       senderWallet: customerWallet,
       recipientWallet: merchantWallet,
     });
@@ -2508,19 +2947,13 @@ describe('TransactionsService.reverseTransaction', () => {
       'idem-reverse-1',
     );
 
-    expect(manager.update).toHaveBeenCalledWith(
-      expect.anything(),
-      merchantWallet.id,
-      {
-        balance: '0',
-      },
-    );
-    expect(manager.update).toHaveBeenCalledWith(
-      expect.anything(),
-      customerWallet.id,
-      {
-        balance: '500',
-      },
+    expect(ledgerService.postReversal).toHaveBeenCalledWith(
+      manager,
+      'purchase-1',
+      undefined,
+      'not as described',
+      [{ wallet: { id: merchantWallet.id, walletType: merchantWallet.walletType }, amount: 500n }],
+      [{ wallet: { id: customerWallet.id, walletType: customerWallet.walletType }, amount: 500n }],
     );
     expect(manager.update).not.toHaveBeenCalledWith(
       expect.anything(),
@@ -2555,7 +2988,7 @@ describe('TransactionsService.reverseTransaction', () => {
       balance: '800',
       walletType: walletType({ allowPurchaseIn: true }),
     };
-    const { service, manager } = buildService({
+    const { service, manager, ledgerService } = buildService({
       senderWallet: creditWallet,
       recipientWallet: merchantWallet,
       repositoryWallet,
@@ -2584,28 +3017,17 @@ describe('TransactionsService.reverseTransaction', () => {
       'idem-reverse-2',
     );
 
-    expect(manager.update).toHaveBeenCalledWith(
-      expect.anything(),
-      merchantWallet.id,
-      {
-        balance: '0',
-      },
-    );
-    // Fully repository-funded: no real money was ever the customer's, so
-    // the customer's real balance stays exactly where it was.
-    expect(manager.update).toHaveBeenCalledWith(
-      expect.anything(),
-      creditWallet.id,
-      {
-        balance: '0',
-      },
-    );
-    expect(manager.update).toHaveBeenCalledWith(
-      expect.anything(),
-      repositoryWallet.id,
-      {
-        balance: '5000',
-      },
+    // Fully repository-funded: the whole refund goes back to the
+    // repository, never to the credit wallet's own type — and, since the
+    // customer's own account never appears as a credit leg here, its real
+    // balance stays exactly where it was.
+    expect(ledgerService.postReversal).toHaveBeenCalledWith(
+      manager,
+      'purchase-2',
+      undefined,
+      'Refund',
+      [{ wallet: { id: merchantWallet.id, walletType: merchantWallet.walletType }, amount: 800n }],
+      [{ wallet: { id: repositoryWallet.id, walletType: repositoryWallet.walletType }, amount: 800n }],
     );
     expect(manager.update).toHaveBeenCalledWith(
       expect.anything(),
@@ -2662,7 +3084,7 @@ describe('TransactionsService.reverseTransaction', () => {
       balance: '1000',
       walletType: walletType({ allowPurchaseIn: true }),
     };
-    const { service, manager } = buildService({
+    const { service, manager, ledgerService } = buildService({
       senderWallet: creditWallet,
       recipientWallet: merchantWallet,
       repositoryWallet,
@@ -2691,28 +3113,20 @@ describe('TransactionsService.reverseTransaction', () => {
       'idem-reverse-3',
     );
 
-    expect(manager.update).toHaveBeenCalledWith(
-      expect.anything(),
-      merchantWallet.id,
-      {
-        balance: '0',
-      },
-    );
-    // Only the support-funded (ZarinPal) slice — 1000 total - 700 from the
+    // The support-funded slice (300) credits the credit wallet's own type
+    // directly; the repository-funded slice (700) credits the repository.
+    // Only that support-funded slice — 1000 total minus 700 from the
     // repository — comes back as real balance on the credit wallet.
-    expect(manager.update).toHaveBeenCalledWith(
-      expect.anything(),
-      creditWallet.id,
-      {
-        balance: '300',
-      },
-    );
-    expect(manager.update).toHaveBeenCalledWith(
-      expect.anything(),
-      repositoryWallet.id,
-      {
-        balance: '5000',
-      },
+    expect(ledgerService.postReversal).toHaveBeenCalledWith(
+      manager,
+      'purchase-3',
+      undefined,
+      'Refund',
+      [{ wallet: { id: merchantWallet.id, walletType: merchantWallet.walletType }, amount: 1000n }],
+      [
+        { wallet: { id: creditWallet.id, walletType: creditWallet.walletType }, amount: 300n },
+        { wallet: { id: repositoryWallet.id, walletType: repositoryWallet.walletType }, amount: 700n },
+      ],
     );
     expect(manager.update).toHaveBeenCalledWith(
       expect.anything(),

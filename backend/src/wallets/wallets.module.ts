@@ -7,6 +7,7 @@ import { WalletTypesModule } from '../wallet-types/wallet-types.module';
 import { SettlementModule } from '../settlement/settlement.module';
 import { IdempotencyModule } from '../idempotency/idempotency.module';
 import { CustomerActionGuard } from '../admin/guards/customer-action.guard';
+import { GlModule } from '../gl/gl.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { CustomerActionGuard } from '../admin/guards/customer-action.guard';
     WalletTypesModule,
     SettlementModule,
     IdempotencyModule,
+    GlModule,
   ],
   controllers: [WalletsController],
   providers: [WalletsService, CustomerActionGuard],

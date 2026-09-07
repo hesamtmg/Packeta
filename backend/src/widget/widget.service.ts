@@ -27,6 +27,7 @@ import {
 import { InstallmentsService } from '../installments/installments.service';
 import { serializeInstallment } from '../installments/installment.serializer';
 import { WidgetDepositDto } from './dto/widget-deposit.dto';
+import { LedgerService } from '../gl/ledger.service';
 
 const SESSION_TTL_MS = 10 * 60 * 1000;
 
@@ -64,6 +65,7 @@ export class WidgetService {
     private readonly configService: ConfigService,
     private readonly transactionsService: TransactionsService,
     private readonly installmentsService: InstallmentsService,
+    private readonly ledgerService: LedgerService,
     private readonly i18n: I18nService,
   ) {}
 
@@ -197,7 +199,13 @@ export class WidgetService {
     const wallets = (
       await this.walletsService.listForUser(session.userId!)
     ).filter((wallet) => !wallet.walletType.hiddenFromCustomer);
-    return wallets.map((wallet) => serializeWallet(wallet));
+    const balances = await this.ledgerService.getWalletBalances(
+      this.widgetSessionsRepository.manager,
+      wallets.map((wallet) => wallet.id),
+    );
+    return wallets.map((wallet) =>
+      serializeWallet(wallet, (balances.get(wallet.id) ?? 0n).toString()),
+    );
   }
 
   async getTransactions(token: string, walletId?: string) {

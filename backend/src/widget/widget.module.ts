@@ -8,6 +8,7 @@ import { WidgetService } from './widget.service';
 import { WidgetController } from './widget.controller';
 import { OtpService } from '../purchase-gateway/otp.service';
 import { CaptchaService } from '../purchase-gateway/captcha.service';
+import { GlModule } from '../gl/gl.module';
 
 // Reuses PurchaseGatewayModule's OtpService/CaptchaService classes directly
 // (both have zero constructor dependencies) rather than a copy — same OTP
@@ -21,6 +22,7 @@ import { CaptchaService } from '../purchase-gateway/captcha.service';
     WalletsModule,
     TransactionsModule,
     InstallmentsModule,
+    GlModule,
   ],
   controllers: [WidgetController],
   providers: [WidgetService, OtpService, CaptchaService],
