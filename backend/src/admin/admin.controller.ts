@@ -50,6 +50,7 @@ import { PanelRolesService } from '../panel-roles/panel-roles.service';
 import { CreatePanelRoleDto } from '../panel-roles/dto/create-panel-role.dto';
 import { UpdatePanelRoleDto } from '../panel-roles/dto/update-panel-role.dto';
 import { SettlementService } from '../settlement/settlement.service';
+import { GlReportingService } from '../gl/gl-reporting.service';
 
 function serializePanelRole(
   role: {
@@ -87,6 +88,7 @@ export class AdminController {
     private readonly batchImportService: BatchImportService,
     private readonly panelRolesService: PanelRolesService,
     private readonly settlementService: SettlementService,
+    private readonly glReportingService: GlReportingService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -343,6 +345,55 @@ export class AdminController {
       }
     }
     return transaction;
+  }
+
+  // Which GL postings (if any) a specific transaction produced — same scope
+  // check as getTransaction above, since this is reachable from that
+  // transaction's own detail view. Returns an empty array for anything
+  // predating the GL feature that the backfill script hasn't been run
+  // against yet, or a VIRTUAL-type row, which never posts.
+  @Get('transactions/:id/gl-entries')
+  @RequireSection('transactions', 'generalLedger')
+  async getTransactionGlEntries(
+    @CurrentUser() caller: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    const transaction = await this.transactionsService.getByIdUnscoped(id);
+    if (!(await this.isSuperAdmin(caller.userId))) {
+      const walletIds = await this.walletsService.listScopedWalletIdsForAdmin(
+        caller.userId,
+      );
+      const touchesScope =
+        (transaction.fromWallet &&
+          walletIds.includes(transaction.fromWallet.id)) ||
+        (transaction.toWallet && walletIds.includes(transaction.toWallet.id));
+      if (!touchesScope) {
+        throw new ForbiddenException('This transaction is outside your scope');
+      }
+    }
+    return this.glReportingService.getJournalEntriesForTransaction(id);
+  }
+
+  // The GL is a company-wide financial statement, not scoped per-admin the
+  // way wallets/transactions are — every account and every posting is
+  // visible to anyone granted the generalLedger section, super-admin or
+  // not.
+  @Get('gl/trial-balance')
+  @RequireSection('generalLedger')
+  async getGlTrialBalance() {
+    return this.glReportingService.getTrialBalance();
+  }
+
+  @Get('gl/accounts/:id/ledger')
+  @RequireSection('generalLedger')
+  async getGlAccountLedger(
+    @Param('id') accountId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.glReportingService.getAccountLedger(
+      accountId,
+      limit ? parseInt(limit, 10) : undefined,
+    );
   }
 
   // Every installment across every credit wallet, any customer — the panel

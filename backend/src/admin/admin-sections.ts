@@ -19,6 +19,7 @@ export const ADMIN_SECTIONS = [
   'reports',
   'roles',
   'offboarding',
+  'generalLedger',
 ] as const;
 
 export type AdminSection = (typeof ADMIN_SECTIONS)[number];
