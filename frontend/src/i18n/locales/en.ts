@@ -92,6 +92,14 @@ export default {
     typesLabel: 'Types',
     activityHeading: 'Activity (14d)',
     latestTransactionHeading: 'Latest transaction',
+    latestTransactionEmpty: 'No transactions yet.',
+    activity: {
+      hour: 'Hour',
+      day: 'Day',
+      week: 'Week',
+      count: '{count} transactions',
+      empty: 'No activity in this period.',
+    },
     charge: {
       title: 'Create a charge',
       hint: 'Generates a payment link for a customer — they identify themselves by phone + code at the link, no Packeta account needed.',
@@ -203,6 +211,9 @@ export default {
       marketHint:
         'If set, this wallet can only send/receive transfers and purchases with these emails (unless the other wallet allows you back).',
       editFailed: 'Failed to save wallet changes',
+      expandStack: 'Show all wallets',
+      collapseStack: 'Collapse',
+      addWalletCard: 'Add wallet',
     },
     actions: {
       deposit: { title: 'Deposit', chooseWallet: 'Choose wallet', submit: 'Deposit' },

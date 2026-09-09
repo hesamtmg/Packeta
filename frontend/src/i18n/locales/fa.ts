@@ -92,6 +92,14 @@ export default {
     typesLabel: 'انواع',
     activityHeading: 'فعالیت (۱۴ روز)',
     latestTransactionHeading: 'آخرین تراکنش',
+    latestTransactionEmpty: 'هنوز تراکنشی وجود ندارد.',
+    activity: {
+      hour: 'ساعت',
+      day: 'روز',
+      week: 'هفته',
+      count: '{count} تراکنش',
+      empty: 'در این بازه فعالیتی وجود ندارد.',
+    },
     charge: {
       title: 'ایجاد درخواست پرداخت',
       hint: 'یک لینک پرداخت برای مشتری ایجاد می‌کند — آن‌ها با شماره تلفن و کد در لینک شناسایی می‌شوند و نیازی به حساب پاکتا نیست.',
@@ -203,6 +211,9 @@ export default {
       marketHint:
         'در صورت تنظیم، این کیف پول فقط می‌تواند با این ایمیل‌ها انتقال/خرید انجام دهد (مگر اینکه کیف پول طرف مقابل شما را مجاز کرده باشد).',
       editFailed: 'ذخیره تغییرات کیف پول ناموفق بود',
+      expandStack: 'نمایش همه کیف‌پول‌ها',
+      collapseStack: 'جمع کردن',
+      addWalletCard: 'افزودن کیف پول',
     },
     actions: {
       deposit: { title: 'واریز', chooseWallet: 'انتخاب کیف پول', submit: 'واریز' },
