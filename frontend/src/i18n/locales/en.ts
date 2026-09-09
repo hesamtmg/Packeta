@@ -214,6 +214,9 @@ export default {
       expandStack: 'Show all wallets',
       collapseStack: 'Collapse',
       addWalletCard: 'Add wallet',
+      cardBrand: 'Packeta',
+      cardWalletLabel: 'Wallet',
+      cardBalanceLabel: 'Balance',
     },
     actions: {
       deposit: { title: 'Deposit', chooseWallet: 'Choose wallet', submit: 'Deposit' },

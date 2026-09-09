@@ -214,6 +214,9 @@ export default {
       expandStack: 'نمایش همه کیف‌پول‌ها',
       collapseStack: 'جمع کردن',
       addWalletCard: 'افزودن کیف پول',
+      cardBrand: 'پاکتا',
+      cardWalletLabel: 'کیف پول',
+      cardBalanceLabel: 'موجودی',
     },
     actions: {
       deposit: { title: 'واریز', chooseWallet: 'انتخاب کیف پول', submit: 'واریز' },

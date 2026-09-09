@@ -11,7 +11,10 @@ export interface CardThemeOption {
 }
 
 export const CARD_THEME_OPTIONS: CardThemeOption[] = [
-  { key: 'indigo', label: 'Indigo', gradient: 'linear-gradient(120deg, #4f7cf6 0%, #6d5df0 55%, #b565f3 100%)' },
+  // Matches ipg-frontend's PayView .paycard exactly (its always-blue
+  // wallet-selection card) — the default so an unconfigured wallet type's
+  // card looks identical in color to the pay page's, not just in layout.
+  { key: 'indigo', label: 'Indigo', gradient: 'linear-gradient(135deg, #2f6fed 0%, #1550c9 60%, #103e9e 100%)' },
   { key: 'violet', label: 'Violet', gradient: 'linear-gradient(120deg, #8b5cf6 0%, #d946ef 55%, #f472b6 100%)' },
   { key: 'teal', label: 'Teal', gradient: 'linear-gradient(120deg, #14b8a6 0%, #22c55e 55%, #eab308 100%)' },
   { key: 'amber', label: 'Amber', gradient: 'linear-gradient(120deg, #f97316 0%, #fbbf24 100%)' },

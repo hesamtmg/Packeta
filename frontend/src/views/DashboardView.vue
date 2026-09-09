@@ -191,9 +191,11 @@ function cardImageSrc(w: Wallet): string | null {
     ? `${API_URL}/uploads/wallet-type-cards/${w.walletType.cardImageFilename}`
     : null;
 }
+// Matches ipg-frontend's PayView maskId exactly — same masked-number look
+// on both the payment gateway's wallet-selection card and this dashboard.
 function maskedWalletId(w: Wallet): string {
   const clean = w.id.replace(/-/g, '').toUpperCase();
-  return `${clean.slice(0, 4)} •••• •••• ${clean.slice(-4)}`;
+  return `•••• •••• •••• ${clean.slice(-4)}`;
 }
 
 function badges(w: Wallet): string[] {
@@ -773,15 +775,27 @@ async function onGrantCredit() {
               @keydown.enter="stackPinned = true"
             >
               <div class="card-face-top">
-                <span class="card-face-type">{{ w.walletType.name }}</span>
-                <span class="card-face-currency-pill">{{ w.walletType.currency.code }}</span>
+                <img v-if="cardImageSrc(w)" :src="cardImageSrc(w)!" class="card-face-logo" alt="" />
+                <span v-else class="card-face-chip" aria-hidden="true">
+                  <svg viewBox="0 0 32 24" fill="none"><rect x="1" y="1" width="30" height="22" rx="4" fill="currentColor" opacity="0.9"/><path d="M1 9h30M1 15h30M11 1v22M21 1v22" stroke="#fff" stroke-width="1"/></svg>
+                </span>
+                <span class="card-face-top-right">
+                  <span class="card-face-contactless" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none"><path d="M7 9a7 7 0 0 1 0 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M10.3 6.5a11 11 0 0 1 0 11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M13.6 4a15 15 0 0 1 0 16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                  </span>
+                  <span class="card-face-brand">{{ t('dashboard.wallets.cardBrand') }}</span>
+                </span>
               </div>
-              <div class="card-face-balance">{{ formatAmount(w.balance, w.walletType.currency) }}</div>
               <div class="card-face-number">{{ maskedWalletId(w) }}</div>
               <div class="card-face-bottom">
-                <span class="card-face-name">{{ walletDisplayName(w) }}</span>
-                <img v-if="cardImageSrc(w)" :src="cardImageSrc(w)!" class="card-brand-image" alt="" />
-                <span v-else class="card-brand-mark" aria-hidden="true"><i /><i /></span>
+                <div class="card-face-field">
+                  <span class="card-face-label">{{ t('dashboard.wallets.cardWalletLabel') }}</span>
+                  <span class="card-face-value">{{ walletDisplayName(w) }}</span>
+                </div>
+                <div class="card-face-field card-face-field-right">
+                  <span class="card-face-label">{{ t('dashboard.wallets.cardBalanceLabel') }}</span>
+                  <span class="card-face-value">{{ formatAmount(w.balance, w.walletType.currency) }}</span>
+                </div>
               </div>
             </div>
 
@@ -1585,86 +1599,89 @@ async function onGrantCredit() {
   background: radial-gradient(circle, rgba(255, 255, 255, 0.18), transparent 70%);
   pointer-events: none;
 }
+/* Matches ipg-frontend's PayView .paycard element-for-element (chip,
+   contactless mark + brand, masked number, wallet/balance fields) so a
+   wallet looks like the same physical card here and on the pay page. */
 .card-face-top {
   position: relative;
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-}
-.card-face-type {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.72rem;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  opacity: 0.85;
-}
-.card-face-currency-pill {
-  flex: none;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  background: rgba(255, 255, 255, 0.28);
-  border-radius: 999px;
-  padding: 3px 10px;
-}
-.card-brand-mark {
-  flex: none;
-  display: flex;
   align-items: center;
+  justify-content: space-between;
 }
-.card-brand-mark i {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.6);
-  display: block;
-  font-style: normal;
-}
-.card-brand-mark i + i {
-  margin-inline-start: -10px;
-  background: rgba(255, 255, 255, 0.9);
-}
-.card-brand-image {
+.card-face-chip {
+  width: 34px;
+  height: 24px;
+  color: rgba(255, 255, 255, 0.85);
   flex: none;
-  height: 28px;
-  max-width: 64px;
+}
+.card-face-chip svg,
+.card-face-contactless svg {
+  width: 100%;
+  height: 100%;
+}
+.card-face-logo {
+  flex: none;
+  height: 26px;
+  max-width: 72px;
   width: auto;
   object-fit: contain;
 }
-
-.card-face-balance {
-  position: relative;
-  font-size: 1.7rem;
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.card-face-top-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.card-face-contactless {
+  width: 22px;
+  height: 22px;
+  color: rgba(255, 255, 255, 0.85);
+  flex: none;
+}
+.card-face-brand {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.85);
 }
 .card-face-number {
   position: relative;
-  font-family: 'Courier New', monospace;
-  font-size: 0.9rem;
-  letter-spacing: 0.1em;
-  opacity: 0.85;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  direction: ltr;
+  text-align: start;
 }
 .card-face-bottom {
   position: relative;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
 }
-.card-face-name {
+.card-face-field {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
+}
+.card-face-field-right {
+  align-items: flex-end;
+  text-align: end;
+}
+.card-face-label {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.65);
+}
+.card-face-value {
+  font-size: 0.85rem;
+  font-weight: 700;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.92rem;
-  font-weight: 600;
 }
 
 .card-face-add {
@@ -1706,12 +1723,9 @@ async function onGrantCredit() {
     padding: 14px 16px;
     border-radius: 14px;
   }
-  .card-face-balance {
-    font-size: 1.2rem;
-  }
   .card-face-number {
-    font-size: 0.8rem;
-    letter-spacing: 0.1em;
+    font-size: 0.9rem;
+    letter-spacing: 0.05em;
   }
 }
 
