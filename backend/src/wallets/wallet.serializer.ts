@@ -43,6 +43,8 @@ export function serializeWallet(
       id: wallet.walletType.id,
       code: wallet.walletType.code,
       name: wallet.walletType.name,
+      cardColor: wallet.walletType.cardColor,
+      cardImageFilename: wallet.walletType.cardImageFilename,
       allowNegativeBalance: wallet.walletType.allowNegativeBalance,
       creditLimit: wallet.walletType.creditLimit,
       allowWithdraw: wallet.walletType.allowWithdraw,

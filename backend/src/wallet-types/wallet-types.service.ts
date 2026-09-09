@@ -115,6 +115,7 @@ export class WalletTypesService {
       code: dto.code,
       name: dto.name,
       currencyId: currency.id,
+      cardColor: dto.cardColor ?? null,
       allowNegativeBalance: dto.allowNegativeBalance,
       creditLimit: dto.allowNegativeBalance ? String(dto.creditLimit) : null,
       allowWithdraw: dto.allowWithdraw,
@@ -223,6 +224,7 @@ export class WalletTypesService {
     );
 
     if (dto.name !== undefined) type.name = dto.name;
+    if (dto.cardColor !== undefined) type.cardColor = dto.cardColor || null;
     if (dto.allowWithdraw !== undefined) type.allowWithdraw = dto.allowWithdraw;
     if (dto.allowP2pOut !== undefined) type.allowP2pOut = dto.allowP2pOut;
     if (dto.allowP2pIn !== undefined) type.allowP2pIn = dto.allowP2pIn;
@@ -297,6 +299,30 @@ export class WalletTypesService {
     }
 
     return this.walletTypesRepository.save(type);
+  }
+
+  // Used by WalletTypesController's card-image upload/delete endpoints —
+  // returns the filename that was replaced (or cleared) so the controller
+  // can remove the now-orphaned file from disk.
+  async setCardImage(
+    id: string,
+    filename: string,
+  ): Promise<{ previousFilename: string | null }> {
+    const type = await this.findById(id);
+    const previousFilename = type.cardImageFilename;
+    type.cardImageFilename = filename;
+    await this.walletTypesRepository.save(type);
+    return { previousFilename };
+  }
+
+  async clearCardImage(id: string): Promise<{ previousFilename: string | null }> {
+    const type = await this.findById(id);
+    const previousFilename = type.cardImageFilename;
+    if (previousFilename) {
+      type.cardImageFilename = null;
+      await this.walletTypesRepository.save(type);
+    }
+    return { previousFilename };
   }
 
   // Hard-delete is safe here (unlike a Wallet, a WalletType has no financial

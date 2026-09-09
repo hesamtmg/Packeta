@@ -1,5 +1,6 @@
 import {
   IsBoolean,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -8,7 +9,9 @@ import {
   Matches,
   Max,
   Min,
+  ValidateIf,
 } from 'class-validator';
+import { CARD_COLOR_PRESETS } from '../entities/wallet-type.entity';
 
 // Same "empty clears" convention as UpdateWalletDto: send an explicit empty
 // array to clear autoWithdrawTimes back to unset. Non-empty must still be
@@ -19,6 +22,13 @@ export class UpdateWalletTypeDto {
   @IsOptional()
   @IsString()
   name?: string;
+
+  // A preset key from the card-color palette (see WalletType.cardColor), or
+  // an empty string to clear it back to the hash-based default.
+  @IsOptional()
+  @ValidateIf((o) => !!o.cardColor)
+  @IsIn(CARD_COLOR_PRESETS)
+  cardColor?: string;
 
   @IsOptional()
   @IsBoolean()
