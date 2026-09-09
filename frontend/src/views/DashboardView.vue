@@ -178,6 +178,23 @@ function walletLabel(w: Wallet): string {
   return `${walletDisplayName(w)} (${w.walletType.currency.code}) — ${formatAmount(w.balance, w.walletType.currency)}`;
 }
 
+// Item: give each wallet a payment-card look — a deterministic gradient
+// theme (by wallet type, so the same type always reads the same color)
+// and a masked-number-style echo of its id, the way a bank app shows the
+// last 4 digits of a card instead of the full PAN.
+const CARD_THEMES = ['card-theme-indigo', 'card-theme-violet', 'card-theme-teal', 'card-theme-amber', 'card-theme-rose'];
+function cardTheme(w: Wallet): string {
+  if (w.closedAt) return 'card-theme-closed';
+  const key = w.walletType.code || w.id;
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  return CARD_THEMES[hash % CARD_THEMES.length];
+}
+function maskedWalletId(w: Wallet): string {
+  const last4 = w.id.replace(/-/g, '').slice(-4).toUpperCase();
+  return `•••• •••• •••• ${last4}`;
+}
+
 function badges(w: Wallet): string[] {
   const list: string[] = [];
   if (w.walletType.allowNegativeBalance) {
@@ -299,11 +316,17 @@ const typeCount = computed(
 );
 const latestCluster = computed(() => historyClusters.value[0] ?? null);
 
-// Drives the wallet stack's peek/expanded state (item 3): hovering the
-// stack, pinning it open, editing a wallet, or having an inline
-// deposit/withdraw/transfer/purchase form open all keep it expanded so the
-// form you're using doesn't collapse out from under you.
-const stackHovered = ref(false);
+// Drives the wallet stack's peek/expanded state (item 3): pinning it open
+// (tap/click), editing a wallet, or having an inline deposit/withdraw/
+// transfer/purchase form open all keep it expanded so the form you're
+// using doesn't collapse out from under you. Real mouse-hover expansion is
+// handled separately in pure CSS (gated to `(hover: hover)` devices) —
+// tracking hover in JS caused stray state on touch: a tap leaves a
+// "phantom" :hover the way it does on any mobile site, and an SPA route
+// change can leave a real mouse sitting over content that just shifted
+// under it, both of which produced a stack stuck open. CSS `:hover` has
+// neither problem: it always matches the live cursor position and is
+// simply switched off outside real-hover devices.
 const stackPinned = ref(false);
 const addWalletOpen = ref(false);
 const openWalletAction = ref<{
@@ -313,7 +336,6 @@ const openWalletAction = ref<{
 
 const stackExpanded = computed(
   () =>
-    stackHovered.value ||
     stackPinned.value ||
     editingWalletId.value !== null ||
     openWalletAction.value !== null ||
@@ -733,29 +755,42 @@ async function onGrantCredit() {
           </button>
         </div>
 
-        <div
-          class="wallet-stack"
-          :class="{ expanded: stackExpanded }"
-          @mouseenter="stackHovered = true"
-          @mouseleave="stackHovered = false"
-        >
+        <div class="wallet-stack" :class="{ expanded: stackExpanded }">
           <article
             v-for="(w, i) in wallet.wallets"
             :key="w.id"
             class="wallet-card"
             :class="{ 'is-peek': !stackExpanded }"
-            :style="{ zIndex: wallet.wallets.length - i, marginTop: !stackExpanded && i > 0 ? '-32px' : undefined }"
+            :style="{ zIndex: wallet.wallets.length - i }"
           >
-            <button type="button" class="wallet-card-peek" @click="stackPinned = true">
-              <span class="peek-dot" :class="`dot-${['orange', 'lime', 'blue', 'red'][i % 4]}`" />
-              <span class="peek-type">{{ walletDisplayName(w) }} · {{ w.walletType.currency.code }}</span>
-              <span class="peek-balance">{{ formatAmount(w.balance, w.walletType.currency) }}</span>
-            </button>
+            <div
+              class="card-face"
+              :class="cardTheme(w)"
+              role="button"
+              tabindex="0"
+              @click="stackPinned = true"
+              @keydown.enter="stackPinned = true"
+            >
+              <div class="card-face-top">
+                <span class="card-chip" aria-hidden="true"><span /><span /><span /></span>
+                <span class="card-face-type">{{ w.walletType.name }}</span>
+                <span class="card-brand-mark" aria-hidden="true"><i /><i /></span>
+              </div>
+              <div class="card-face-number">{{ maskedWalletId(w) }}</div>
+              <div class="card-face-balance">{{ formatAmount(w.balance, w.walletType.currency) }}</div>
+              <div class="card-face-bottom">
+                <span class="card-face-label">
+                  <small>{{ t('dashboard.wallets.cardHolderLabel') }}</small>
+                  {{ walletDisplayName(w) }}
+                </span>
+                <span class="card-face-label card-face-currency">
+                  <small>{{ t('dashboard.wallets.cardCurrencyLabel') }}</small>
+                  {{ w.walletType.currency.code }}
+                </span>
+              </div>
+            </div>
 
-            <div class="wallet-card-full">
-              <span class="wallet-type">{{ walletDisplayName(w) }} · {{ w.walletType.currency.code }}</span>
-              <span v-if="w.name" class="wallet-type-sub">{{ w.walletType.name }}</span>
-              <span class="wallet-balance">{{ formatAmount(w.balance, w.walletType.currency) }}</span>
+            <div class="card-body">
               <span class="mono-id">{{ w.id }}</span>
               <div class="badges">
                 <span v-for="b in badges(w)" :key="b" class="admin-badge">{{ b }}</span>
@@ -983,14 +1018,18 @@ async function onGrantCredit() {
             v-if="auth.canCustomerAction('addWallet')"
             class="wallet-card wallet-card-add"
             :class="{ 'is-peek': !stackExpanded }"
-            :style="{ zIndex: 0, marginTop: !stackExpanded && wallet.wallets.length > 0 ? '-32px' : undefined }"
+            :style="{ zIndex: 0 }"
           >
-            <button type="button" class="wallet-card-peek" @click="addWalletOpen = true">
-              <span class="peek-dot dot-blue" />
-              <span class="peek-type">+ {{ t('dashboard.wallets.addWalletCard') }}</span>
+            <button
+              type="button"
+              class="card-face card-face-add"
+              @click="addWalletOpen = true"
+            >
+              <span class="card-face-add-icon" aria-hidden="true">+</span>
+              <span>{{ t('dashboard.wallets.addWalletCard') }}</span>
             </button>
 
-            <div class="wallet-card-full">
+            <div class="card-body">
               <div class="wallet-card-add-head">
                 <span class="wallet-type">{{ t('dashboard.wallets.addWalletCard') }}</span>
                 <button type="button" class="admin-btn admin-btn-ghost" @click="addWalletOpen = false">
@@ -1459,6 +1498,7 @@ async function onGrantCredit() {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
 }
 .wallet-hero-head h2 {
@@ -1468,71 +1508,218 @@ async function onGrantCredit() {
 /* Item 3: wallets stack like cards in a wallet — peeking behind the top
    one until the stack is hovered, pinned open, or a card inside it needs
    attention (editing, an inline action form). */
+/* Item: the wallet stack is capped so the payment-card visual stays a
+   sensible size on wide desktop columns; on narrow/mobile viewports the
+   container itself is narrower than the cap, so the card just fills it. */
 .wallet-stack {
   display: flex;
   flex-direction: column;
+  max-width: 440px;
 }
 .wallet-card {
   position: relative;
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-sm);
-  background: var(--card-bg);
-  transition: margin-top 240ms ease, box-shadow 240ms ease;
+  transition: margin-top 260ms ease;
 }
-.wallet-stack:not(.expanded) .wallet-card:hover {
-  box-shadow: 0 10px 24px -14px rgba(20, 60, 140, 0.35);
+/* A percentage margin-top resolves against the *containing block's width*,
+   not the element's own height — exploited here so each card overlaps the
+   one before it by a fixed fraction of the (fluid) card width, leaving a
+   proportional sliver visible no matter the viewport size. */
+.wallet-stack:not(.expanded) .wallet-card:not(:first-child) {
+  margin-top: -50%;
 }
-.wallet-stack.expanded .wallet-card {
-  margin-top: 14px !important;
+.wallet-stack.expanded .wallet-card:not(:first-child) {
+  margin-top: 14px;
 }
 .wallet-stack .wallet-card:first-child {
   margin-top: 0 !important;
 }
-
-.wallet-card-peek {
+.wallet-card.is-peek .card-body {
   display: none;
+}
+
+/* Real-hover devices (a mouse, not a finger) also get pointer-driven
+   expand — CSS `:hover`, not JS state, so it always tracks the live
+   cursor with no way to get stuck open the way a tap's synthetic hover
+   can on touch. Touch/no-hover devices rely solely on tapping a card or
+   the "Show all wallets" button (stackPinned) — see the note by
+   stackExpanded's declaration. */
+@media (hover: hover) and (pointer: fine) {
+  .wallet-stack:not(.expanded):hover .wallet-card:not(:first-child) {
+    margin-top: 14px;
+  }
+  .wallet-stack:not(.expanded):hover .wallet-card.is-peek .card-body {
+    display: flex;
+  }
+  .wallet-stack:not(.expanded) .card-face:hover {
+    transform: translateY(-3px);
+  }
+}
+.card-face:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* The payment-card face itself: fixed aspect ratio so it always reads as
+   a card, a deterministic gradient per wallet type, a chip + masked
+   number + balance + wallet/currency row like a real bank card. */
+.card-face {
+  position: relative;
   width: 100%;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
-  background: var(--card-bg);
-  border: none;
-  border-radius: var(--radius-sm);
+  aspect-ratio: 1.586 / 1;
+  border-radius: 18px;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  color: #fff;
+  overflow: hidden;
   cursor: pointer;
-  font: inherit;
-  color: var(--text);
+  box-shadow: 0 16px 32px -18px rgba(20, 30, 70, 0.55);
+  transition: transform 200ms ease, box-shadow 200ms ease;
+  font-family: inherit;
+  border: none;
   text-align: start;
 }
-.wallet-card.is-peek .wallet-card-peek {
-  display: flex;
-}
-.peek-dot {
-  width: 9px;
-  height: 9px;
+.card-face::before {
+  content: '';
+  position: absolute;
+  inset: -35% -15% auto auto;
+  width: 60%;
+  aspect-ratio: 1;
   border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.22), transparent 70%);
+  pointer-events: none;
+}
+.card-theme-indigo { background: linear-gradient(135deg, #5b7cf8 0%, #1d2e8c 100%); }
+.card-theme-violet { background: linear-gradient(135deg, #b565f3 0%, #5b21b6 100%); }
+.card-theme-teal { background: linear-gradient(135deg, #2dd4bf 0%, #0f5c52 100%); }
+.card-theme-amber { background: linear-gradient(135deg, #fbbf24 0%, #9a5b0c 100%); }
+.card-theme-rose { background: linear-gradient(135deg, #fb7185 0%, #9d174d 100%); }
+.card-theme-closed { background: linear-gradient(135deg, #94a3b8 0%, #3f4b5e 100%); }
+
+.card-face-top {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.card-chip {
+  width: 32px;
+  height: 24px;
+  border-radius: 5px;
+  background: linear-gradient(135deg, #f4d78c 0%, #c9a227 100%);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 5px;
   flex: none;
 }
-.peek-type {
+.card-chip span {
+  height: 1.5px;
+  border-radius: 1px;
+  background: rgba(0, 0, 0, 0.35);
+}
+.card-face-type {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.85rem;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.85;
+  padding-top: 4px;
 }
-.peek-balance {
-  font-weight: 700;
+.card-brand-mark {
   flex: none;
+  display: flex;
+  align-items: center;
+}
+.card-brand-mark i {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.55);
+  display: block;
+  font-style: normal;
+}
+.card-brand-mark i + i {
+  margin-inline-start: -8px;
+  background: rgba(255, 255, 255, 0.85);
 }
 
-.wallet-card-full {
+.card-face-number {
+  position: relative;
+  font-family: 'Courier New', monospace;
+  font-size: 0.92rem;
+  letter-spacing: 0.14em;
+  opacity: 0.85;
+}
+.card-face-balance {
+  position: relative;
+  font-size: 1.5rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card-face-bottom {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+}
+.card-face-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card-face-label small {
+  font-size: 0.58rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.75;
+}
+.card-face-currency {
+  flex: none;
+  align-items: flex-end;
+  text-align: end;
+}
+
+.card-face-add {
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--panel-bg);
+  border: 1.5px dashed var(--card-border);
+  color: var(--text-dim);
+  box-shadow: none;
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+.card-face-add:hover {
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+.card-face-add-icon {
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+.card-body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 14px;
-}
-.wallet-card.is-peek .wallet-card-full {
-  display: none;
+  padding: 14px 2px 4px;
 }
 
 .wallet-card-add-head {
@@ -1540,6 +1727,20 @@ async function onGrantCredit() {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+@media (max-width: 420px) {
+  .card-face {
+    padding: 14px 16px;
+    border-radius: 14px;
+  }
+  .card-face-balance {
+    font-size: 1.2rem;
+  }
+  .card-face-number {
+    font-size: 0.8rem;
+    letter-spacing: 0.1em;
+  }
 }
 
 .wallet-quick-actions {
@@ -1650,16 +1851,6 @@ async function onGrantCredit() {
   color: var(--text-dimmer);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-}
-.wallet-type-sub {
-  font-size: 0.68rem;
-  color: var(--text-dimmer);
-  opacity: 0.7;
-  margin-top: -6px;
-}
-.wallet-balance {
-  font-size: 1.5rem;
-  font-weight: 700;
 }
 .badges {
   display: flex;
@@ -1806,6 +1997,23 @@ async function onGrantCredit() {
   flex: none;
   font-weight: 700;
   font-size: 0.9rem;
+}
+
+/* Icon + description/date + amount + status badge is too much for one
+   row on a phone width — the date was getting overlapped by the amount.
+   Let the row wrap: description/date keep the first line, amount +
+   status move to their own line, pushed to the end. */
+@media (max-width: 480px) {
+  .history-row {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .history-row-main {
+    flex-basis: 100%;
+  }
+  .history-row-amount {
+    margin-inline-start: auto;
+  }
 }
 .history-detail {
   padding: 4px 14px 14px;

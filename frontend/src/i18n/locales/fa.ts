@@ -214,6 +214,8 @@ export default {
       expandStack: 'نمایش همه کیف‌پول‌ها',
       collapseStack: 'جمع کردن',
       addWalletCard: 'افزودن کیف پول',
+      cardHolderLabel: 'کیف پول',
+      cardCurrencyLabel: 'ارز',
     },
     actions: {
       deposit: { title: 'واریز', chooseWallet: 'انتخاب کیف پول', submit: 'واریز' },
