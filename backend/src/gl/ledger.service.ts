@@ -1,9 +1,15 @@
 import { Injectable } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EntityManager } from 'typeorm';
 import { GlAccount, GlAccountCode } from './entities/gl-account.entity';
 import { GlJournalEntry } from './entities/gl-journal-entry.entity';
 import { GlPosting, GlPostingDirection } from './entities/gl-posting.entity';
 import { WalletType } from '../wallet-types/entities/wallet-type.entity';
+import {
+  GlPostingCreatedEvent,
+  RealtimeEvent,
+  WalletBalanceChangedEvent,
+} from '../realtime/events';
 
 export interface LedgerLeg {
   code: GlAccountCode;
@@ -51,6 +57,8 @@ export interface WalletLegInput {
 @Injectable()
 export class LedgerService {
   private readonly accountCache = new Map<string, GlAccount>();
+
+  constructor(private readonly eventEmitter: EventEmitter2) {}
 
   walletAccountCode(walletType: WalletType): GlAccountCode {
     return walletType.allowNegativeBalance
@@ -184,21 +192,72 @@ export class LedgerService {
     });
     await manager.save(entry);
 
-    const postings = await Promise.all(
-      legs.map(async (leg) => {
-        const account = await this.getAccount(manager, leg.code, leg.currencyId);
-        return manager.create(GlPosting, {
-          journalEntryId: entry.id,
-          accountId: account.id,
-          direction: leg.direction,
-          amount: leg.amount.toString(),
-          walletId: leg.walletId,
-        });
+    const legsWithAccounts = await Promise.all(
+      legs.map(async (leg) => ({
+        leg,
+        account: await this.getAccount(manager, leg.code, leg.currencyId),
+      })),
+    );
+    const postings = legsWithAccounts.map(({ leg, account }) =>
+      manager.create(GlPosting, {
+        journalEntryId: entry.id,
+        accountId: account.id,
+        direction: leg.direction,
+        amount: leg.amount.toString(),
+        walletId: leg.walletId,
       }),
     );
     await manager.save(postings);
 
+    this.emitRealtimeEvents(entry, description, legsWithAccounts);
+
     return entry;
+  }
+
+  // Fired from inside the caller's still-open DB transaction (every
+  // postEntry caller wraps it in dataSource.transaction(...)), so in theory
+  // an event here could outlive a transaction that later rolls back. This
+  // is a monitoring feed, not the ledger of record — the /admin/gl/* REST
+  // endpoints stay authoritative — and the window is tiny, so this is an
+  // accepted trade-off rather than something worth a queryRunner-buffered
+  // flush-on-commit right now.
+  private emitRealtimeEvents(
+    entry: GlJournalEntry,
+    description: string,
+    legsWithAccounts: Array<{ leg: LedgerLeg; account: GlAccount }>,
+  ): void {
+    const at = new Date().toISOString();
+
+    const glPostingCreated: GlPostingCreatedEvent = {
+      journalEntryId: entry.id,
+      transactionId: entry.transactionId,
+      description,
+      postings: legsWithAccounts.map(({ leg, account }) => ({
+        accountCode: account.code,
+        walletId: leg.walletId,
+        direction: leg.direction,
+        amount: leg.amount.toString(),
+      })),
+      at,
+    };
+    this.eventEmitter.emit(RealtimeEvent.GL_POSTING_CREATED, glPostingCreated);
+
+    for (const { leg } of legsWithAccounts) {
+      if (!leg.walletId) continue;
+      const signedDelta =
+        leg.direction === GlPostingDirection.CREDIT ? leg.amount : -leg.amount;
+      const walletBalanceChanged: WalletBalanceChangedEvent = {
+        walletId: leg.walletId,
+        delta: signedDelta.toString(),
+        transactionId: entry.transactionId,
+        description,
+        at,
+      };
+      this.eventEmitter.emit(
+        RealtimeEvent.WALLET_BALANCE_CHANGED,
+        walletBalanceChanged,
+      );
+    }
   }
 
   // A single wallet's balance changed by a real cash movement at the bank
@@ -211,7 +270,8 @@ export class LedgerService {
     description: string,
     wallet: WalletLegInput,
     delta: bigint,
-    cashAccountCode: GlAccountCode.BANK_CASH | GlAccountCode.SETTLEMENT_CLEARING,
+    cashAccountCode:
+      GlAccountCode.BANK_CASH | GlAccountCode.SETTLEMENT_CLEARING,
   ): Promise<GlJournalEntry> {
     const walletLeg = this.walletLeg(wallet, delta);
     const cashLeg: LedgerLeg = {
@@ -244,7 +304,8 @@ export class LedgerService {
     manager: EntityManager,
     transactionId: string,
     description: string,
-    cashAccountCode: GlAccountCode.BANK_CASH | GlAccountCode.SETTLEMENT_CLEARING,
+    cashAccountCode:
+      GlAccountCode.BANK_CASH | GlAccountCode.SETTLEMENT_CLEARING,
     currencyId: string,
     totalAmount: bigint,
     walletCredits: Array<{ wallet: WalletLegInput; amount: bigint }>,

@@ -349,6 +349,7 @@ function buildService(options: {
     ledgerService as any,
     {} as any,
     i18nStub as any,
+    { emit: () => undefined } as any,
   );
 
   return {
@@ -1317,6 +1318,7 @@ function buildSweepService(options: {
     ledgerService as any,
     {} as any,
     i18nStub as any,
+    { emit: () => undefined } as any,
   );
 
   return {
@@ -2835,6 +2837,7 @@ describe('TransactionsService.getHistory', () => {
       {} as any,
       transactionsRepository as any,
       i18nStub as any,
+      { emit: () => undefined } as any,
     );
     return { service, transactionsRepository };
   }

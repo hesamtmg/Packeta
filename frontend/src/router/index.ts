@@ -22,6 +22,7 @@ import AdminSchedulerLogsView from '../views/admin/AdminSchedulerLogsView.vue';
 import AdminOffboardingView from '../views/admin/AdminOffboardingView.vue';
 import AdminWalletDetailView from '../views/admin/AdminWalletDetailView.vue';
 import AdminGeneralLedgerView from '../views/admin/AdminGeneralLedgerView.vue';
+import AdminLiveActivityView from '../views/admin/AdminLiveActivityView.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -156,6 +157,12 @@ const router = createRouter({
       name: 'admin-general-ledger',
       component: AdminGeneralLedgerView,
       meta: { requiresAuth: true, requiresAdmin: true, requiresSection: 'generalLedger' },
+    },
+    {
+      path: '/admin/live-activity',
+      name: 'admin-live-activity',
+      component: AdminLiveActivityView,
+      meta: { requiresAuth: true, requiresAdmin: true, requiresSection: 'liveActivity' },
     },
   ],
 });

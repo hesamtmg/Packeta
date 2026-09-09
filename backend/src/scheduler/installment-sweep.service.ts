@@ -1,7 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InstallmentsService } from '../installments/installments.service';
 import { LoggingService } from '../logging/logging.service';
 import { Interval } from '@nestjs/schedule';
+import { InstallmentActivityEvent, RealtimeEvent } from '../realtime/events';
 // Once a day: generates the next scheduled installment for every
 // repository-backed credit wallet whose type's installmentDate matches
 // today, then applies penalties and blocks any wallet whose installment
@@ -13,6 +15,7 @@ export class InstallmentSweepService {
   constructor(
     private readonly installmentsService: InstallmentsService,
     private readonly loggingService: LoggingService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   @Interval(30_000)
@@ -35,6 +38,13 @@ export class InstallmentSweepService {
           })),
         },
       });
+      const event: InstallmentActivityEvent = {
+        kind: 'generated',
+        count: generated.length,
+        installmentIds: generated.map((installment) => installment.id),
+        at: new Date().toISOString(),
+      };
+      this.eventEmitter.emit(RealtimeEvent.INSTALLMENT_ACTIVITY, event);
     }
 
     const overdue = await this.installmentsService.applyOverduePenalties();
@@ -46,6 +56,12 @@ export class InstallmentSweepService {
         success: true,
         metadata: { count: overdue },
       });
+      const event: InstallmentActivityEvent = {
+        kind: 'overdue_penalty',
+        count: overdue,
+        at: new Date().toISOString(),
+      };
+      this.eventEmitter.emit(RealtimeEvent.INSTALLMENT_ACTIVITY, event);
     }
   }
 }

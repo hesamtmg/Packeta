@@ -1,3 +1,4 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AppDataSource } from '../database/data-source';
 import { Wallet } from '../wallets/entities/wallet.entity';
 import {
@@ -90,7 +91,7 @@ function emptyReport(): Report {
 
 async function main() {
   const dataSource = await AppDataSource.initialize();
-  const ledger = new LedgerService();
+  const ledger = new LedgerService(new EventEmitter2());
   const report = emptyReport();
 
   try {

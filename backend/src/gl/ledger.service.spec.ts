@@ -1,3 +1,4 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { LedgerService, WalletLegInput } from './ledger.service';
 import { GlAccount, GlAccountCode, GlAccountType } from './entities/gl-account.entity';
 import { GlPostingDirection } from './entities/gl-posting.entity';
@@ -157,7 +158,7 @@ function wallet(type: WalletType, id?: string): WalletLegInput {
 
 describe('LedgerService', () => {
   it('maps a normal wallet type to CUSTOMER_WALLETS and a credit-line type to CREDIT_RECEIVABLE', () => {
-    const service = new LedgerService();
+    const service = new LedgerService(new EventEmitter2());
     expect(service.walletAccountCode(walletType())).toBe(
       GlAccountCode.CUSTOMER_WALLETS,
     );
@@ -167,7 +168,7 @@ describe('LedgerService', () => {
   });
 
   it('postCashMovement on a deposit debits cash and credits the wallet-mapped account', async () => {
-    const service = new LedgerService();
+    const service = new LedgerService(new EventEmitter2());
     const { manager, savedPostings } = buildManager();
 
     const depositWallet = wallet(walletType(), 'wallet-deposit');
@@ -201,7 +202,7 @@ describe('LedgerService', () => {
   });
 
   it('postCashMovement on a withdrawal debits the wallet-mapped account and credits cash', async () => {
-    const service = new LedgerService();
+    const service = new LedgerService(new EventEmitter2());
     const { manager, savedPostings } = buildManager();
 
     await service.postCashMovement(
@@ -232,7 +233,7 @@ describe('LedgerService', () => {
   });
 
   it('postCashInMultiLeg debits cash once and splits the credit across several wallets', async () => {
-    const service = new LedgerService();
+    const service = new LedgerService(new EventEmitter2());
     const { manager, savedPostings } = buildManager();
     const repositoryType = walletType({ name: 'Repository' });
     const feeRepoType = walletType({ name: 'Fee repo' });
@@ -265,7 +266,7 @@ describe('LedgerService', () => {
   });
 
   it('a repayment into a CREDIT wallet credits (shrinks) CREDIT_RECEIVABLE rather than CUSTOMER_WALLETS', async () => {
-    const service = new LedgerService();
+    const service = new LedgerService(new EventEmitter2());
     const { manager, savedPostings } = buildManager();
 
     await service.postCashMovement(
@@ -288,7 +289,7 @@ describe('LedgerService', () => {
   });
 
   it('a draw against a CREDIT wallet debits (grows) CREDIT_RECEIVABLE', async () => {
-    const service = new LedgerService();
+    const service = new LedgerService(new EventEmitter2());
     const { manager, savedPostings } = buildManager();
 
     await service.postWalletToWallet(
@@ -313,7 +314,7 @@ describe('LedgerService', () => {
   });
 
   it('postAdjustment posts the opposite leg to LEDGER_ADJUSTMENTS', async () => {
-    const service = new LedgerService();
+    const service = new LedgerService(new EventEmitter2());
     const { manager, savedPostings } = buildManager();
 
     await service.postAdjustment(
@@ -343,7 +344,7 @@ describe('LedgerService', () => {
   });
 
   it('postMultiLeg debits several wallets and credits one, staying balanced', async () => {
-    const service = new LedgerService();
+    const service = new LedgerService(new EventEmitter2());
     const { manager, savedPostings } = buildManager();
     const repositoryType = walletType({ name: 'Repository' });
     const supportType = walletType({ name: 'Support' });
@@ -372,7 +373,7 @@ describe('LedgerService', () => {
   });
 
   it('postMultiLeg drops zero-amount legs instead of rejecting them', async () => {
-    const service = new LedgerService();
+    const service = new LedgerService(new EventEmitter2());
     const { manager, savedPostings } = buildManager();
 
     await service.postMultiLeg(
@@ -390,7 +391,7 @@ describe('LedgerService', () => {
   });
 
   it('postReversal links back to the original journal entry when one exists', async () => {
-    const service = new LedgerService();
+    const service = new LedgerService(new EventEmitter2());
     const { manager, savedEntries } = buildManager(SEEDED_ACCOUNTS, [
       { id: 'journal-original', transactionId: 'purchase-1' },
     ]);
@@ -411,7 +412,7 @@ describe('LedgerService', () => {
   });
 
   it('postReversal leaves reversalOfId null when no original entry is found', async () => {
-    const service = new LedgerService();
+    const service = new LedgerService(new EventEmitter2());
     const { manager, savedEntries } = buildManager();
 
     await service.postReversal(
@@ -430,7 +431,7 @@ describe('LedgerService', () => {
   });
 
   it('rejects an unbalanced set of legs', async () => {
-    const service = new LedgerService();
+    const service = new LedgerService(new EventEmitter2());
     const { manager } = buildManager();
 
     await expect(
@@ -458,7 +459,7 @@ describe('LedgerService', () => {
   });
 
   it('rejects an entry with fewer than two legs', async () => {
-    const service = new LedgerService();
+    const service = new LedgerService(new EventEmitter2());
     const { manager } = buildManager();
 
     await expect(
@@ -479,7 +480,7 @@ describe('LedgerService', () => {
   });
 
   it('throws when an account has not been seeded for that currency', async () => {
-    const service = new LedgerService();
+    const service = new LedgerService(new EventEmitter2());
     const { manager } = buildManager([]);
 
     await expect(
@@ -488,7 +489,7 @@ describe('LedgerService', () => {
   });
 
   it('caches accounts after the first lookup', async () => {
-    const service = new LedgerService();
+    const service = new LedgerService(new EventEmitter2());
     const { manager } = buildManager();
 
     await service.getAccount(manager as any, GlAccountCode.BANK_CASH, USD_ID);
@@ -498,7 +499,7 @@ describe('LedgerService', () => {
   });
 
   it('getWalletBalance sums CREDIT as positive and DEBIT as negative for that wallet only', async () => {
-    const service = new LedgerService();
+    const service = new LedgerService(new EventEmitter2());
     const { manager } = buildManager(SEEDED_ACCOUNTS, [], [
       { walletId: 'wallet-a', direction: GlPostingDirection.CREDIT, amount: '1000' },
       { walletId: 'wallet-a', direction: GlPostingDirection.DEBIT, amount: '400' },
@@ -511,7 +512,7 @@ describe('LedgerService', () => {
   });
 
   it('getWalletBalance returns 0 for a wallet with no postings', async () => {
-    const service = new LedgerService();
+    const service = new LedgerService(new EventEmitter2());
     const { manager } = buildManager();
 
     expect(await service.getWalletBalance(manager as any, 'wallet-none')).toBe(
@@ -520,7 +521,7 @@ describe('LedgerService', () => {
   });
 
   it('getWalletBalances batches several wallets into one map, omitting wallets with no postings', async () => {
-    const service = new LedgerService();
+    const service = new LedgerService(new EventEmitter2());
     const { manager } = buildManager(SEEDED_ACCOUNTS, [], [
       { walletId: 'wallet-a', direction: GlPostingDirection.CREDIT, amount: '100' },
       { walletId: 'wallet-b', direction: GlPostingDirection.DEBIT, amount: '30' },
@@ -538,7 +539,7 @@ describe('LedgerService', () => {
   });
 
   it('postRepositoryAllocationMirror posts the wallet leg plus an offsetting REPOSITORY_ALLOCATIONS leg', async () => {
-    const service = new LedgerService();
+    const service = new LedgerService(new EventEmitter2());
     const { manager, savedPostings } = buildManager();
 
     await service.postRepositoryAllocationMirror(
@@ -568,7 +569,7 @@ describe('LedgerService', () => {
   });
 
   it('postRepositoryAllocationMirror is a no-op when delta is zero', async () => {
-    const service = new LedgerService();
+    const service = new LedgerService(new EventEmitter2());
     const { manager, savedPostings } = buildManager();
 
     const result = await service.postRepositoryAllocationMirror(
