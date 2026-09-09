@@ -214,8 +214,6 @@ export default {
       expandStack: 'Show all wallets',
       collapseStack: 'Collapse',
       addWalletCard: 'Add wallet',
-      cardHolderLabel: 'Wallet',
-      cardCurrencyLabel: 'Currency',
     },
     actions: {
       deposit: { title: 'Deposit', chooseWallet: 'Choose wallet', submit: 'Deposit' },

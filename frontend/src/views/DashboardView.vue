@@ -191,8 +191,8 @@ function cardTheme(w: Wallet): string {
   return CARD_THEMES[hash % CARD_THEMES.length];
 }
 function maskedWalletId(w: Wallet): string {
-  const last4 = w.id.replace(/-/g, '').slice(-4).toUpperCase();
-  return `•••• •••• •••• ${last4}`;
+  const clean = w.id.replace(/-/g, '').toUpperCase();
+  return `${clean.slice(0, 4)} •••• •••• ${clean.slice(-4)}`;
 }
 
 function badges(w: Wallet): string[] {
@@ -772,21 +772,14 @@ async function onGrantCredit() {
               @keydown.enter="stackPinned = true"
             >
               <div class="card-face-top">
-                <span class="card-chip" aria-hidden="true"><span /><span /><span /></span>
                 <span class="card-face-type">{{ w.walletType.name }}</span>
-                <span class="card-brand-mark" aria-hidden="true"><i /><i /></span>
+                <span class="card-face-currency-pill">{{ w.walletType.currency.code }}</span>
               </div>
-              <div class="card-face-number">{{ maskedWalletId(w) }}</div>
               <div class="card-face-balance">{{ formatAmount(w.balance, w.walletType.currency) }}</div>
+              <div class="card-face-number">{{ maskedWalletId(w) }}</div>
               <div class="card-face-bottom">
-                <span class="card-face-label">
-                  <small>{{ t('dashboard.wallets.cardHolderLabel') }}</small>
-                  {{ walletDisplayName(w) }}
-                </span>
-                <span class="card-face-label card-face-currency">
-                  <small>{{ t('dashboard.wallets.cardCurrencyLabel') }}</small>
-                  {{ w.walletType.currency.code }}
-                </span>
+                <span class="card-face-name">{{ walletDisplayName(w) }}</span>
+                <span class="card-brand-mark" aria-hidden="true"><i /><i /></span>
               </div>
             </div>
 
@@ -1565,9 +1558,9 @@ async function onGrantCredit() {
 .card-face {
   position: relative;
   width: 100%;
-  aspect-ratio: 1.586 / 1;
-  border-radius: 18px;
-  padding: 16px 20px;
+  aspect-ratio: 1.95 / 1;
+  border-radius: 22px;
+  padding: 18px 22px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -1587,50 +1580,41 @@ async function onGrantCredit() {
   width: 60%;
   aspect-ratio: 1;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.22), transparent 70%);
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.18), transparent 70%);
   pointer-events: none;
 }
-.card-theme-indigo { background: linear-gradient(135deg, #5b7cf8 0%, #1d2e8c 100%); }
-.card-theme-violet { background: linear-gradient(135deg, #b565f3 0%, #5b21b6 100%); }
-.card-theme-teal { background: linear-gradient(135deg, #2dd4bf 0%, #0f5c52 100%); }
-.card-theme-amber { background: linear-gradient(135deg, #fbbf24 0%, #9a5b0c 100%); }
-.card-theme-rose { background: linear-gradient(135deg, #fb7185 0%, #9d174d 100%); }
-.card-theme-closed { background: linear-gradient(135deg, #94a3b8 0%, #3f4b5e 100%); }
+.card-theme-indigo { background: linear-gradient(120deg, #4f7cf6 0%, #6d5df0 55%, #b565f3 100%); }
+.card-theme-violet { background: linear-gradient(120deg, #8b5cf6 0%, #d946ef 55%, #f472b6 100%); }
+.card-theme-teal { background: linear-gradient(120deg, #14b8a6 0%, #22c55e 55%, #eab308 100%); }
+.card-theme-amber { background: linear-gradient(120deg, #f97316 0%, #fbbf24 100%); }
+.card-theme-rose { background: linear-gradient(120deg, #fb7185 0%, #f472b6 55%, #fbbf24 100%); }
+.card-theme-closed { background: linear-gradient(120deg, #94a3b8 0%, #64748b 100%); }
 
 .card-face-top {
   position: relative;
   display: flex;
   align-items: flex-start;
+  justify-content: space-between;
   gap: 8px;
 }
-.card-chip {
-  width: 32px;
-  height: 24px;
-  border-radius: 5px;
-  background: linear-gradient(135deg, #f4d78c 0%, #c9a227 100%);
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 3px;
-  padding: 0 5px;
-  flex: none;
-}
-.card-chip span {
-  height: 1.5px;
-  border-radius: 1px;
-  background: rgba(0, 0, 0, 0.35);
-}
 .card-face-type {
-  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.66rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
   opacity: 0.85;
-  padding-top: 4px;
+}
+.card-face-currency-pill {
+  flex: none;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  background: rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  padding: 3px 10px;
 }
 .card-brand-mark {
   flex: none;
@@ -1638,61 +1622,47 @@ async function onGrantCredit() {
   align-items: center;
 }
 .card-brand-mark i {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.6);
   display: block;
   font-style: normal;
 }
 .card-brand-mark i + i {
-  margin-inline-start: -8px;
-  background: rgba(255, 255, 255, 0.85);
+  margin-inline-start: -10px;
+  background: rgba(255, 255, 255, 0.9);
 }
 
-.card-face-number {
-  position: relative;
-  font-family: 'Courier New', monospace;
-  font-size: 0.92rem;
-  letter-spacing: 0.14em;
-  opacity: 0.85;
-}
 .card-face-balance {
   position: relative;
-  font-size: 1.5rem;
+  font-size: 1.7rem;
   font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.card-face-number {
+  position: relative;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+  letter-spacing: 0.1em;
+  opacity: 0.85;
+}
 .card-face-bottom {
   position: relative;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
-.card-face-label {
-  display: flex;
-  flex-direction: column;
+.card-face-name {
   min-width: 0;
-  font-size: 0.8rem;
-  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.card-face-label small {
-  font-size: 0.58rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  opacity: 0.75;
-}
-.card-face-currency {
-  flex: none;
-  align-items: flex-end;
-  text-align: end;
+  font-size: 0.92rem;
+  font-weight: 600;
 }
 
 .card-face-add {
