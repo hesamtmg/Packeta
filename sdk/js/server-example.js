@@ -26,11 +26,7 @@
 const express = require('express');
 const crypto = require('crypto');
 
-let { PACKETA_API_URL, PACKETA_EMAIL, PACKETA_PASSWORD } = process.env;
-PACKETA_API_URL='http://localhost:3000'
-PACKETA_EMAIL='989373084409@packeta.ir'
-PACKETA_PASSWORD='Tmg@2215309'
-console.log(PACKETA_API_URL)
+const { PACKETA_API_URL, PACKETA_EMAIL, PACKETA_PASSWORD } = process.env;
 const router = express.Router();
 router.use(express.json());
 
@@ -49,7 +45,6 @@ async function getToken() {
   if (cachedToken && Date.now() < cachedTokenExpiresAt) {
     return cachedToken;
   }
-  console.log(PACKETA_API_URL,PACKETA_EMAIL,PACKETA_PASSWORD)
   const res = await fetch(`${PACKETA_API_URL}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
