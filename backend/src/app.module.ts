@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ServeStaticModule } from '@nestjs/serve-static';
@@ -41,10 +42,12 @@ import { RailSettlementsModule } from './rail-settlements/rail-settlements.modul
 import { PanelRolesModule } from './panel-roles/panel-roles.module';
 import { WidgetModule } from './widget/widget.module';
 import { GlModule } from './gl/gl.module';
+import { RealtimeModule } from './realtime/realtime.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
+    EventEmitterModule.forRoot(),
     I18nModule.forRoot({
       fallbackLanguage: 'en',
       loaderOptions: {
@@ -111,6 +114,7 @@ import { GlModule } from './gl/gl.module';
     PanelRolesModule,
     WidgetModule,
     GlModule,
+    RealtimeModule,
   ],
 })
 export class AppModule {}

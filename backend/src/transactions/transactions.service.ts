@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { I18nService } from 'nestjs-i18n';
 import { DataSource, EntityManager, In, LessThan, Repository } from 'typeorm';
 import { Wallet } from '../wallets/entities/wallet.entity';
@@ -49,6 +50,12 @@ import {
 } from '../rail-settlements/entities/rail-settlement.entity';
 import { LedgerService, WalletLegInput } from '../gl/ledger.service';
 import { GlAccountCode } from '../gl/entities/gl-account.entity';
+import {
+  RealtimeEvent,
+  SettlementActivityEvent,
+  TransactionCreatedEvent,
+  TransactionStatusChangedEvent,
+} from '../realtime/events';
 
 export interface MoneyResult {
   transactionId: string;
@@ -95,7 +102,60 @@ export class TransactionsService {
     @InjectRepository(Transaction)
     private readonly transactionsRepository: Repository<Transaction>,
     private readonly i18n: I18nService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
+
+  // Best-effort — re-fetches the row after its owning DB transaction has
+  // committed, so the live feed always reflects the final, durable state
+  // rather than an in-flight one. Never lets a lookup/emit failure surface
+  // to the caller, since this is a monitoring side-channel, not part of the
+  // actual money-movement flow.
+  private async emitTransactionCreated(
+    transactionId: string,
+    action: string,
+  ): Promise<void> {
+    try {
+      const transaction = await this.transactionsRepository.findOneBy({
+        id: transactionId,
+      });
+      if (!transaction) return;
+      const event: TransactionCreatedEvent = {
+        id: transaction.id,
+        type: transaction.type,
+        status: transaction.status,
+        action,
+        fromWalletId: transaction.fromWalletId,
+        toWalletId: transaction.toWalletId,
+        amount: transaction.amount,
+        createdAt: transaction.createdAt.toISOString(),
+      };
+      this.eventEmitter.emit(RealtimeEvent.TRANSACTION_CREATED, event);
+    } catch {
+      // best-effort, see comment above
+    }
+  }
+
+  private async emitTransactionStatusChanged(
+    transactionId: string,
+    reason?: string,
+  ): Promise<void> {
+    try {
+      const transaction = await this.transactionsRepository.findOneBy({
+        id: transactionId,
+      });
+      if (!transaction) return;
+      const event: TransactionStatusChangedEvent = {
+        id: transaction.id,
+        type: transaction.type,
+        status: transaction.status,
+        reason,
+        updatedAt: new Date().toISOString(),
+      };
+      this.eventEmitter.emit(RealtimeEvent.TRANSACTION_STATUS_CHANGED, event);
+    } catch {
+      // best-effort, see comment above
+    }
+  }
 
   // Step 1 of the two-phase, IPG-style deposit: creates a PENDING ledger row
   // with no balance change yet, then asks ZarinPal — a real payment gateway,
@@ -886,7 +946,10 @@ export class TransactionsService {
       const subRepositoryRef =
         await this.walletsService.getByIdUnscoped(subRepositoryId);
       routedLegs.push({
-        wallet: { id: subRepositoryRef.id, walletType: subRepositoryRef.walletType },
+        wallet: {
+          id: subRepositoryRef.id,
+          walletType: subRepositoryRef.walletType,
+        },
         amount,
       });
     }
@@ -958,7 +1021,10 @@ export class TransactionsService {
       zarinpalAmount,
       [
         {
-          wallet: { id: repositoryRef.id, walletType: repositoryRef.walletType },
+          wallet: {
+            id: repositoryRef.id,
+            walletType: repositoryRef.walletType,
+          },
           amount: toRepository,
         },
         ...routedLegs,
@@ -1106,10 +1172,8 @@ export class TransactionsService {
         );
         const routedTotal = fee + penalty + unblockFee - unrouted;
 
-        const currentRepositoryBalance = await this.ledgerService.getWalletBalance(
-          manager,
-          repository.id,
-        );
+        const currentRepositoryBalance =
+          await this.ledgerService.getWalletBalance(manager, repository.id);
         const newRepositoryBalance = currentRepositoryBalance - routedTotal;
         if (newRepositoryBalance < 0n) {
           throw new UnprocessableEntityException(
@@ -1146,7 +1210,10 @@ export class TransactionsService {
             'Overdue debt absorbed by repository',
             [
               {
-                wallet: { id: repositoryRef.id, walletType: repositoryRef.walletType },
+                wallet: {
+                  id: repositoryRef.id,
+                  walletType: repositoryRef.walletType,
+                },
                 amount: routedTotal,
               },
             ],
@@ -1282,10 +1349,8 @@ export class TransactionsService {
         );
         const routedTotal = fee + penalty - unrouted;
 
-        const currentRepositoryBalance = await this.ledgerService.getWalletBalance(
-          manager,
-          repository.id,
-        );
+        const currentRepositoryBalance =
+          await this.ledgerService.getWalletBalance(manager, repository.id);
         const newRepositoryBalance = currentRepositoryBalance - routedTotal;
         if (newRepositoryBalance < 0n) {
           throw new UnprocessableEntityException(
@@ -1319,7 +1384,10 @@ export class TransactionsService {
             'Offboarding debt absorbed by repository',
             [
               {
-                wallet: { id: repositoryRef.id, walletType: repositoryRef.walletType },
+                wallet: {
+                  id: repositoryRef.id,
+                  walletType: repositoryRef.walletType,
+                },
                 amount: routedTotal,
               },
             ],
@@ -1710,7 +1778,7 @@ export class TransactionsService {
   // at attach-wallet time (itself gated by phone+OTP), and the IPG's own
   // verify call is one-time-use, so an early or duplicate call is harmless.
   async verifyPurchase(transactionId: string): Promise<PurchaseVerifyResult> {
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const transaction = await manager
         .createQueryBuilder(Transaction, 't')
         .setLock('pessimistic_write')
@@ -1903,6 +1971,9 @@ export class TransactionsService {
 
       return { transactionId: transaction.id, status: transaction.status };
     });
+
+    void this.emitTransactionStatusChanged(result.transactionId, result.reason);
+    return result;
   }
 
   // Completes a PURCHASE from a CREDIT wallet, funding it with real money
@@ -1967,7 +2038,10 @@ export class TransactionsService {
         supportWallet.id,
       );
       supportDebitLeg = {
-        wallet: { id: supportWalletRef.id, walletType: supportWalletRef.walletType },
+        wallet: {
+          id: supportWalletRef.id,
+          walletType: supportWalletRef.walletType,
+        },
         amount,
       };
       const supportTransfer = manager.create(Transaction, {
@@ -2006,10 +2080,8 @@ export class TransactionsService {
         manager,
         fromWallet.repositoryWalletId!,
       );
-      const currentRepositoryBalance = await this.ledgerService.getWalletBalance(
-        manager,
-        repository.id,
-      );
+      const currentRepositoryBalance =
+        await this.ledgerService.getWalletBalance(manager, repository.id);
       if (currentRepositoryBalance - remainder < 0n) {
         throw new UnprocessableEntityException(
           'The backing repository does not have enough real balance to fund this purchase',
@@ -2063,7 +2135,8 @@ export class TransactionsService {
       manager,
       fromWallet.id,
     );
-    const newFromBalance = currentFromBalance + externallyFunded - purchaseAmount;
+    const newFromBalance =
+      currentFromBalance + externallyFunded - purchaseAmount;
     if (newFromBalance < floor) {
       transaction.status = TransactionStatus.REVERSED;
       await manager.save(transaction);
@@ -2086,7 +2159,10 @@ export class TransactionsService {
           )
         : [
             {
-              wallet: { id: fromWalletRef.id, walletType: fromWalletRef.walletType },
+              wallet: {
+                id: fromWalletRef.id,
+                walletType: fromWalletRef.walletType,
+              },
               amount: purchaseAmount,
             },
           ];
@@ -2100,7 +2176,10 @@ export class TransactionsService {
       debitLegs,
       [
         {
-          wallet: { id: merchantWalletRef.id, walletType: merchantWalletRef.walletType },
+          wallet: {
+            id: merchantWalletRef.id,
+            walletType: merchantWalletRef.walletType,
+          },
           amount: purchaseAmount,
         },
       ],
@@ -2313,21 +2392,19 @@ export class TransactionsService {
         const merchantFloor = merchantWalletRef.walletType.allowNegativeBalance
           ? -BigInt(merchantWalletRef.walletType.creditLimit ?? '0')
           : 0n;
-        const currentMerchantBalance = await this.ledgerService.getWalletBalance(
-          manager,
-          merchantWallet.id,
-        );
-        const newMerchantBalance = currentMerchantBalance - BigInt(original.amount);
+        const currentMerchantBalance =
+          await this.ledgerService.getWalletBalance(manager, merchantWallet.id);
+        const newMerchantBalance =
+          currentMerchantBalance - BigInt(original.amount);
         if (newMerchantBalance < merchantFloor) {
           throw new UnprocessableEntityException(
             "Merchant's balance is too low to refund this purchase",
           );
         }
-        const currentCustomerBalance = await this.ledgerService.getWalletBalance(
-          manager,
-          customerWallet.id,
-        );
-        const newCustomerBalance = currentCustomerBalance + customerCreditAmount;
+        const currentCustomerBalance =
+          await this.ledgerService.getWalletBalance(manager, customerWallet.id);
+        const newCustomerBalance =
+          currentCustomerBalance + customerCreditAmount;
 
         // Which real wallets get the merchant's refund credited to — the
         // customer's own credit-wallet type directly for the genuinely
@@ -2341,7 +2418,10 @@ export class TransactionsService {
         const creditLegs: { wallet: WalletLegInput; amount: bigint }[] = [];
         if (customerCreditAmount > 0n) {
           creditLegs.push({
-            wallet: { id: customerWalletRef.id, walletType: customerWalletRef.walletType },
+            wallet: {
+              id: customerWalletRef.id,
+              walletType: customerWalletRef.walletType,
+            },
             amount: customerCreditAmount,
           });
         }
@@ -2355,7 +2435,10 @@ export class TransactionsService {
             repository.id,
           );
           creditLegs.push({
-            wallet: { id: repositoryRef.id, walletType: repositoryRef.walletType },
+            wallet: {
+              id: repositoryRef.id,
+              walletType: repositoryRef.walletType,
+            },
             amount: repositoryAmount,
           });
           const restoredVirtual =
@@ -2447,13 +2530,16 @@ export class TransactionsService {
   // verified it before the timeout — no balance to unwind, since nothing
   // moves until /verify succeeds.
   async expirePendingPurchase(transactionId: string): Promise<void> {
-    await this.transactionsRepository
+    const result = await this.transactionsRepository
       .createQueryBuilder()
       .update(Transaction)
       .set({ status: TransactionStatus.REVERSED })
       .where('id = :transactionId', { transactionId })
       .andWhere('status = :pending', { pending: TransactionStatus.PENDING })
       .execute();
+    if (result.affected) {
+      void this.emitTransactionStatusChanged(transactionId, 'expired');
+    }
   }
 
   // Public/unauthenticated, same reasoning as verifyPurchase: the customer
@@ -2477,6 +2563,7 @@ export class TransactionsService {
         this.i18n.t('transactions.PENDING_PURCHASE_NOT_FOUND'),
       );
     }
+    void this.emitTransactionStatusChanged(transactionId, 'cancelled');
   }
 
   // Merchant wallet auto-withdraw sweep. System-triggered (the scheduler),
@@ -2506,160 +2593,178 @@ export class TransactionsService {
   // WITHDRAW still carries the actual ledger movement, exactly as it does
   // for a non-rail wallet.
   async sweepAutoWithdraw(walletId: string): Promise<Transaction[]> {
-    return this.dataSource.transaction(async (manager) => {
-      const created: Transaction[] = [];
-      const wallet = await this.walletsService.lockById(manager, walletId);
-      const balance = await this.ledgerService.getWalletBalance(
-        manager,
-        wallet.id,
-      );
-      if (balance <= 0n) {
-        return created;
-      }
-      const walletRef = await this.walletsService.getByIdUnscoped(walletId);
-
-      const now = new Date();
-      const minuteKey = now.toISOString().slice(0, 16);
-      const keyPrefix = wallet.railType
-        ? `rail-settlement:${wallet.railType.toLowerCase()}`
-        : 'auto-withdraw';
-      const walletDefaults = await this.settlementService.findForWallet(
-        manager,
-        wallet.id,
-      );
-
-      // Returns which GL account the withdrawal's cash leg should land in —
-      // BANK_CASH outright for a wallet with no rail configured (the legacy
-      // autoWithdrawTimes-only path has no provider to model a failure for),
-      // or based on the mocked rail provider's synchronous outcome
-      // otherwise. See withdraw()'s own postCashMovement call for the same
-      // reasoning.
-      const recordRailSettlement = async (
-        transaction: Transaction,
-        amount: string,
-        destinationIban: string | null,
-        label: string | null,
-      ): Promise<GlAccountCode.BANK_CASH | GlAccountCode.SETTLEMENT_CLEARING> => {
-        if (!wallet.railType) return GlAccountCode.BANK_CASH;
-        const settlement = await this.railSettlementsService.createForSweep(
+    const createdWithdrawals = await this.dataSource.transaction(
+      async (manager) => {
+        const created: Transaction[] = [];
+        const wallet = await this.walletsService.lockById(manager, walletId);
+        const balance = await this.ledgerService.getWalletBalance(
           manager,
-          {
-            walletId: wallet.id,
-            railType: wallet.railType,
-            amount,
-            destinationIban,
-            label,
-            transactionId: transaction.id,
-            scheduledFor: now,
-          },
+          wallet.id,
         );
-        await manager.update(Transaction, transaction.id, {
-          railSettlementId: settlement.id,
-        });
-        return settlement.status === RailSettlementStatus.COMPLETED
-          ? GlAccountCode.BANK_CASH
-          : GlAccountCode.SETTLEMENT_CLEARING;
-      };
-
-      const unsettledPurchases = await manager
-        .createQueryBuilder(Transaction, 't')
-        .setLock('pessimistic_write')
-        .where('t."toWalletId" = :walletId', { walletId: wallet.id })
-        .andWhere('t.type = :type', { type: TransactionType.PURCHASE })
-        .andWhere('t.status = :status', {
-          status: TransactionStatus.COMPLETED,
-        })
-        .andWhere('t."settledAt" IS NULL')
-        .getMany();
-
-      const overridesByPurchase =
-        await this.settlementService.findForTransactions(
-          manager,
-          unsettledPurchases.map((purchase) => purchase.id),
-        );
-      const splitModeActive =
-        walletDefaults.length > 0 || overridesByPurchase.size > 0;
-
-      if (!splitModeActive) {
-        const transaction = manager.create(Transaction, {
-          type: TransactionType.WITHDRAW,
-          fromWalletId: wallet.id,
-          toWalletId: null,
-          amount: balance.toString(),
-          idempotencyKey: `${keyPrefix}:${wallet.id}:${minuteKey}`,
-        });
-        await manager.save(transaction);
-        const cashAccount = await recordRailSettlement(
-          transaction,
-          balance.toString(),
-          null,
-          null,
-        );
-        await this.ledgerService.postCashMovement(
-          manager,
-          transaction.id,
-          'Auto-withdraw sweep',
-          { id: walletRef.id, walletType: walletRef.walletType },
-          -balance,
-          cashAccount,
-        );
-        created.push(transaction);
-        return created;
-      }
-
-      let remainingBalance = balance;
-
-      for (const purchase of unsettledPurchases) {
-        const splitRows =
-          overridesByPurchase.get(purchase.id) ?? walletDefaults;
-
-        const amounts = splitRows.length
-          ? this.settlementService.computeAmounts(splitRows, purchase.amount)
-          : [{ iban: null, label: null, amount: BigInt(purchase.amount) }];
-
-        const total = amounts.reduce((sum, item) => sum + item.amount, 0n);
-        // Defensive only — every purchase's amount was already added to this
-        // wallet's balance at verify time, so this should never trip.
-        if (total > remainingBalance) {
-          continue;
+        if (balance <= 0n) {
+          return created;
         }
-        remainingBalance -= total;
+        const walletRef = await this.walletsService.getByIdUnscoped(walletId);
 
-        for (const [index, item] of amounts.entries()) {
-          const withdrawal = manager.create(Transaction, {
+        const now = new Date();
+        const minuteKey = now.toISOString().slice(0, 16);
+        const keyPrefix = wallet.railType
+          ? `rail-settlement:${wallet.railType.toLowerCase()}`
+          : 'auto-withdraw';
+        const walletDefaults = await this.settlementService.findForWallet(
+          manager,
+          wallet.id,
+        );
+
+        // Returns which GL account the withdrawal's cash leg should land in —
+        // BANK_CASH outright for a wallet with no rail configured (the legacy
+        // autoWithdrawTimes-only path has no provider to model a failure for),
+        // or based on the mocked rail provider's synchronous outcome
+        // otherwise. See withdraw()'s own postCashMovement call for the same
+        // reasoning.
+        const recordRailSettlement = async (
+          transaction: Transaction,
+          amount: string,
+          destinationIban: string | null,
+          label: string | null,
+        ): Promise<
+          GlAccountCode.BANK_CASH | GlAccountCode.SETTLEMENT_CLEARING
+        > => {
+          if (!wallet.railType) return GlAccountCode.BANK_CASH;
+          const settlement = await this.railSettlementsService.createForSweep(
+            manager,
+            {
+              walletId: wallet.id,
+              railType: wallet.railType,
+              amount,
+              destinationIban,
+              label,
+              transactionId: transaction.id,
+              scheduledFor: now,
+            },
+          );
+          await manager.update(Transaction, transaction.id, {
+            railSettlementId: settlement.id,
+          });
+          return settlement.status === RailSettlementStatus.COMPLETED
+            ? GlAccountCode.BANK_CASH
+            : GlAccountCode.SETTLEMENT_CLEARING;
+        };
+
+        const unsettledPurchases = await manager
+          .createQueryBuilder(Transaction, 't')
+          .setLock('pessimistic_write')
+          .where('t."toWalletId" = :walletId', { walletId: wallet.id })
+          .andWhere('t.type = :type', { type: TransactionType.PURCHASE })
+          .andWhere('t.status = :status', {
+            status: TransactionStatus.COMPLETED,
+          })
+          .andWhere('t."settledAt" IS NULL')
+          .getMany();
+
+        const overridesByPurchase =
+          await this.settlementService.findForTransactions(
+            manager,
+            unsettledPurchases.map((purchase) => purchase.id),
+          );
+        const splitModeActive =
+          walletDefaults.length > 0 || overridesByPurchase.size > 0;
+
+        if (!splitModeActive) {
+          const transaction = manager.create(Transaction, {
             type: TransactionType.WITHDRAW,
             fromWalletId: wallet.id,
             toWalletId: null,
-            amount: item.amount.toString(),
-            idempotencyKey: `${keyPrefix}:${wallet.id}:${purchase.id}:${index}:${minuteKey}`,
-            relatedTransactionId: purchase.id,
-            destinationIban: item.iban,
-            note: item.label,
+            amount: balance.toString(),
+            idempotencyKey: `${keyPrefix}:${wallet.id}:${minuteKey}`,
           });
-          await manager.save(withdrawal);
+          await manager.save(transaction);
           const cashAccount = await recordRailSettlement(
-            withdrawal,
-            item.amount.toString(),
-            item.iban,
-            item.label,
+            transaction,
+            balance.toString(),
+            null,
+            null,
           );
           await this.ledgerService.postCashMovement(
             manager,
-            withdrawal.id,
-            'Auto-withdraw settlement',
+            transaction.id,
+            'Auto-withdraw sweep',
             { id: walletRef.id, walletType: walletRef.walletType },
-            -item.amount,
+            -balance,
             cashAccount,
           );
-          created.push(withdrawal);
+          created.push(transaction);
+          return created;
         }
 
-        purchase.settledAt = new Date();
-        await manager.save(purchase);
-      }
+        let remainingBalance = balance;
 
-      return created;
-    });
+        for (const purchase of unsettledPurchases) {
+          const splitRows =
+            overridesByPurchase.get(purchase.id) ?? walletDefaults;
+
+          const amounts = splitRows.length
+            ? this.settlementService.computeAmounts(splitRows, purchase.amount)
+            : [{ iban: null, label: null, amount: BigInt(purchase.amount) }];
+
+          const total = amounts.reduce((sum, item) => sum + item.amount, 0n);
+          // Defensive only — every purchase's amount was already added to this
+          // wallet's balance at verify time, so this should never trip.
+          if (total > remainingBalance) {
+            continue;
+          }
+          remainingBalance -= total;
+
+          for (const [index, item] of amounts.entries()) {
+            const withdrawal = manager.create(Transaction, {
+              type: TransactionType.WITHDRAW,
+              fromWalletId: wallet.id,
+              toWalletId: null,
+              amount: item.amount.toString(),
+              idempotencyKey: `${keyPrefix}:${wallet.id}:${purchase.id}:${index}:${minuteKey}`,
+              relatedTransactionId: purchase.id,
+              destinationIban: item.iban,
+              note: item.label,
+            });
+            await manager.save(withdrawal);
+            const cashAccount = await recordRailSettlement(
+              withdrawal,
+              item.amount.toString(),
+              item.iban,
+              item.label,
+            );
+            await this.ledgerService.postCashMovement(
+              manager,
+              withdrawal.id,
+              'Auto-withdraw settlement',
+              { id: walletRef.id, walletType: walletRef.walletType },
+              -item.amount,
+              cashAccount,
+            );
+            created.push(withdrawal);
+          }
+
+          purchase.settledAt = new Date();
+          await manager.save(purchase);
+        }
+
+        return created;
+      },
+    );
+
+    if (createdWithdrawals.length > 0) {
+      const walletRef = await this.walletsService.getByIdUnscoped(walletId);
+      const event: SettlementActivityEvent = {
+        walletId,
+        railType: walletRef.railType,
+        transactionIds: createdWithdrawals.map((t) => t.id),
+        currentTime: new Date().toISOString(),
+        at: new Date().toISOString(),
+      };
+      this.eventEmitter.emit(RealtimeEvent.SETTLEMENT_ACTIVITY, event);
+    }
+
+    return createdWithdrawals;
   }
 
   // A repository-backed CREDIT wallet's own balance/floor mechanics are
@@ -2906,10 +3011,16 @@ export class TransactionsService {
       idempotencyKey: transaction.idempotencyKey,
       createdAt: transaction.createdAt,
       fromWallet: fromWallet
-        ? serializeWallet(fromWallet, (balances.get(fromWallet.id) ?? 0n).toString())
+        ? serializeWallet(
+            fromWallet,
+            (balances.get(fromWallet.id) ?? 0n).toString(),
+          )
         : null,
       toWallet: toWallet
-        ? serializeWallet(toWallet, (balances.get(toWallet.id) ?? 0n).toString())
+        ? serializeWallet(
+            toWallet,
+            (balances.get(toWallet.id) ?? 0n).toString(),
+          )
         : null,
       direction: ownsFrom && ownsTo ? 'BOTH' : ownsFrom ? 'OUT' : 'IN',
       status: transaction.status,
@@ -3028,6 +3139,7 @@ export class TransactionsService {
       );
     }
 
+    let replayed = false;
     try {
       const result = await this.dataSource.transaction(async (manager) => {
         const claim = await this.idempotencyService.claim(manager, {
@@ -3037,6 +3149,7 @@ export class TransactionsService {
           payload,
         });
         if (claim.replay) {
+          replayed = true;
           return claim.responseBody as unknown as T;
         }
 
@@ -3056,6 +3169,12 @@ export class TransactionsService {
         userId,
         metadata: { ...payload },
       });
+
+      const resultTransactionId = (result as { transactionId?: string })
+        ?.transactionId;
+      if (!replayed && resultTransactionId) {
+        void this.emitTransactionCreated(resultTransactionId, action);
+      }
 
       return result;
     } catch (error) {

@@ -20,6 +20,7 @@ export const ADMIN_SECTIONS = [
   'roles',
   'offboarding',
   'generalLedger',
+  'liveActivity',
 ] as const;
 
 export type AdminSection = (typeof ADMIN_SECTIONS)[number];

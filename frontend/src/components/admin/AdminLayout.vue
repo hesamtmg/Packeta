@@ -101,6 +101,12 @@ const allNavItems = computed<NavItem[]>(() => [
     label: t('adminNav.generalLedger'),
     icon: 'M4 5a2 2 0 012-2h12a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V5zM8 8h8M8 12h8M8 16h5',
   },
+  {
+    name: 'admin-live-activity',
+    section: 'liveActivity',
+    label: t('adminNav.liveActivity'),
+    icon: 'M3 12h4l3 8 4-16 3 8h4',
+  },
 ]);
 
 const navItems = computed(() =>
