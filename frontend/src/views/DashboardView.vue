@@ -3,9 +3,10 @@ import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useWalletStore, type Wallet, type WalletOptionsInput, type SettlementRailType } from '../stores/wallet';
 import { useAuthStore } from '../stores/auth';
-import { apiRequest, ApiError } from '../api/client';
+import { apiRequest, ApiError, API_URL } from '../api/client';
 import { amountStep, formatAmount, formatAmountWords, toMinorUnits, type CurrencyInfo } from '../utils/currency';
 import { formatDateTime } from '../utils/date';
+import { cardGradient } from '../utils/cardTheme';
 import { transactionTypeClass, transactionStatusClass } from '../types/admin';
 import { walletDisplayName } from '../utils/wallet-name';
 import { useListControls } from '../composables/useListControls';
@@ -178,17 +179,17 @@ function walletLabel(w: Wallet): string {
   return `${walletDisplayName(w)} (${w.walletType.currency.code}) — ${formatAmount(w.balance, w.walletType.currency)}`;
 }
 
-// Item: give each wallet a payment-card look — a deterministic gradient
-// theme (by wallet type, so the same type always reads the same color)
-// and a masked-number-style echo of its id, the way a bank app shows the
-// last 4 digits of a card instead of the full PAN.
-const CARD_THEMES = ['card-theme-indigo', 'card-theme-violet', 'card-theme-teal', 'card-theme-amber', 'card-theme-rose'];
-function cardTheme(w: Wallet): string {
-  if (w.closedAt) return 'card-theme-closed';
-  const key = w.walletType.code || w.id;
-  let hash = 0;
-  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
-  return CARD_THEMES[hash % CARD_THEMES.length];
+// Item: give each wallet a payment-card look — the gradient an admin
+// picked for its wallet type (or a deterministic hash-based default, see
+// utils/cardTheme.ts) and a masked-number-style echo of its id, the way a
+// bank app shows the last 4 digits of a card instead of the full PAN.
+function cardFaceStyle(w: Wallet): { background: string } {
+  return { background: cardGradient(w.walletType, !!w.closedAt) };
+}
+function cardImageSrc(w: Wallet): string | null {
+  return w.walletType.cardImageFilename
+    ? `${API_URL}/uploads/wallet-type-cards/${w.walletType.cardImageFilename}`
+    : null;
 }
 function maskedWalletId(w: Wallet): string {
   const clean = w.id.replace(/-/g, '').toUpperCase();
@@ -765,7 +766,7 @@ async function onGrantCredit() {
           >
             <div
               class="card-face"
-              :class="cardTheme(w)"
+              :style="cardFaceStyle(w)"
               role="button"
               tabindex="0"
               @click="stackPinned = true"
@@ -779,7 +780,8 @@ async function onGrantCredit() {
               <div class="card-face-number">{{ maskedWalletId(w) }}</div>
               <div class="card-face-bottom">
                 <span class="card-face-name">{{ walletDisplayName(w) }}</span>
-                <span class="card-brand-mark" aria-hidden="true"><i /><i /></span>
+                <img v-if="cardImageSrc(w)" :src="cardImageSrc(w)!" class="card-brand-image" alt="" />
+                <span v-else class="card-brand-mark" aria-hidden="true"><i /><i /></span>
               </div>
             </div>
 
@@ -1583,13 +1585,6 @@ async function onGrantCredit() {
   background: radial-gradient(circle, rgba(255, 255, 255, 0.18), transparent 70%);
   pointer-events: none;
 }
-.card-theme-indigo { background: linear-gradient(120deg, #4f7cf6 0%, #6d5df0 55%, #b565f3 100%); }
-.card-theme-violet { background: linear-gradient(120deg, #8b5cf6 0%, #d946ef 55%, #f472b6 100%); }
-.card-theme-teal { background: linear-gradient(120deg, #14b8a6 0%, #22c55e 55%, #eab308 100%); }
-.card-theme-amber { background: linear-gradient(120deg, #f97316 0%, #fbbf24 100%); }
-.card-theme-rose { background: linear-gradient(120deg, #fb7185 0%, #f472b6 55%, #fbbf24 100%); }
-.card-theme-closed { background: linear-gradient(120deg, #94a3b8 0%, #64748b 100%); }
-
 .card-face-top {
   position: relative;
   display: flex;
@@ -1632,6 +1627,13 @@ async function onGrantCredit() {
 .card-brand-mark i + i {
   margin-inline-start: -10px;
   background: rgba(255, 255, 255, 0.9);
+}
+.card-brand-image {
+  flex: none;
+  height: 28px;
+  max-width: 64px;
+  width: auto;
+  object-fit: contain;
 }
 
 .card-face-balance {

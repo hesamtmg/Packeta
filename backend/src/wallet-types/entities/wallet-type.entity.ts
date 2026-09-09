@@ -37,6 +37,19 @@ export enum WalletTypeCode {
   MERCHANT_REPOSITORY = 'MERCHANT_REPOSITORY',
 }
 
+// Must match the keys in frontend/src/utils/cardTheme.ts's
+// CARD_THEME_OPTIONS exactly — that file is the single source of truth for
+// what each key actually renders as (the gradient CSS), this array only
+// exists so the backend can validate cardColor against the same set.
+export const CARD_COLOR_PRESETS = [
+  'indigo',
+  'violet',
+  'teal',
+  'amber',
+  'rose',
+] as const;
+export type CardColorPreset = (typeof CARD_COLOR_PRESETS)[number];
+
 // Each row is the "law" governing a wallet type: whether it can go negative
 // (and how far), whether it can be cashed out, and whether it can send/receive
 // peer-to-peer transfers. Balance floor enforcement lives in a DB trigger
@@ -205,6 +218,20 @@ export class WalletType {
   // default — a merchant has to deliberately opt into the weaker guarantee.
   @Column({ type: 'boolean', default: true })
   widgetRequiresOtp: boolean;
+
+  // Card appearance a customer's wallet dashboard renders for every wallet
+  // of this type. cardColor is a preset key from the frontend's
+  // CARD_THEME_OPTIONS palette (validated against that same list in the
+  // DTOs) — null falls back to a deterministic hash of `code` so every
+  // type still gets a consistent-looking color before an admin picks one.
+  // cardImageFilename is an uploaded logo (see WalletTypesController's
+  // card-image endpoints) shown in place of the generic brand mark; null
+  // keeps that generic mark.
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  cardColor: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  cardImageFilename: string | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

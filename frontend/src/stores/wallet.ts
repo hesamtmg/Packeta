@@ -7,6 +7,11 @@ export interface WalletType {
   code: string;
   name: string;
   currency: CurrencyInfo;
+  // Card appearance (see utils/cardTheme.ts) — both null until an admin
+  // sets them on this wallet type, at which point every wallet of this
+  // type picks them up automatically.
+  cardColor: string | null;
+  cardImageFilename: string | null;
   allowNegativeBalance: boolean;
   creditLimit: string | null;
   allowWithdraw: boolean;

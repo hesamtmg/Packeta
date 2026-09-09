@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { apiRequest, ApiError } from '../../api/client';
+import { apiRequest, ApiError, API_URL, postMultipart } from '../../api/client';
 import { amountStep, toMinorUnits, type CurrencyInfo } from '../../utils/currency';
+import { CARD_THEME_OPTIONS } from '../../utils/cardTheme';
 import { useAuthStore } from '../../stores/auth';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
 
@@ -14,6 +15,11 @@ interface WalletType {
   code: string;
   name: string;
   currency: CurrencyInfo;
+  // Card appearance every wallet of this type's dashboard card picks up
+  // automatically (see frontend/src/utils/cardTheme.ts) — both null until
+  // set here.
+  cardColor: string | null;
+  cardImageFilename: string | null;
   allowNegativeBalance: boolean;
   creditLimit: string | null;
   allowWithdraw: boolean;
@@ -120,6 +126,7 @@ const newType = reactive({
   code: '',
   name: '',
   currencyCode: '',
+  cardColor: '',
   allowNegativeBalance: false,
   creditLimit: '',
   allowWithdraw: true,
@@ -219,6 +226,7 @@ async function save(type: WalletType) {
       method: 'PATCH',
       body: {
         name: type.name,
+        cardColor: type.cardColor ?? '',
         allowNegativeBalance: type.allowNegativeBalance,
         creditLimit: type.allowNegativeBalance
           ? Number(type.creditLimit ?? 0)
@@ -286,6 +294,51 @@ async function remove(type: WalletType) {
   }
 }
 
+function cardImageSrc(type: WalletType): string | null {
+  return type.cardImageFilename
+    ? `${API_URL}/uploads/wallet-type-cards/${type.cardImageFilename}`
+    : null;
+}
+
+const cardImageFiles = reactive<Record<string, File | undefined>>({});
+const cardImageBusy = ref<string | null>(null);
+
+function onCardImageSelected(type: WalletType, event: Event) {
+  cardImageFiles[type.id] = (event.target as HTMLInputElement).files?.[0];
+}
+
+async function uploadCardImage(type: WalletType) {
+  const file = cardImageFiles[type.id];
+  if (!file) return;
+  error.value = '';
+  cardImageBusy.value = type.id;
+  try {
+    const result = await postMultipart<{ cardImageFilename: string }>(
+      `/wallet-types/${type.id}/card-image`,
+      { image: file },
+    );
+    type.cardImageFilename = result.cardImageFilename;
+    cardImageFiles[type.id] = undefined;
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : t('admin.walletTypes.cardImageUploadFailed');
+  } finally {
+    cardImageBusy.value = null;
+  }
+}
+
+async function removeCardImage(type: WalletType) {
+  error.value = '';
+  cardImageBusy.value = type.id;
+  try {
+    await apiRequest(`/wallet-types/${type.id}/card-image`, { method: 'DELETE' });
+    type.cardImageFilename = null;
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : t('admin.walletTypes.cardImageUploadFailed');
+  } finally {
+    cardImageBusy.value = null;
+  }
+}
+
 async function createType() {
   error.value = '';
   busy.value = true;
@@ -297,6 +350,7 @@ async function createType() {
         code: newType.code.toUpperCase(),
         name: newType.name,
         currencyCode: newType.currencyCode,
+        cardColor: newType.cardColor || undefined,
         allowNegativeBalance: newType.allowNegativeBalance,
         creditLimit:
           newType.allowNegativeBalance && currency
@@ -360,6 +414,7 @@ async function createType() {
     newType.code = '';
     newType.name = '';
     newType.currencyCode = '';
+    newType.cardColor = '';
     newType.allowNegativeBalance = false;
     newType.creditLimit = '';
     newType.allowWithdraw = true;
@@ -444,6 +499,57 @@ loadTypes();
           <label class="checkbox-label"><input v-model="wt.allowWidget" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.allowWidgetLabel') }}</label>
           <label v-if="wt.allowWidget" class="checkbox-label"><input v-model="wt.widgetRequiresOtp" type="checkbox" :disabled="!auth.isSuperAdmin" /> {{ t('admin.walletTypes.widgetRequiresOtpLabel') }}</label>
 
+          <span class="section-label">{{ t('admin.walletTypes.cardAppearanceHeading') }}</span>
+          <span class="hint">{{ t('admin.walletTypes.cardColorHint') }}</span>
+          <div class="swatch-row">
+            <button
+              type="button"
+              class="swatch swatch-auto"
+              :class="{ selected: !wt.cardColor }"
+              :disabled="!auth.isSuperAdmin"
+              :title="t('admin.walletTypes.cardColorAuto')"
+              @click="wt.cardColor = null"
+            >
+              {{ t('admin.walletTypes.cardColorAuto') }}
+            </button>
+            <button
+              v-for="opt in CARD_THEME_OPTIONS"
+              :key="opt.key"
+              type="button"
+              class="swatch"
+              :class="{ selected: wt.cardColor === opt.key }"
+              :style="{ background: opt.gradient }"
+              :disabled="!auth.isSuperAdmin"
+              :title="opt.label"
+              @click="wt.cardColor = opt.key"
+            />
+          </div>
+          <div class="card-image-row">
+            <img v-if="cardImageSrc(wt)" :src="cardImageSrc(wt)!" class="card-image-preview" :alt="t('admin.walletTypes.cardImageLabel')" />
+            <div v-if="auth.isSuperAdmin" class="card-image-controls">
+              <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" @change="onCardImageSelected(wt, $event)" />
+              <div class="card-image-buttons">
+                <button
+                  type="button"
+                  class="admin-btn admin-btn-ghost"
+                  :disabled="!cardImageFiles[wt.id] || cardImageBusy === wt.id"
+                  @click="uploadCardImage(wt)"
+                >
+                  {{ t('admin.walletTypes.cardImageUpload') }}
+                </button>
+                <button
+                  v-if="wt.cardImageFilename"
+                  type="button"
+                  class="admin-btn admin-btn-ghost"
+                  :disabled="cardImageBusy === wt.id"
+                  @click="removeCardImage(wt)"
+                >
+                  {{ t('admin.walletTypes.cardImageRemove') }}
+                </button>
+              </div>
+            </div>
+          </div>
+
           <span class="section-label">{{ t('admin.walletTypes.creditLineHeading') }}</span>
           <label class="checkbox-label">
             <input v-model="wt.enableCreditLine" type="checkbox" :disabled="!auth.isSuperAdmin" />
@@ -526,6 +632,29 @@ loadTypes();
           </option>
         </select>
       </label>
+      <span class="hint">{{ t('admin.walletTypes.cardColorHint') }}</span>
+      <div class="swatch-row">
+        <button
+          type="button"
+          class="swatch swatch-auto"
+          :class="{ selected: !newType.cardColor }"
+          :title="t('admin.walletTypes.cardColorAuto')"
+          @click="newType.cardColor = ''"
+        >
+          {{ t('admin.walletTypes.cardColorAuto') }}
+        </button>
+        <button
+          v-for="opt in CARD_THEME_OPTIONS"
+          :key="opt.key"
+          type="button"
+          class="swatch"
+          :class="{ selected: newType.cardColor === opt.key }"
+          :style="{ background: opt.gradient }"
+          :title="opt.label"
+          @click="newType.cardColor = opt.key"
+        />
+      </div>
+      <span class="hint">{{ t('admin.walletTypes.cardImageAfterCreateHint') }}</span>
       <label class="checkbox-label">
         <input v-model="newType.allowNegativeBalance" type="checkbox" />
         {{ t('admin.walletTypes.allowNegativeLabel') }}
@@ -679,5 +808,66 @@ loadTypes();
   gap: 4px;
   font-size: 0.85rem;
   color: var(--text-dim);
+}
+.swatch-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.swatch {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+.swatch.selected {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px var(--card-bg);
+}
+.swatch:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.swatch-auto {
+  width: auto;
+  border-radius: 999px;
+  padding: 0 10px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  background: var(--panel-bg);
+  color: var(--text-dim);
+  border: 2px solid var(--card-border);
+}
+.swatch-auto.selected {
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+.card-image-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.card-image-preview {
+  height: 32px;
+  width: auto;
+  max-width: 80px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+.card-image-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.card-image-controls input[type='file'] {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+.card-image-buttons {
+  display: flex;
+  gap: 8px;
 }
 </style>

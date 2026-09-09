@@ -1,5 +1,6 @@
 import {
   IsBoolean,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -9,6 +10,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
+import { CARD_COLOR_PRESETS } from '../entities/wallet-type.entity';
 
 export class CreateWalletTypeDto {
   @IsString()
@@ -22,6 +24,13 @@ export class CreateWalletTypeDto {
 
   @IsString()
   currencyCode: string;
+
+  // A preset key from the card-color palette every wallet of this type's
+  // dashboard card uses (see WalletType.cardColor) — omit to fall back to
+  // the deterministic hash-based default.
+  @IsOptional()
+  @IsIn(CARD_COLOR_PRESETS)
+  cardColor?: string;
 
   @IsBoolean()
   allowNegativeBalance: boolean;
