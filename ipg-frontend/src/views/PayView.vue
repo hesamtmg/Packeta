@@ -3,8 +3,9 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import { apiRequest, ApiError } from '../api/client';
-import { packetaRequest } from '../api/packetaClient';
+import { packetaRequest, PACKETA_API_URL } from '../api/packetaClient';
 import { formatAmount, formatAmountWords, type CurrencyInfo } from '../utils/currency';
+import { cardGradient } from '../utils/cardTheme';
 import { setLocale } from '../i18n';
 
 interface PaymentInfo {
@@ -46,7 +47,15 @@ interface EligibleWallet {
     name: string;
     code: string;
     currency: CurrencyInfo;
+    cardColor: string | null;
+    cardImageFilename: string | null;
   };
+}
+
+function cardImageSrc(walletType: { cardImageFilename: string | null }): string | null {
+  return walletType.cardImageFilename
+    ? `${PACKETA_API_URL}/uploads/wallet-type-cards/${walletType.cardImageFilename}`
+    : null;
 }
 
 const route = useRoute();
@@ -174,6 +183,8 @@ const activeCard = computed(() => {
         selectedWallet.value.walletType.currency,
         locale.value === 'fa' ? 'fa' : 'en',
       ),
+      background: cardGradient(selectedWallet.value.walletType, false),
+      logoSrc: cardImageSrc(selectedWallet.value.walletType),
     };
   }
   return {
@@ -183,6 +194,8 @@ const activeCard = computed(() => {
     subLabel: t('card.amount'),
     subValue: merchantSummary.value.displayAmount,
     subWords: merchantSummary.value.displayAmountWords,
+    background: undefined as string | undefined,
+    logoSrc: null as string | null,
   };
 });
 
@@ -662,10 +675,12 @@ onUnmounted(() => {
               type="button"
               class="paycard"
               :class="{ selected: selectedWalletId === w.id }"
+              :style="{ background: cardGradient(w.walletType, false) }"
               @click="selectWallet(w.id)"
             >
               <div class="paycard-top">
-                <span class="paycard-chip" aria-hidden="true">
+                <img v-if="cardImageSrc(w.walletType)" :src="cardImageSrc(w.walletType)!" class="paycard-logo" alt="" />
+                <span v-else class="paycard-chip" aria-hidden="true">
                   <svg viewBox="0 0 32 24" fill="none"><rect x="1" y="1" width="30" height="22" rx="4" fill="currentColor" opacity="0.9"/><path d="M1 9h30M1 15h30M11 1v22M21 1v22" stroke="#fff" stroke-width="1"/></svg>
                 </span>
                 <span class="paycard-top-right">
@@ -694,10 +709,12 @@ onUnmounted(() => {
         <div
           v-else-if="step !== 'loading' && step !== 'phone' && step !== 'otp'"
           class="paycard paycard-static"
+          :style="activeCard.background ? { background: activeCard.background } : undefined"
           aria-hidden="false"
         >
           <div class="paycard-top">
-            <span class="paycard-chip" aria-hidden="true">
+            <img v-if="activeCard.logoSrc" :src="activeCard.logoSrc" class="paycard-logo" alt="" />
+            <span v-else class="paycard-chip" aria-hidden="true">
               <svg viewBox="0 0 32 24" fill="none"><rect x="1" y="1" width="30" height="22" rx="4" fill="currentColor" opacity="0.9"/><path d="M1 9h30M1 15h30M11 1v22M21 1v22" stroke="#fff" stroke-width="1"/></svg>
             </span>
             <span class="paycard-top-right">
@@ -1150,6 +1167,13 @@ button.paycard.selected {
 .paycard-contactless svg {
   width: 100%;
   height: 100%;
+}
+.paycard-logo {
+  height: 26px;
+  max-width: 72px;
+  width: auto;
+  object-fit: contain;
+  flex: none;
 }
 .paycard-contactless {
   width: 22px;

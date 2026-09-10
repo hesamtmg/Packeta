@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { ApiError } from '../api/client';
-import { packetaRequest } from '../api/packetaClient';
+import { packetaRequest, PACKETA_API_URL } from '../api/packetaClient';
 import {
   amountStep,
   formatAmount,
@@ -11,6 +11,7 @@ import {
   type CurrencyInfo,
 } from '../utils/currency';
 import { formatCalendarDate, formatDateTime } from '../utils/date';
+import { cardGradient } from '../utils/cardTheme';
 
 interface WidgetStatus {
   merchantName: string;
@@ -30,7 +31,15 @@ interface WidgetWallet {
     code: string;
     currency: CurrencyInfo;
     depositable: boolean;
+    cardColor: string | null;
+    cardImageFilename: string | null;
   };
+}
+
+function cardImageSrc(walletType: { cardImageFilename: string | null }): string | null {
+  return walletType.cardImageFilename
+    ? `${PACKETA_API_URL}/uploads/wallet-type-cards/${walletType.cardImageFilename}`
+    : null;
 }
 
 interface WidgetTransaction {
@@ -491,9 +500,10 @@ onMounted(async () => {
           <p v-if="!wallets.length" class="status">{{ t('widget.wallets.none') }}</p>
           <div v-else class="wallet-list">
             <div v-for="w in wallets" :key="w.id" class="paycard-wrap">
-              <div class="paycard">
+              <div class="paycard" :style="{ background: cardGradient(w.walletType, false) }">
                 <div class="paycard-top">
-                  <span class="paycard-chip" aria-hidden="true">
+                  <img v-if="cardImageSrc(w.walletType)" :src="cardImageSrc(w.walletType)!" class="paycard-logo" alt="" />
+                  <span v-else class="paycard-chip" aria-hidden="true">
                     <svg viewBox="0 0 32 24" fill="none"><rect x="1" y="1" width="30" height="22" rx="4" fill="currentColor" opacity="0.9"/><path d="M1 9h30M1 15h30M11 1v22M21 1v22" stroke="#fff" stroke-width="1"/></svg>
                   </span>
                   <span class="paycard-brand">{{ t('brand') }}</span>
@@ -888,6 +898,13 @@ onMounted(async () => {
   width: 28px;
   height: 20px;
   color: rgba(255, 255, 255, 0.85);
+}
+.paycard-logo {
+  height: 22px;
+  max-width: 60px;
+  width: auto;
+  object-fit: contain;
+  flex: none;
 }
 .paycard-chip svg {
   width: 100%;
