@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
+import LandingView from '../views/LandingView.vue';
 import LoginView from '../views/LoginView.vue';
 import SignupView from '../views/SignupView.vue';
 import DashboardView from '../views/DashboardView.vue';
@@ -27,10 +28,18 @@ import AdminLiveActivityView from '../views/admin/AdminLiveActivityView.vue';
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    {
+      // Public marketing page. Authenticated visitors are bounced straight
+      // to their dashboard in the guard below, so this only ever renders
+      // for a logged-out visitor.
+      path: '/',
+      name: 'landing',
+      component: LandingView,
+    },
     { path: '/login', name: 'login', component: LoginView },
     { path: '/signup', name: 'signup', component: SignupView },
     {
-      path: '/',
+      path: '/dashboard',
       name: 'dashboard',
       component: DashboardView,
       meta: { requiresAuth: true },
@@ -169,6 +178,9 @@ const router = createRouter({
 
 router.beforeEach((to) => {
   const auth = useAuthStore();
+  if (to.name === 'landing' && auth.isAuthenticated) {
+    return { name: 'dashboard' };
+  }
   if (to.meta.requiresAuth && !auth.isAuthenticated) {
     return { name: 'login' };
   }
