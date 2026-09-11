@@ -46,6 +46,8 @@ const featureCards = [
   { icon: 'globe', key: 'locale', accent: 'orange' },
 ] as const;
 
+const apiEndpoints = ['signup', 'wallets', 'deposit', 'withdraw', 'transfer', 'charge'] as const;
+
 const adminItems = [
   'dashboard',
   'transactions',
@@ -77,6 +79,7 @@ const adminItems = [
           <a href="#features">{{ t('landing.nav.features') }}</a>
           <a href="#accounting">{{ t('landing.nav.accounting') }}</a>
           <a href="#payments">{{ t('landing.nav.payments') }}</a>
+          <a href="#api">{{ t('landing.nav.api') }}</a>
           <a href="#security">{{ t('landing.nav.security') }}</a>
         </nav>
         <div class="landing-nav-actions">
@@ -373,6 +376,51 @@ const adminItems = [
         data-currency="IRR"&gt;
   Pay with Packeta
 &lt;/button&gt;</code></pre>
+      </div>
+    </section>
+
+    <!-- Developer API -->
+    <section id="api" class="section deep-dive reverse accent-band-blue">
+      <div class="deep-dive-copy">
+        <span class="eyebrow">{{ t('landing.api.eyebrow') }}</span>
+        <h2>{{ t('landing.api.title') }}</h2>
+        <p>{{ t('landing.api.body') }}</p>
+        <ul class="point-list">
+          <li>
+            <strong>{{ t('landing.api.point1.title') }}</strong>
+            <span>{{ t('landing.api.point1.desc') }}</span>
+          </li>
+          <li>
+            <strong>{{ t('landing.api.point2.title') }}</strong>
+            <span>{{ t('landing.api.point2.desc') }}</span>
+          </li>
+          <li>
+            <strong>{{ t('landing.api.point3.title') }}</strong>
+            <span>{{ t('landing.api.point3.desc') }}</span>
+          </li>
+        </ul>
+      </div>
+      <div class="deep-dive-visual api-visual-stack">
+        <div class="admin-card code-mock" dir="ltr">
+          <div class="code-dots"><i /><i /><i /></div>
+          <pre><code>POST /transactions/purchase/charge
+Authorization: Bearer &lt;token&gt;
+Idempotency-Key: 8f14e45f-ceea-4c67-9c1a
+
+{
+  "amount": 250000,
+  "currencyCode": "IRR"
+}
+
+&rarr; { "transactionId", "redirectUrl", "expiresAt" }</code></pre>
+        </div>
+        <div class="admin-card api-endpoint-list">
+          <div v-for="ep in apiEndpoints" :key="ep" class="api-endpoint-row">
+            <span class="api-method" :class="`method-${t(`landing.api.endpoints.${ep}.method`)}`">{{ t(`landing.api.endpoints.${ep}.method`) }}</span>
+            <code class="api-path" dir="ltr">{{ t(`landing.api.endpoints.${ep}.path`) }}</code>
+            <span class="api-desc">{{ t(`landing.api.endpoints.${ep}.desc`) }}</span>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -950,6 +998,55 @@ const adminItems = [
   align-self: center;
   color: var(--text-dimmer);
   font-size: 1.2rem;
+}
+
+/* API visual */
+.api-visual-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.api-endpoint-list {
+  padding: 8px 20px;
+}
+.api-endpoint-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--card-border);
+  flex-wrap: wrap;
+}
+.api-endpoint-row:last-child {
+  border-bottom: none;
+}
+.api-method {
+  flex-shrink: 0;
+  width: 46px;
+  text-align: center;
+  border-radius: 6px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 3px 0;
+  color: #fff;
+}
+.method-GET {
+  background: var(--accent-blue);
+}
+.method-POST {
+  background: var(--accent-lime);
+}
+.api-path {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.8rem;
+  color: var(--text);
+  flex-shrink: 0;
+}
+.api-desc {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  flex: 1;
+  min-width: 140px;
 }
 
 /* Code mock */
