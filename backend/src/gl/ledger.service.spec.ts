@@ -30,6 +30,7 @@ const SEEDED_ACCOUNTS: GlAccount[] = [
   account(GlAccountCode.FEE_REVENUE, GlAccountType.REVENUE),
   account(GlAccountCode.LEDGER_ADJUSTMENTS, GlAccountType.EQUITY),
   account(GlAccountCode.REPOSITORY_ALLOCATIONS, GlAccountType.EQUITY),
+  account(GlAccountCode.REPOSITORY_FUNDS, GlAccountType.LIABILITY),
 ];
 
 function buildManager(
@@ -165,6 +166,63 @@ describe('LedgerService', () => {
     expect(
       service.walletAccountCode(walletType({ allowNegativeBalance: true })),
     ).toBe(GlAccountCode.CREDIT_RECEIVABLE);
+  });
+
+  it('maps REPOSITORY to REPOSITORY_FUNDS and MERCHANT_REPOSITORY to FEE_REVENUE', () => {
+    const service = new LedgerService(new EventEmitter2());
+    expect(
+      service.walletAccountCode(walletType({ code: 'REPOSITORY' as any })),
+    ).toBe(GlAccountCode.REPOSITORY_FUNDS);
+    expect(
+      service.walletAccountCode(
+        walletType({ code: 'MERCHANT_REPOSITORY' as any }),
+      ),
+    ).toBe(GlAccountCode.FEE_REVENUE);
+  });
+
+  it('an installment repayment credits REPOSITORY_FUNDS for the principal and FEE_REVENUE for the fee slice', async () => {
+    const service = new LedgerService(new EventEmitter2());
+    const { manager, savedPostings } = buildManager();
+    const repository = wallet(walletType({ code: 'REPOSITORY' as any }));
+    const feeRepository = wallet(
+      walletType({ code: 'MERCHANT_REPOSITORY' as any }),
+    );
+
+    await service.postCashInMultiLeg(
+      manager as any,
+      'tx-1',
+      'Installment repayment',
+      GlAccountCode.BANK_CASH,
+      USD_ID,
+      110n,
+      [
+        { wallet: repository, amount: 100n },
+        { wallet: feeRepository, amount: 10n },
+      ],
+    );
+
+    const byAccount = (code: GlAccountCode) =>
+      savedPostings.find((p) => p.accountId === `account-${code}-${USD_ID}`);
+    expect(byAccount(GlAccountCode.BANK_CASH)).toMatchObject({
+      direction: GlPostingDirection.DEBIT,
+      amount: '110',
+    });
+    expect(byAccount(GlAccountCode.REPOSITORY_FUNDS)).toMatchObject({
+      direction: GlPostingDirection.CREDIT,
+      amount: '100',
+      walletId: repository.id,
+    });
+    expect(byAccount(GlAccountCode.FEE_REVENUE)).toMatchObject({
+      direction: GlPostingDirection.CREDIT,
+      amount: '10',
+      walletId: feeRepository.id,
+    });
+    expect(
+      savedPostings.some(
+        (p) =>
+          p.accountId === `account-${GlAccountCode.CUSTOMER_WALLETS}-${USD_ID}`,
+      ),
+    ).toBe(false);
   });
 
   it('postCashMovement on a deposit debits cash and credits the wallet-mapped account', async () => {

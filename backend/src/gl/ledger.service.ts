@@ -4,7 +4,10 @@ import { EntityManager } from 'typeorm';
 import { GlAccount, GlAccountCode } from './entities/gl-account.entity';
 import { GlJournalEntry } from './entities/gl-journal-entry.entity';
 import { GlPosting, GlPostingDirection } from './entities/gl-posting.entity';
-import { WalletType } from '../wallet-types/entities/wallet-type.entity';
+import {
+  WalletType,
+  WalletTypeCode,
+} from '../wallet-types/entities/wallet-type.entity';
 import {
   GlPostingCreatedEvent,
   RealtimeEvent,
@@ -16,17 +19,18 @@ export interface LedgerLeg {
   currencyId: string;
   direction: GlPostingDirection;
   amount: bigint;
-  // Only set for a leg against a wallet-mapped account (CUSTOMER_WALLETS or
-  // CREDIT_RECEIVABLE) — which specific wallet it belongs to, so
+  // Only set for a leg against a wallet-mapped account (CUSTOMER_WALLETS,
+  // CREDIT_RECEIVABLE, REPOSITORY_FUNDS, or FEE_REVENUE for a
+  // MERCHANT_REPOSITORY wallet) — which specific wallet it belongs to, so
   // getWalletBalance can find it later. Null for a leg against a non-wallet
-  // account (BANK_CASH, SETTLEMENT_CLEARING, FEE_REVENUE,
-  // LEDGER_ADJUSTMENTS, REPOSITORY_ALLOCATIONS).
+  // account (BANK_CASH, SETTLEMENT_CLEARING, LEDGER_ADJUSTMENTS,
+  // REPOSITORY_ALLOCATIONS).
   walletId: string | null;
 }
 
 // A wallet-mapped leg needs both which wallet it's for (to tag the
-// posting) and that wallet's type (to pick CUSTOMER_WALLETS vs
-// CREDIT_RECEIVABLE and its currency) — every caller already has both from
+// posting) and that wallet's type (to pick its GL account — see
+// walletAccountCode — and its currency) — every caller already has both from
 // the same Wallet row, so this is just those two fields rather than the
 // whole entity.
 export interface WalletLegInput {
@@ -61,6 +65,12 @@ export class LedgerService {
   constructor(private readonly eventEmitter: EventEmitter2) {}
 
   walletAccountCode(walletType: WalletType): GlAccountCode {
+    if (walletType.code === WalletTypeCode.MERCHANT_REPOSITORY) {
+      return GlAccountCode.FEE_REVENUE;
+    }
+    if (walletType.code === WalletTypeCode.REPOSITORY) {
+      return GlAccountCode.REPOSITORY_FUNDS;
+    }
     return walletType.allowNegativeBalance
       ? GlAccountCode.CREDIT_RECEIVABLE
       : GlAccountCode.CUSTOMER_WALLETS;
