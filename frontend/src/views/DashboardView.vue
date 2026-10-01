@@ -1523,7 +1523,7 @@ async function onGrantCredit() {
 .wallet-stack {
   display: flex;
   flex-direction: column;
-  max-width: 440px;
+  max-width: 340px;
 }
 .wallet-card {
   position: relative;
@@ -1534,7 +1534,7 @@ async function onGrantCredit() {
    one before it by a fixed fraction of the (fluid) card width, leaving a
    proportional sliver visible no matter the viewport size. */
 .wallet-stack:not(.expanded) .wallet-card:not(:first-child) {
-  margin-top: -50%;
+  margin-top: -52%;
 }
 .wallet-stack.expanded .wallet-card:not(:first-child) {
   margin-top: 14px;
@@ -1574,16 +1574,16 @@ async function onGrantCredit() {
 .card-face {
   position: relative;
   width: 100%;
-  aspect-ratio: 1.95 / 1;
-  border-radius: 22px;
-  padding: 18px 22px;
+  aspect-ratio: 1.586 / 1; /* ISO/IEC 7810 ID-1 bank-card ratio */
+  border-radius: 14px;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   color: #fff;
   overflow: hidden;
   cursor: pointer;
-  box-shadow: 0 16px 32px -18px rgba(20, 30, 70, 0.55);
+  box-shadow: 0 10px 22px -14px rgba(20, 30, 70, 0.5);
   transition: transform 200ms ease, box-shadow 200ms ease;
   font-family: inherit;
   border: none;
@@ -1609,8 +1609,8 @@ async function onGrantCredit() {
   justify-content: space-between;
 }
 .card-face-chip {
-  width: 34px;
-  height: 24px;
+  width: 28px;
+  height: 20px;
   color: rgba(255, 255, 255, 0.85);
   flex: none;
 }
@@ -1621,33 +1621,33 @@ async function onGrantCredit() {
 }
 .card-face-logo {
   flex: none;
-  height: 26px;
-  max-width: 72px;
+  height: 20px;
+  max-width: 56px;
   width: auto;
   object-fit: contain;
 }
 .card-face-top-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 .card-face-contactless {
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   color: rgba(255, 255, 255, 0.85);
   flex: none;
 }
 .card-face-brand {
-  font-size: 0.72rem;
+  font-size: 0.65rem;
   font-weight: 800;
   letter-spacing: 0.04em;
   color: rgba(255, 255, 255, 0.85);
 }
 .card-face-number {
   position: relative;
-  font-size: 1.05rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   font-variant-numeric: tabular-nums;
   direction: ltr;
   text-align: start;
@@ -1663,7 +1663,7 @@ async function onGrantCredit() {
   display: flex;
   flex: 1 1 0;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
 }
 .card-face-field-right {
@@ -1671,14 +1671,14 @@ async function onGrantCredit() {
   text-align: end;
 }
 .card-face-label {
-  font-size: 0.62rem;
+  font-size: 0.55rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: rgba(255, 255, 255, 0.65);
 }
 .card-face-value {
-  font-size: 0.85rem;
-  font-weight: 700;
+  font-size: 0.75rem;
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1720,12 +1720,12 @@ async function onGrantCredit() {
 
 @media (max-width: 420px) {
   .card-face {
-    padding: 14px 16px;
-    border-radius: 14px;
+    padding: 12px 14px;
+    border-radius: 12px;
   }
   .card-face-number {
-    font-size: 0.9rem;
-    letter-spacing: 0.05em;
+    font-size: 0.82rem;
+    letter-spacing: 0.06em;
   }
 }
 
