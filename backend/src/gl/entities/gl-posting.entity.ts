@@ -28,7 +28,8 @@ export class GlPosting {
   accountId: string;
 
   // Which wallet this posting's amount belongs to — set for every
-  // CUSTOMER_WALLETS/CREDIT_RECEIVABLE leg (including a repository
+  // wallet-mapped leg (CUSTOMER_WALLETS, CREDIT_RECEIVABLE, REPOSITORY_FUNDS,
+  // or FEE_REVENUE for a MERCHANT_REPOSITORY wallet — including a repository
   // allocation mirror leg, itself tagged with the wallet it mirrors, not
   // the repository), null for a leg against a non-wallet account like
   // BANK_CASH or REPOSITORY_ALLOCATIONS. LedgerService.getWalletBalance

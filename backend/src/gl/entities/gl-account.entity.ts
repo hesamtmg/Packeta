@@ -32,9 +32,9 @@ export enum GlAccountCode {
   // in place today, whose payout the provider reported as failed) — sits
   // here instead of BANK_CASH until reconciled.
   SETTLEMENT_CLEARING = 'SETTLEMENT_CLEARING',
-  // Fee revenue recognized on a purchase/withdrawal fee. Seeded now, not
-  // posted to yet — there's no fee field in the code today, this is ready
-  // for when one ships.
+  // Fee revenue. Wallets of type MERCHANT_REPOSITORY (which receive an
+  // installment repayment's fee/penalty/unblock-fee slices) post here — see
+  // LedgerService.walletAccountCode.
   FEE_REVENUE = 'FEE_REVENUE',
   // Counterparty for admin ADJUSTMENT postings — a manual balance
   // correction isn't backed by a real cash movement, so it has to hit
@@ -48,6 +48,11 @@ export enum GlAccountCode {
   // keep the entry balanced. Purely a bookkeeping bridge with no
   // independent real-world meaning of its own.
   REPOSITORY_ALLOCATIONS = 'REPOSITORY_ALLOCATIONS',
+  // What Packeta owes repository holders in aggregate — the real money a
+  // REPOSITORY wallet holds. Same shape as CUSTOMER_WALLETS (a liability),
+  // kept separate so repository money shows up on its own in the trial
+  // balance; an installment's principal returns here when repaid.
+  REPOSITORY_FUNDS = 'REPOSITORY_FUNDS',
 }
 
 export enum GlAccountType {
