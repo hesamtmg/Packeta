@@ -45,19 +45,18 @@ export interface WalletLegInput {
 // transaction), so a posting can never exist without the balance change
 // that produced it, or vice versa.
 //
-// Which GL account a wallet maps to depends on its type's law
-// (allowNegativeBalance), not on the Transaction's type — a CREDIT wallet's
-// balance is a receivable (asset) from Packeta's point of view, everything
-// else is a liability. With accounts chosen this way, a single rule covers
-// both: a wallet balance *increase* is always a CREDIT to its mapped
-// account, and a *decrease* is always a DEBIT — for a liability that's the
-// standard "credit increases it" rule, and for the receivable it holds too,
-// because a CREDIT wallet's balance moving down means more is owed to
-// Packeta, i.e. the receivable (an asset) is increasing, which is also
-// recorded as a debit. getWalletBalance relies on this same rule running in
-// reverse: summing CREDIT postings as positive and DEBIT as negative, for a
-// given wallet, always reproduces its balance — there's no stored
-// wallets.balance column anymore.
+// Which GL account a wallet maps to depends on its type's code (see
+// walletAccountCode) — REPOSITORY, MERCHANT_REPOSITORY, or the default
+// CUSTOMER_WALLETS. All are accounts where a wallet balance *increase* is a
+// CREDIT and a *decrease* is a DEBIT, so getWalletBalance can sum CREDIT
+// postings as positive and DEBIT as negative, for a given wallet, to
+// reproduce its balance — there's no stored wallets.balance column anymore.
+//
+// Wallets never go negative. A credit wallet's virtual amount (its credit
+// line) is tracked separately, as a CREDIT_RECEIVABLE asset tagged with the
+// credit wallet: DEBITed when the line is drawn on and CREDITed when the
+// principal is repaid or written off (see postCreditReceivable and
+// getWalletReceivable). Those postings are excluded from getWalletBalance.
 @Injectable()
 export class LedgerService {
   private readonly accountCache = new Map<string, GlAccount>();
@@ -71,9 +70,7 @@ export class LedgerService {
     if (walletType.code === WalletTypeCode.REPOSITORY) {
       return GlAccountCode.REPOSITORY_FUNDS;
     }
-    return walletType.allowNegativeBalance
-      ? GlAccountCode.CREDIT_RECEIVABLE
-      : GlAccountCode.CUSTOMER_WALLETS;
+    return GlAccountCode.CUSTOMER_WALLETS;
   }
 
   // delta > 0 (balance went up) -> CREDIT the wallet's mapped account;
@@ -140,9 +137,16 @@ export class LedgerService {
     const result = new Map<string, bigint>();
     if (walletIds.length === 0) return result;
 
+    // CREDIT_RECEIVABLE postings are tagged with their credit wallet too, but
+    // they track what it owes (see getWalletReceivable), not what it holds,
+    // so they are left out of its balance.
     const rows = await manager
       .createQueryBuilder(GlPosting, 'posting')
+      .innerJoin(GlAccount, 'account', 'account.id = posting.accountId')
       .where('posting.walletId IN (:...walletIds)', { walletIds })
+      .andWhere('account.code != :receivable', {
+        receivable: GlAccountCode.CREDIT_RECEIVABLE,
+      })
       .select('posting.walletId', 'walletId')
       .addSelect(
         `SUM(CASE WHEN posting.direction = 'CREDIT' THEN posting.amount ELSE -posting.amount END)`,
@@ -155,6 +159,29 @@ export class LedgerService {
       result.set(row.walletId, BigInt(row.net));
     }
     return result;
+  }
+
+  // What a credit wallet currently owes: every virtual-amount draw on it
+  // (DEBIT CREDIT_RECEIVABLE) minus every repayment or write-off of that
+  // principal (CREDIT CREDIT_RECEIVABLE). The reverse sign convention of
+  // getWalletBalance, because this is an asset account.
+  async getWalletReceivable(
+    manager: EntityManager,
+    walletId: string,
+  ): Promise<bigint> {
+    const row = await manager
+      .createQueryBuilder(GlPosting, 'posting')
+      .innerJoin(GlAccount, 'account', 'account.id = posting.accountId')
+      .where('posting.walletId = :walletId', { walletId })
+      .andWhere('account.code = :receivable', {
+        receivable: GlAccountCode.CREDIT_RECEIVABLE,
+      })
+      .select(
+        `SUM(CASE WHEN posting.direction = 'DEBIT' THEN posting.amount ELSE -posting.amount END)`,
+        'net',
+      )
+      .getRawOne<{ net: string | null }>();
+    return BigInt(row?.net ?? '0');
   }
 
   // Inserts a balanced journal entry. Throws if the legs don't net to zero
@@ -252,8 +279,10 @@ export class LedgerService {
     };
     this.eventEmitter.emit(RealtimeEvent.GL_POSTING_CREATED, glPostingCreated);
 
-    for (const { leg } of legsWithAccounts) {
+    for (const { leg, account } of legsWithAccounts) {
       if (!leg.walletId) continue;
+      // A receivable leg moves what the wallet owes, not its balance.
+      if (account.code === GlAccountCode.CREDIT_RECEIVABLE) continue;
       const signedDelta =
         leg.direction === GlPostingDirection.CREDIT ? leg.amount : -leg.amount;
       const walletBalanceChanged: WalletBalanceChangedEvent = {
@@ -476,6 +505,50 @@ export class LedgerService {
       transactionId,
       description,
       legs: [walletLeg, plugLeg],
+    });
+  }
+
+  // A credit wallet's virtual amount (its credit line) as a receivable: a
+  // positive delta is a draw on the line (money lent out), a negative one is
+  // principal coming back — repaid, or written off when the repository
+  // absorbs the debt. Only the repository funds the real money (posted
+  // separately), so this is a bookkeeping entry against the
+  // REPOSITORY_ALLOCATIONS plug, tagged with the credit wallet so
+  // getWalletReceivable can find it. A no-op when delta is zero.
+  async postCreditReceivable(
+    manager: EntityManager,
+    transactionId: string,
+    description: string,
+    wallet: WalletLegInput,
+    delta: bigint,
+  ): Promise<GlJournalEntry | null> {
+    if (delta === 0n) return null;
+    const receivableDirection =
+      delta > 0n ? GlPostingDirection.DEBIT : GlPostingDirection.CREDIT;
+    const amount = delta < 0n ? -delta : delta;
+    const currencyId = wallet.walletType.currencyId;
+    return this.postEntry(manager, {
+      transactionId,
+      description,
+      legs: [
+        {
+          code: GlAccountCode.CREDIT_RECEIVABLE,
+          currencyId,
+          direction: receivableDirection,
+          amount,
+          walletId: wallet.id,
+        },
+        {
+          code: GlAccountCode.REPOSITORY_ALLOCATIONS,
+          currencyId,
+          direction:
+            receivableDirection === GlPostingDirection.DEBIT
+              ? GlPostingDirection.CREDIT
+              : GlPostingDirection.DEBIT,
+          amount,
+          walletId: null,
+        },
+      ],
     });
   }
 }

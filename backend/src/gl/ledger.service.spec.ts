@@ -74,9 +74,32 @@ function buildManager(
       const allPostings = [...existingPostings, ...savedPostings];
       const qb: any = {
         _walletIds: [] as string[],
-        where(_expr: string, params: { walletIds: string[] }) {
-          qb._walletIds = params.walletIds;
+        _excludedCode: null as string | null,
+        _onlyCode: null as string | null,
+        innerJoin() {
           return qb;
+        },
+        where(_expr: string, params: { walletIds?: string[]; walletId?: string }) {
+          qb._walletIds = params.walletIds ?? [params.walletId as string];
+          return qb;
+        },
+        andWhere(expr: string, params: { receivable: string }) {
+          if (expr.includes('!=')) qb._excludedCode = params.receivable;
+          else qb._onlyCode = params.receivable;
+          return qb;
+        },
+        async getRawOne() {
+          let net = 0n;
+          for (const posting of allPostings) {
+            if (posting.walletId !== qb._walletIds[0]) continue;
+            const code = accounts.find((a) => a.id === posting.accountId)?.code;
+            if (qb._onlyCode && code !== qb._onlyCode) continue;
+            net +=
+              posting.direction === GlPostingDirection.DEBIT
+                ? BigInt(posting.amount)
+                : -BigInt(posting.amount);
+          }
+          return { net: net.toString() };
         },
         select() {
           return qb;
@@ -91,6 +114,13 @@ function buildManager(
           const byWallet = new Map<string, bigint>();
           for (const posting of allPostings) {
             if (!posting.walletId || !qb._walletIds.includes(posting.walletId)) {
+              continue;
+            }
+            if (
+              qb._excludedCode &&
+              accounts.find((a) => a.id === posting.accountId)?.code ===
+                qb._excludedCode
+            ) {
               continue;
             }
             const signed =
@@ -158,14 +188,14 @@ function wallet(type: WalletType, id?: string): WalletLegInput {
 }
 
 describe('LedgerService', () => {
-  it('maps a normal wallet type to CUSTOMER_WALLETS and a credit-line type to CREDIT_RECEIVABLE', () => {
+  it('maps a normal wallet type (including CREDIT) to CUSTOMER_WALLETS', () => {
     const service = new LedgerService(new EventEmitter2());
     expect(service.walletAccountCode(walletType())).toBe(
       GlAccountCode.CUSTOMER_WALLETS,
     );
     expect(
-      service.walletAccountCode(walletType({ allowNegativeBalance: true })),
-    ).toBe(GlAccountCode.CREDIT_RECEIVABLE);
+      service.walletAccountCode(walletType({ code: 'CREDIT' as any })),
+    ).toBe(GlAccountCode.CUSTOMER_WALLETS);
   });
 
   it('maps REPOSITORY to REPOSITORY_FUNDS and MERCHANT_REPOSITORY to FEE_REVENUE', () => {
@@ -323,52 +353,86 @@ describe('LedgerService', () => {
     expect(totalCredit).toBe(400n);
   });
 
-  it('a repayment into a CREDIT wallet credits (shrinks) CREDIT_RECEIVABLE rather than CUSTOMER_WALLETS', async () => {
+  it('postCreditReceivable on a draw debits CREDIT_RECEIVABLE (tagged with the wallet) against REPOSITORY_ALLOCATIONS', async () => {
     const service = new LedgerService(new EventEmitter2());
     const { manager, savedPostings } = buildManager();
 
-    await service.postCashMovement(
+    await service.postCreditReceivable(
       manager as any,
       'tx-1',
-      'Installment repayment',
-      wallet(walletType({ allowNegativeBalance: true })),
-      300n,
-      GlAccountCode.BANK_CASH,
-    );
-
-    const receivableLeg = savedPostings.find(
-      (p) =>
-        p.accountId === `account-${GlAccountCode.CREDIT_RECEIVABLE}-${USD_ID}`,
-    );
-    expect(receivableLeg).toMatchObject({
-      direction: GlPostingDirection.CREDIT,
-      amount: '300',
-    });
-  });
-
-  it('a draw against a CREDIT wallet debits (grows) CREDIT_RECEIVABLE', async () => {
-    const service = new LedgerService(new EventEmitter2());
-    const { manager, savedPostings } = buildManager();
-
-    await service.postWalletToWallet(
-      manager as any,
-      'tx-1',
-      'Credit-funded purchase',
-      wallet(walletType({ allowNegativeBalance: true })),
-      wallet(walletType()),
+      'Credit line drawn',
+      wallet(walletType({ code: 'CREDIT' as any }), 'credit-wallet-1'),
       200n,
     );
 
-    const receivableLeg = savedPostings.find(
-      (p) =>
-        p.accountId === `account-${GlAccountCode.CREDIT_RECEIVABLE}-${USD_ID}`,
+    expect(savedPostings).toHaveLength(2);
+    expect(
+      savedPostings.find(
+        (p) =>
+          p.accountId ===
+          `account-${GlAccountCode.CREDIT_RECEIVABLE}-${USD_ID}`,
+      ),
+    ).toMatchObject({
+      direction: GlPostingDirection.DEBIT,
+      amount: '200',
+      walletId: 'credit-wallet-1',
+    });
+    expect(
+      savedPostings.find(
+        (p) =>
+          p.accountId ===
+          `account-${GlAccountCode.REPOSITORY_ALLOCATIONS}-${USD_ID}`,
+      ),
+    ).toMatchObject({
+      direction: GlPostingDirection.CREDIT,
+      amount: '200',
+      walletId: null,
+    });
+  });
+
+  it('postCreditReceivable on a repayment credits CREDIT_RECEIVABLE, and is a no-op for zero', async () => {
+    const service = new LedgerService(new EventEmitter2());
+    const { manager, savedPostings } = buildManager();
+    const creditWallet = wallet(walletType({ code: 'CREDIT' as any }));
+
+    await service.postCreditReceivable(
+      manager as any,
+      'tx-1',
+      'Principal repaid',
+      creditWallet,
+      -150n,
     );
-    const walletLeg = savedPostings.find(
-      (p) =>
-        p.accountId === `account-${GlAccountCode.CUSTOMER_WALLETS}-${USD_ID}`,
-    );
-    expect(receivableLeg).toMatchObject({ direction: GlPostingDirection.DEBIT });
-    expect(walletLeg).toMatchObject({ direction: GlPostingDirection.CREDIT });
+    expect(
+      savedPostings.find(
+        (p) =>
+          p.accountId ===
+          `account-${GlAccountCode.CREDIT_RECEIVABLE}-${USD_ID}`,
+      ),
+    ).toMatchObject({ direction: GlPostingDirection.CREDIT, amount: '150' });
+
+    const before = savedPostings.length;
+    expect(
+      await service.postCreditReceivable(
+        manager as any,
+        'tx-2',
+        'No-op',
+        creditWallet,
+        0n,
+      ),
+    ).toBeNull();
+    expect(savedPostings).toHaveLength(before);
+  });
+
+  it('getWalletReceivable is draws minus repayments and getWalletBalance ignores receivable postings', async () => {
+    const service = new LedgerService(new EventEmitter2());
+    const { manager } = buildManager();
+    const creditWallet = wallet(walletType({ code: 'CREDIT' as any }), 'cw');
+
+    await service.postCreditReceivable(manager as any, 't1', 'draw', creditWallet, 500n);
+    await service.postCreditReceivable(manager as any, 't2', 'repay', creditWallet, -200n);
+
+    expect(await service.getWalletReceivable(manager as any, 'cw')).toBe(300n);
+    expect(await service.getWalletBalance(manager as any, 'cw')).toBe(0n);
   });
 
   it('postAdjustment posts the opposite leg to LEDGER_ADJUSTMENTS', async () => {
@@ -604,7 +668,7 @@ describe('LedgerService', () => {
       manager as any,
       'tx-1',
       'Withdraw mirror',
-      wallet(walletType({ allowNegativeBalance: true }), 'credit-wallet-1'),
+      wallet(walletType({ code: 'CREDIT' as any }), 'credit-wallet-1'),
       -200n,
     );
 

@@ -4,6 +4,7 @@ import { Installment } from './entities/installment.entity';
 import { Wallet } from '../wallets/entities/wallet.entity';
 import { Transaction } from '../transactions/entities/transaction.entity';
 import { LoggingModule } from '../logging/logging.module';
+import { GlModule } from '../gl/gl.module';
 import { InstallmentsService } from './installments.service';
 import { InstallmentsController } from './installments.controller';
 
@@ -11,6 +12,7 @@ import { InstallmentsController } from './installments.controller';
   imports: [
     TypeOrmModule.forFeature([Installment, Wallet, Transaction]),
     LoggingModule,
+    GlModule,
   ],
   controllers: [InstallmentsController],
   providers: [InstallmentsService],

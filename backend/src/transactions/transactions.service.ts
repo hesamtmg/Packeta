@@ -279,9 +279,7 @@ export class TransactionsService {
         this.walletsService.assertWithinTransactionLimits(walletRef, amount);
 
         const wallet = await this.walletsService.lockById(manager, walletId);
-        const floor = walletRef.walletType.allowNegativeBalance
-          ? -BigInt(walletRef.walletType.creditLimit ?? '0')
-          : 0n;
+        const floor = 0n; // wallets never go negative — a credit line is tracked as CREDIT_RECEIVABLE instead
         const currentBalance = await this.ledgerService.getWalletBalance(
           manager,
           wallet.id,
@@ -445,9 +443,7 @@ export class TransactionsService {
         const fromWallet = locked.get(fromWalletRef.id)!;
         const toWallet = locked.get(toWalletRef.id)!;
 
-        const floor = fromWalletRef.walletType.allowNegativeBalance
-          ? -BigInt(fromWalletRef.walletType.creditLimit ?? '0')
-          : 0n;
+        const floor = 0n; // wallets never go negative — a credit line is tracked as CREDIT_RECEIVABLE instead
         const currentFromBalance = await this.ledgerService.getWalletBalance(
           manager,
           fromWallet.id,
@@ -507,8 +503,7 @@ export class TransactionsService {
   }
 
   // Admin-only manual correction. amount is signed (positive credits,
-  // negative debits) and still bounded by the wallet's own floor (0, or
-  // -creditLimit) — admins can correct balances, not bypass the wallet
+  // negative debits) and still bounded by the wallet's floor of 0 — admins can correct balances, not bypass the wallet
   // type's fundamental rules.
   async adjust(
     adminUserId: string,
@@ -535,9 +530,7 @@ export class TransactionsService {
             this.i18n.t('transactions.WALLET_CLOSED'),
           );
         }
-        const floor = walletRef.walletType.allowNegativeBalance
-          ? -BigInt(walletRef.walletType.creditLimit ?? '0')
-          : 0n;
+        const floor = 0n; // wallets never go negative — a credit line is tracked as CREDIT_RECEIVABLE instead
 
         const wallet = await this.walletsService.lockById(manager, walletId);
         const currentBalance = await this.ledgerService.getWalletBalance(
@@ -2099,6 +2092,16 @@ export class TransactionsService {
         wallet: { id: repositoryRef.id, walletType: repositoryRef.walletType },
         amount: remainder,
       };
+      // The virtual amount just drawn on is now owed by the credit wallet:
+      // book it as a receivable (the real money leg is the repository's,
+      // posted with the purchase below).
+      await this.ledgerService.postCreditReceivable(
+        manager,
+        transaction.id,
+        'Credit line drawn for purchase',
+        { id: fromWallet.id, walletType: fromWalletRef.walletType },
+        remainder,
+      );
       const fundingTransfer = manager.create(Transaction, {
         type: TransactionType.TRANSFER,
         fromWalletId: repository.id,
@@ -2128,9 +2131,7 @@ export class TransactionsService {
       await manager.save(ceilingDrawDown);
     }
 
-    const floor = fromWalletRef.walletType.allowNegativeBalance
-      ? -BigInt(fromWalletRef.walletType.creditLimit ?? '0')
-      : 0n;
+    const floor = 0n; // wallets never go negative — a credit line is tracked as CREDIT_RECEIVABLE instead
     const currentFromBalance = await this.ledgerService.getWalletBalance(
       manager,
       fromWallet.id,
@@ -2389,9 +2390,7 @@ export class TransactionsService {
           : 0n;
         const customerCreditAmount = BigInt(original.amount) - repositoryAmount;
 
-        const merchantFloor = merchantWalletRef.walletType.allowNegativeBalance
-          ? -BigInt(merchantWalletRef.walletType.creditLimit ?? '0')
-          : 0n;
+        const merchantFloor = 0n; // wallets never go negative — a credit line is tracked as CREDIT_RECEIVABLE instead
         const currentMerchantBalance =
           await this.ledgerService.getWalletBalance(manager, merchantWallet.id);
         const newMerchantBalance =

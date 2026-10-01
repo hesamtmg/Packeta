@@ -14,6 +14,7 @@ import {
 import { UsersService } from '../users/users.service';
 import { displayIdentity } from '../common/synthetic-email';
 import { LoggingService } from '../logging/logging.service';
+import { LedgerService } from '../gl/ledger.service';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -72,6 +73,7 @@ export class InstallmentsService {
     private readonly transactionsRepository: Repository<Transaction>,
     private readonly usersService: UsersService,
     private readonly loggingService: LoggingService,
+    private readonly ledgerService: LedgerService,
   ) {}
 
   // Splits a billing period's total (the sum of a credit wallet's VIRTUAL
@@ -588,8 +590,18 @@ export class InstallmentsService {
     });
     const wallet = await manager.findOne(Wallet, {
       where: { id: installment.walletId },
+      relations: { walletType: true },
     });
     if (!wallet) return;
+    // The same principal that was drawn on the credit line comes off the
+    // receivable — whether it was repaid or the repository absorbed it.
+    await this.ledgerService.postCreditReceivable(
+      manager,
+      transactionId,
+      'Installment principal settled',
+      { id: wallet.id, walletType: wallet.walletType },
+      -BigInt(installment.principalAmount),
+    );
     const restored =
       BigInt(wallet.virtualAmount ?? '0') + BigInt(installment.principalAmount);
     await manager.update(Wallet, wallet.id, {

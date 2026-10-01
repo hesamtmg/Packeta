@@ -62,6 +62,9 @@ function buildLedgerServiceStub(wallets: Array<{ id: string; balance: string }>)
   };
 
   return {
+    // Bookkeeping only (no wallet balance change) — see
+    // LedgerService.postCreditReceivable.
+    postCreditReceivable: jest.fn(async () => null),
     postCashMovement: jest.fn(
       async (
         _manager: unknown,
@@ -715,7 +718,7 @@ describe('TransactionsService.transfer', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('allows a credit wallet to go negative down to its credit limit', async () => {
+  it('rejects a credit wallet going negative even within its old credit limit', async () => {
     const senderWallet: WalletFixture = {
       id: 'wallet-a',
       balance: '0',
@@ -733,15 +736,15 @@ describe('TransactionsService.transfer', () => {
     };
     const { service } = buildService({ senderWallet, recipientWallet });
 
-    const result = await service.transfer(
-      'sender',
-      senderWallet.id,
-      'recipient@example.com',
-      1000,
-      'idem-5',
-    );
-
-    expect(result.balance).toBe('-1000');
+    await expect(
+      service.transfer(
+        'sender',
+        senderWallet.id,
+        'recipient@example.com',
+        1000,
+        'idem-5',
+      ),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 
   it('rejects a credit wallet transfer beyond its credit limit', async () => {
@@ -815,7 +818,7 @@ describe('TransactionsService.withdraw', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('allows withdrawing a credit wallet into its credit limit and records the chosen rail', async () => {
+  it('rejects withdrawing a credit wallet past a zero balance', async () => {
     const senderWallet: WalletFixture = {
       id: 'wallet-a',
       balance: '0',
@@ -825,32 +828,21 @@ describe('TransactionsService.withdraw', () => {
         creditLimit: '500',
       }),
     };
-    const { service, manager, railSettlementsService } = buildService({
+    const { service, railSettlementsService } = buildService({
       senderWallet,
     });
 
-    const result = await service.withdraw(
-      'sender',
-      senderWallet.id,
-      500,
-      SettlementRailType.PAYA,
-      'IR000000000000000000000001',
-      'idem-8',
-    );
-    expect(result.balance).toBe('-500');
-    expect(railSettlementsService.createForSweep).toHaveBeenCalledWith(
-      manager,
-      expect.objectContaining({
-        walletId: senderWallet.id,
-        railType: 'PAYA',
-        amount: '500',
-      }),
-    );
-    expect(manager.update).toHaveBeenCalledWith(
-      expect.anything(),
-      result.transactionId,
-      { railSettlementId: 'rail-settlement-1' },
-    );
+    await expect(
+      service.withdraw(
+        'sender',
+        senderWallet.id,
+        500,
+        SettlementRailType.PAYA,
+        'IR000000000000000000000001',
+        'idem-8',
+      ),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(railSettlementsService.createForSweep).not.toHaveBeenCalled();
   });
 
   it('posts a WITHDRAW to bank cash when the rail settlement completes', async () => {
@@ -1105,7 +1097,7 @@ describe('TransactionsService.adjust', () => {
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 
-  it('allows a debit past zero on a wallet with a credit limit', async () => {
+  it('rejects a debit past zero even on a wallet with an old credit limit', async () => {
     const wallet: WalletFixture = {
       id: 'wallet-a',
       balance: '0',
@@ -1117,14 +1109,15 @@ describe('TransactionsService.adjust', () => {
     };
     const { service } = buildService({ senderWallet: wallet });
 
-    const result = await service.adjust(
-      'admin-1',
-      wallet.id,
-      -500,
-      'Manual credit line correction',
-      'idem-13',
-    );
-    expect(result.balance).toBe('-500');
+    await expect(
+      service.adjust(
+        'admin-1',
+        wallet.id,
+        -500,
+        'Manual credit line correction',
+        'idem-13',
+      ),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 
   it('rejects a zero-amount adjustment', async () => {
@@ -1399,6 +1392,14 @@ describe('TransactionsService.verifyPurchase', () => {
           amount: 150n,
         },
       ],
+    );
+    // The drawn virtual amount is booked as a receivable on the credit wallet.
+    expect(ledgerService.postCreditReceivable).toHaveBeenCalledWith(
+      manager,
+      'purchase-tx-1',
+      expect.any(String),
+      { id: creditWallet.id, walletType: creditWallet.walletType },
+      150n,
     );
     // 2. the credit wallet's remaining credit ceiling (virtualAmount) is
     // drawn down by the repository-funded amount.

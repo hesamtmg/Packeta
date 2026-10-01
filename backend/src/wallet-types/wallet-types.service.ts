@@ -64,6 +64,11 @@ export class WalletTypesService {
         `Wallet type "${dto.code}" already exists for ${currency.code}`,
       );
     }
+    if (dto.code === WalletTypeCode.CREDIT && dto.allowNegativeBalance) {
+      throw new BadRequestException(
+        'CREDIT wallets cannot go negative — their credit line is the virtual amount granted by a repository',
+      );
+    }
     if (dto.allowNegativeBalance && dto.creditLimit === undefined) {
       throw new BadRequestException(
         'creditLimit is required when allowNegativeBalance is true',
@@ -157,6 +162,11 @@ export class WalletTypesService {
 
     const allowNegativeBalance =
       dto.allowNegativeBalance ?? type.allowNegativeBalance;
+    if (type.code === WalletTypeCode.CREDIT && allowNegativeBalance) {
+      throw new BadRequestException(
+        'CREDIT wallets cannot go negative — their credit line is the virtual amount granted by a repository',
+      );
+    }
     if (
       allowNegativeBalance &&
       dto.creditLimit === undefined &&

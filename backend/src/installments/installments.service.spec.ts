@@ -80,12 +80,16 @@ function buildService(options: {
   const loggingService = {
     log: jest.fn(async () => undefined),
   };
+  const ledgerService = {
+    postCreditReceivable: jest.fn(async () => null),
+  };
   const service = new InstallmentsService(
     installmentsRepository as any,
     walletsRepository as any,
     transactionsRepository as any,
     usersService as any,
     loggingService as any,
+    ledgerService as any,
   );
   return {
     service,
@@ -94,6 +98,7 @@ function buildService(options: {
     transactionsRepository,
     usersService,
     loggingService,
+    ledgerService,
   };
 }
 
@@ -518,7 +523,7 @@ describe('InstallmentsService.markPaid', () => {
   }
 
   it('marks the installment paid, clears the block, restores virtualAmount by the PRINCIPAL only, and records a VIRTUAL restore transaction', async () => {
-    const { service } = buildService({});
+    const { service, ledgerService } = buildService({});
     // principal 280 + fee 50 = amount 330 — only the 280 that was ever
     // drawn from virtualAmount at purchase time should come back; the fee
     // was never part of that draw-down.
@@ -528,10 +533,23 @@ describe('InstallmentsService.markPaid', () => {
       amount: '330',
       principalAmount: '280',
     };
-    const wallet = { id: 'wallet-1', virtualAmount: '600' };
+    const wallet = {
+      id: 'wallet-1',
+      virtualAmount: '600',
+      walletType: { id: 'type-1' },
+    };
     const manager = buildManager(installment, wallet);
 
     await service.markPaid(manager as any, installment.id, 'tx-1');
+
+    // The principal comes off the credit wallet's receivable (not the fee).
+    expect(ledgerService.postCreditReceivable).toHaveBeenCalledWith(
+      manager,
+      'tx-1',
+      expect.any(String),
+      { id: 'wallet-1', walletType: wallet.walletType },
+      -280n,
+    );
 
     expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'wallet-1', {
       blockedAt: null,

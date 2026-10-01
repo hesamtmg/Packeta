@@ -306,6 +306,26 @@ describe('WalletTypesService.create — fee/penalty/unblockFee sub-repositories'
   });
 });
 
+describe('WalletTypesService.update — CREDIT cannot go negative', () => {
+  it('rejects turning allowNegativeBalance on for a CREDIT type', async () => {
+    const { service } = buildServiceForAutoWithdraw({
+      id: 'type-1',
+      code: 'CREDIT',
+      supportsAutoWithdraw: false,
+      autoWithdrawTimes: null,
+      allowNegativeBalance: false,
+      creditLimit: null,
+    });
+
+    await expect(
+      service.update('type-1', {
+        allowNegativeBalance: true,
+        creditLimit: 1000,
+      } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
 describe('WalletTypesService.update — autoWithdrawTimes', () => {
   it('rejects a non-empty autoWithdrawTimes that is not exactly 3 entries', async () => {
     const { service } = buildServiceForAutoWithdraw({
