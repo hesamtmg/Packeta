@@ -1031,7 +1031,7 @@ async function onGrantCredit() {
                     class="admin-input"
                   />
                 </label>
-                <label class="field">
+                <label class="field span-2">
                   {{ t('dashboard.wallets.marketLabel') }}
                   <input
                     v-model="editRestrictedCounterparties"
@@ -1441,7 +1441,7 @@ async function onGrantCredit() {
                   />
                 </label>
 
-                <label class="field">
+                <label class="field span-2">
                   {{ t('dashboard.wallets.marketLabel') }}
                   <input
                     v-model="newWalletRestrictedCounterparties"
