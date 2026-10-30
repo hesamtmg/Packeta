@@ -21,15 +21,19 @@ function toggle() {
 <style scoped>
 .lang-switch {
   border: 1px solid var(--card-border);
-  background: transparent;
+  background: var(--card-bg, transparent);
   color: var(--text);
-  border-radius: 999px;
-  padding: 6px 14px;
+  border-radius: 10px;
+  min-height: 38px;
+  padding: 0 12px;
+  font: inherit;
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
 }
 .lang-switch:hover {
   background: var(--hover-tint, rgba(255, 255, 255, 0.06));
+  border-color: var(--accent-blue);
 }
 </style>

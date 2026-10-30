@@ -87,6 +87,25 @@ type Step =
   | 'topup-result';
 const step = ref<Step>('loading');
 
+// Progress shown in the checkout stepper: identify → choose wallet → pay → done.
+const stepIndex = computed(() => {
+  switch (step.value) {
+    case 'phone':
+    case 'otp':
+      return 0;
+    case 'wallet':
+    case 'insufficient-credit':
+      return 1;
+    case 'pay':
+      return 2;
+    case 'redirecting':
+    case 'topup-result':
+      return 3;
+    default:
+      return -1;
+  }
+});
+
 const chargeInfo = ref<ChargeStatus | null>(null);
 
 const phoneNumber = ref('');
@@ -100,7 +119,6 @@ const devCodeHint = ref('');
 const sessionToken = ref('');
 const eligibleWallets = ref<EligibleWallet[]>([]);
 const selectedWalletId = ref('');
-const carousel = ref<HTMLElement | null>(null);
 const gatewayError = ref('');
 const gatewayBusy = ref(false);
 const insufficientCredit = ref<{ shortfall: string; availableCredit: string } | null>(null);
@@ -437,14 +455,6 @@ function selectWallet(id: string) {
   selectedWalletId.value = id;
 }
 
-function scrollCarousel(direction: -1 | 1) {
-  const el = carousel.value;
-  if (!el) return;
-  const card = el.querySelector<HTMLElement>('.wallet-card');
-  const cardWidth = card ? card.offsetWidth + 12 : 220;
-  el.scrollBy({ left: direction * cardWidth, behavior: 'smooth' });
-}
-
 async function onContinueWithWallet() {
   gatewayError.value = '';
   gatewayBusy.value = true;
@@ -583,14 +593,14 @@ onUnmounted(() => {
 
 <template>
   <div class="shell">
-    <span class="blob blob-1" aria-hidden="true"></span>
-    <span class="blob blob-2" aria-hidden="true"></span>
-    <span class="blob blob-3" aria-hidden="true"></span>
-
     <header class="nav">
       <div class="nav-brand">
         <span class="logo-mark">P</span>
         <span class="logo-text">{{ t('brand') }}</span>
+        <span class="secure-badge">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 018 0v4" /></svg>
+          {{ t('secureCheckout') }}
+        </span>
       </div>
       <div class="nav-actions">
         <button type="button" class="lang-toggle" @click="toggleLocale">{{ locale === 'fa' ? 'EN' : 'فارسی' }}</button>
@@ -598,47 +608,48 @@ onUnmounted(() => {
     </header>
 
     <main class="page">
-      <h1 class="page-heading">{{ t('heading') }}</h1>
-      <p class="page-subheading">{{ t('subheading') }}</p>
+      <div class="checkout">
+        <aside class="summary">
+          <div class="summary-head">
+            <span class="summary-merchant-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l1.5-5h15L21 9M3 9v11h18V9M3 9h18M9 20v-6h6v6" /></svg>
+            </span>
+            <div class="summary-merchant">
+              <span class="summary-label">{{ t('payingTo') }}</span>
+              <strong class="summary-merchant-name">{{ merchantSummary.name || t('heading') }}</strong>
+              <span v-if="merchantSummary.storeSite" class="summary-merchant-site">{{ merchantSummary.storeSite }}</span>
+            </div>
+          </div>
 
-      <div class="card">
-       <div class="merchant-column">
-        <div
-          v-if="countdownDigits && step !== 'redirecting' && step !== 'loading'"
-          class="flipclock"
-          :class="{ expiring: isExpired }"
-        >
-          <div class="flip-group">
-            <div class="flip-digit" :class="{ flipping: flipAnimating.mt }">{{ flipDisplay.mt }}</div>
-            <div class="flip-digit" :class="{ flipping: flipAnimating.mo }">{{ flipDisplay.mo }}</div>
+          <div v-if="step !== 'loading' && merchantSummary.displayAmount" class="summary-amount">
+            <span class="summary-label">{{ t('totals.label') }}</span>
+            <strong class="summary-amount-value">{{ merchantSummary.displayAmount }}</strong>
+            <span v-if="merchantSummary.displayAmountWords" class="summary-amount-words">{{ merchantSummary.displayAmountWords }}</span>
           </div>
-          <div class="flip-colon"><span></span><span></span></div>
-          <div class="flip-group">
-            <div class="flip-digit" :class="{ flipping: flipAnimating.st }">{{ flipDisplay.st }}</div>
-            <div class="flip-digit" :class="{ flipping: flipAnimating.so }">{{ flipDisplay.so }}</div>
-          </div>
-        </div>
 
-       <div v-if="step !== 'loading' && merchantSummary.displayAmount" class="totals-bar">
-          <span class="totals-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2V2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 8h6M9 12h6M9 16h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-          </span>
-          <div class="totals-text">
-            <span class="totals-label">{{ t('totals.label') }}</span>
-            <strong class="totals-amount">{{ merchantSummary.displayAmount }}</strong>
-            <span v-if="merchantSummary.displayAmountWords" class="totals-amount-words">{{ merchantSummary.displayAmountWords }}</span>
+          <div
+            v-if="countdownDigits && step !== 'redirecting' && step !== 'loading'"
+            class="summary-timer"
+          >
+            <span class="summary-label">{{ isExpired ? t('expired') : t('timeLeft') }}</span>
+            <div class="flipclock" :class="{ expiring: isExpired }">
+              <div class="flip-group">
+                <div class="flip-digit" :class="{ flipping: flipAnimating.mt }">{{ flipDisplay.mt }}</div>
+                <div class="flip-digit" :class="{ flipping: flipAnimating.mo }">{{ flipDisplay.mo }}</div>
+              </div>
+              <div class="flip-colon"><span></span><span></span></div>
+              <div class="flip-group">
+                <div class="flip-digit" :class="{ flipping: flipAnimating.st }">{{ flipDisplay.st }}</div>
+                <div class="flip-digit" :class="{ flipping: flipAnimating.so }">{{ flipDisplay.so }}</div>
+              </div>
+            </div>
           </div>
-        </div>
-        <div v-if="hasMerchantPanel" class="merchant-panel">
-          <div class="merchant-panel-row merchant-panel-title">
-            <span class="merchant-panel-label">{{ t('merchantInfo.company') }}</span>
-            <span class="merchant-panel-value">{{ merchantSummary.name }}</span>
-          </div>
-          <div v-if="merchantSummary.storeSite" class="merchant-panel-row">
-            <span class="merchant-panel-label">{{ t('merchantInfo.storeSite') }}</span>
-            <span class="merchant-panel-value">{{ merchantSummary.storeSite }}</span>
-          </div>
-          <div v-if="merchantSummary.terminalId" class="merchant-panel-row">
+
+          <div
+            v-if="hasMerchantPanel && (merchantSummary.terminalId || merchantSummary.acceptorCode || merchantSummary.category || merchantSummary.subCategory)"
+            class="merchant-panel"
+          >
+            <div v-if="merchantSummary.terminalId" class="merchant-panel-row">
             <span class="merchant-panel-label">{{ t('merchantInfo.terminalId') }}</span>
             <span class="merchant-panel-value">{{ merchantSummary.terminalId }}</span>
           </div>
@@ -654,60 +665,59 @@ onUnmounted(() => {
             <span class="merchant-panel-label">{{ t('merchantInfo.subCategory') }}</span>
             <span class="merchant-panel-value">{{ merchantSummary.subCategory }}</span>
           </div>
-        </div>
+          </div>
 
-      
-       </div>
+          <div class="summary-foot">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.7-7 9-4-1.3-7-4.5-7-9V6l7-3z" /><path d="M9 12l2 2 4-4" /></svg>
+            {{ t('protected') }}
+          </div>
+        </aside>
 
-       <div class="form-column">
-        <!-- No wallet is known yet on the phone/OTP identification steps, so
-             there's nothing meaningful to put on a card — it only appears
-             from the wallet step onward. That step shows every eligible
-             wallet as its own selectable card; every later step shows one
-             static summary card (the selected wallet once known, otherwise
-             the transaction itself). -->
-        <div v-if="step === 'wallet' && eligibleWallets.length" class="carousel-wrap">
-          <button class="carousel-nav" type="button" @click="scrollCarousel(-1)">‹</button>
-          <div ref="carousel" class="carousel">
+        <section class="panel">
+          <ol v-if="stepIndex >= 0" class="stepper">
+            <li
+              v-for="(label, i) in [t('steps.identify'), t('steps.wallet'), t('steps.pay')]"
+              :key="i"
+              :class="{ done: stepIndex > i, current: stepIndex === i }"
+            >
+              <span class="stepper-dot">
+                <svg v-if="stepIndex > i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7" /></svg>
+                <template v-else>{{ i + 1 }}</template>
+              </span>
+              <span class="stepper-label">{{ label }}</span>
+            </li>
+          </ol>
+
+          <p v-if="step === 'wallet' && !isExpired" class="status">{{ t('wallet.prompt') }}</p>
+          <div v-if="step === 'wallet' && eligibleWallets.length" class="wallet-options" role="radiogroup" :aria-label="t('wallet.prompt')">
             <button
               v-for="w in eligibleWallets"
               :key="w.id"
               type="button"
-              class="paycard"
+              role="radio"
+              class="wallet-option"
               :class="{ selected: selectedWalletId === w.id }"
-              :style="{ background: cardGradient(w.walletType, false) }"
+              :aria-checked="selectedWalletId === w.id"
               @click="selectWallet(w.id)"
             >
-              <div class="paycard-top">
-                <img v-if="cardImageSrc(w.walletType)" :src="cardImageSrc(w.walletType)!" class="paycard-logo" alt="" />
-                <span v-else class="paycard-chip" aria-hidden="true">
-                  <svg viewBox="0 0 32 24" fill="none"><rect x="1" y="1" width="30" height="22" rx="4" fill="currentColor" opacity="0.9"/><path d="M1 9h30M1 15h30M11 1v22M21 1v22" stroke="#fff" stroke-width="1"/></svg>
-                </span>
-                <span class="paycard-top-right">
-                  <span class="paycard-contactless" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none"><path d="M7 9a7 7 0 0 1 0 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M10.3 6.5a11 11 0 0 1 0 11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M13.6 4a15 15 0 0 1 0 16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-                  </span>
-                  <span class="paycard-brand">{{ t('brand') }}</span>
-                </span>
-              </div>
-              <div class="paycard-number">{{ maskId(w.id) }}</div>
-              <div class="paycard-bottom">
-                <div class="paycard-field">
-                  <span class="paycard-label">{{ t('card.wallet') }}</span>
-                  <span class="paycard-value">{{ w.walletType.name }}</span>
-                </div>
-                <div class="paycard-field paycard-field-right">
-                  <span class="paycard-label">{{ t('card.balance') }}</span>
-                  <span class="paycard-value">{{ formatAmount((BigInt(w.balance) + BigInt(w.virtualAmount || '0')).toString(), w.walletType.currency) }}</span>
-                </div>
-              </div>
+              <span class="wallet-option-chip" :style="{ background: cardGradient(w.walletType, false) }">
+                <img v-if="cardImageSrc(w.walletType)" :src="cardImageSrc(w.walletType)!" alt="" />
+                <template v-else>{{ w.walletType.currency.code.slice(0, 3) }}</template>
+              </span>
+              <span class="wallet-option-main">
+                <span class="wallet-option-name">{{ w.walletType.name }}</span>
+                <span class="wallet-option-mask">{{ maskId(w.id) }}</span>
+              </span>
+              <span class="wallet-option-balance">
+                <span class="wallet-option-balance-label">{{ t('wallet.available') }}</span>
+                {{ formatAmount((BigInt(w.balance) + BigInt(w.virtualAmount || '0')).toString(), w.walletType.currency) }}
+              </span>
+              <span class="wallet-option-radio" aria-hidden="true"></span>
             </button>
           </div>
-          <button class="carousel-nav" type="button" @click="scrollCarousel(1)">›</button>
-        </div>
 
-        <div
-          v-else-if="step !== 'loading' && step !== 'phone' && step !== 'otp'"
+          <div
+          v-if="step !== 'wallet' && step !== 'loading' && step !== 'phone' && step !== 'otp'"
           class="paycard paycard-static"
           :style="activeCard.background ? { background: activeCard.background } : undefined"
           aria-hidden="false"
@@ -738,7 +748,8 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <template v-if="step === 'loading'">
+          <div class="step-body">
+          <template v-if="step === 'loading'">
           <p class="status">{{ t('loading') }}</p>
         </template>
 
@@ -796,7 +807,6 @@ onUnmounted(() => {
         </template>
 
         <template v-else-if="step === 'wallet'">
-          <p class="status">{{ t('wallet.prompt') }}</p>
           <p v-if="!eligibleWallets.length" class="status">{{ t('wallet.none') }}</p>
           <button
             v-if="eligibleWallets.length"
@@ -850,7 +860,8 @@ onUnmounted(() => {
 
           <p v-else class="status">{{ t('loading') }}</p>
         </template>
-       </div>
+          </div>
+        </section>
       </div>
     </main>
 
@@ -865,42 +876,24 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 .shell {
+  --ink: #0f172a;
+  --ink-dim: #5b6478;
+  --ink-dimmer: #8e97aa;
+  --line: #e4e8f1;
+  --soft: #f6f8fc;
+  --brand: #2457d6;
+  --brand-gradient: linear-gradient(135deg, #4f8bff 0%, #2457d6 55%, #1a3fa8 100%);
+  --danger: #d12f2f;
   position: relative;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  z-index: 1;
   overflow-x: hidden;
-}
-.blob {
-  position: fixed;
-  border-radius: 50%;
-  z-index: 0;
-  pointer-events: none;
-}
-.blob-1 {
-  width: 240px;
-  height: 240px;
-  top: -70px;
-  right: -50px;
-  background: linear-gradient(135deg, #6fa8ff, #2f6fed);
-  opacity: 0.9;
-}
-.blob-2 {
-  width: 90px;
-  height: 90px;
-  top: 60px;
-  right: 190px;
-  background: #2f6fed;
-  opacity: 0.6;
-}
-.blob-3 {
-  width: 360px;
-  height: 360px;
-  bottom: -140px;
-  left: -120px;
-  background: linear-gradient(135deg, #4f8bff, #1550c9);
-  opacity: 0.85;
+  color: var(--ink);
+  background:
+    radial-gradient(1000px 500px at 100% -10%, rgba(79, 139, 255, 0.16), transparent 60%),
+    radial-gradient(800px 500px at -10% 110%, rgba(36, 87, 214, 0.12), transparent 60%),
+    #f3f5fa;
 }
 
 .nav {
@@ -910,32 +903,48 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.9rem 1.5rem;
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(8px);
-  border-bottom: 1px solid #e3e5f2;
+  padding: 0.85rem 1.5rem;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: saturate(1.4) blur(12px);
+  border-bottom: 1px solid var(--line);
 }
 .nav-brand {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.6rem;
 }
 .logo-mark {
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #4f8bff, #2f6fed);
+  background: var(--brand-gradient);
   color: #fff;
-  font-weight: 700;
+  font-weight: 800;
   font-size: 1.05rem;
+  box-shadow: 0 6px 16px -6px rgba(36, 87, 214, 0.7);
 }
 .logo-text {
   font-weight: 700;
   font-size: 1.05rem;
-  color: #14213d;
+}
+.secure-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-inline-start: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(21, 128, 61, 0.1);
+  color: #15803d;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.secure-badge svg {
+  width: 13px;
+  height: 13px;
 }
 .nav-actions {
   display: flex;
@@ -943,20 +952,354 @@ onUnmounted(() => {
   gap: 0.6rem;
 }
 .lang-toggle {
-  padding: 0.4rem 0.8rem;
-  border-radius: 999px;
-  border: 1px solid #dce6fb;
+  min-height: 36px;
+  padding: 0 0.85rem;
+  border-radius: 10px;
+  border: 1px solid var(--line);
   background: #fff;
-  color: #2f6fed;
+  color: var(--ink);
+  font: inherit;
   font-size: 0.8rem;
   font-weight: 700;
   cursor: pointer;
 }
-/* Split-flap "flip clock" countdown, top of the merchant-info column —
-   each digit is its own dark tile with a seam across the middle; when a
-   digit changes, that one tile rotates through its edge (rotateX) and the
-   new digit is swapped in right at the invisible 90°-turned midpoint, the
-   same illusion a real mechanical flip clock relies on. */
+.lang-toggle:hover {
+  border-color: var(--brand);
+}
+
+.page {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2.5rem 1rem;
+}
+
+/* Two-panel checkout: order summary (dark) + steps (light). Stacks on
+   narrow screens with the summary on top. */
+.checkout {
+  width: 100%;
+  max-width: 920px;
+  display: grid;
+  grid-template-columns: minmax(0, 340px) minmax(0, 1fr);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 26px;
+  overflow: hidden;
+  box-shadow: 0 30px 70px -30px rgba(15, 35, 95, 0.35);
+}
+
+.summary {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 1.75rem;
+  color: #fff;
+  background: linear-gradient(160deg, #13245a 0%, #1a3fa8 60%, #2457d6 100%);
+  overflow: hidden;
+}
+.summary::before {
+  content: '';
+  position: absolute;
+  width: 320px;
+  height: 320px;
+  top: -160px;
+  inset-inline-end: -120px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.18), transparent 70%);
+  pointer-events: none;
+}
+.summary > * {
+  position: relative;
+}
+.summary-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.summary-merchant-icon {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+.summary-merchant-icon svg {
+  width: 22px;
+  height: 22px;
+}
+.summary-merchant {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.summary-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.7);
+}
+.summary-merchant-name {
+  font-size: 1.05rem;
+  overflow-wrap: anywhere;
+}
+.summary-merchant-site {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.75);
+  overflow-wrap: anywhere;
+}
+.summary-amount {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 1rem 1.1rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+.summary-amount-value {
+  font-size: 1.85rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.summary-amount-words {
+  font-size: 0.76rem;
+  color: rgba(255, 255, 255, 0.75);
+}
+.summary-timer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.summary-foot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.76rem;
+  color: rgba(255, 255, 255, 0.72);
+}
+.summary-foot svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.merchant-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+}
+.merchant-panel-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.merchant-panel-label {
+  font-size: 0.76rem;
+  color: rgba(255, 255, 255, 0.68);
+  white-space: nowrap;
+}
+.merchant-panel-value {
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-align: end;
+  overflow-wrap: anywhere;
+}
+
+/* Right panel */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  padding: 1.75rem 2rem 2rem;
+  min-width: 0;
+}
+.step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.stepper {
+  list-style: none;
+  margin: 0 0 0.25rem;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.stepper li {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--ink-dimmer);
+  font-size: 0.8rem;
+  font-weight: 600;
+  min-width: 0;
+}
+.stepper li:not(:last-child)::after {
+  content: '';
+  flex: 1;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--line);
+  min-width: 12px;
+}
+.stepper li.done:not(:last-child)::after {
+  background: var(--brand);
+}
+.stepper-dot {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: var(--soft);
+  border: 1.5px solid var(--line);
+}
+.stepper-dot svg {
+  width: 13px;
+  height: 13px;
+}
+.stepper li.current {
+  color: var(--ink);
+}
+.stepper li.current .stepper-dot {
+  border-color: var(--brand);
+  color: var(--brand);
+  box-shadow: 0 0 0 4px rgba(36, 87, 214, 0.12);
+}
+.stepper li.done .stepper-dot {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+.stepper-label {
+  white-space: nowrap;
+}
+
+/* Wallet selection: radio-style rows instead of a sideways carousel. */
+.wallet-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 2px;
+}
+.wallet-option {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  width: 100%;
+  padding: 0.8rem 0.95rem;
+  border-radius: 14px;
+  border: 1.5px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+.wallet-option:hover {
+  border-color: rgba(36, 87, 214, 0.5);
+}
+.wallet-option.selected {
+  border-color: var(--brand);
+  background: rgba(36, 87, 214, 0.05);
+  box-shadow: 0 0 0 3px rgba(36, 87, 214, 0.12);
+}
+.wallet-option-chip {
+  flex: none;
+  width: 52px;
+  height: 34px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  box-shadow: 0 6px 14px -8px rgba(15, 23, 42, 0.6);
+}
+.wallet-option-chip img {
+  max-width: 34px;
+  max-height: 18px;
+  object-fit: contain;
+}
+.wallet-option-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.wallet-option-name {
+  font-weight: 700;
+  font-size: 0.92rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wallet-option-mask {
+  font-size: 0.74rem;
+  color: var(--ink-dimmer);
+  direction: ltr;
+  text-align: start;
+  font-variant-numeric: tabular-nums;
+}
+.wallet-option-balance {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-weight: 700;
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+}
+.wallet-option-balance-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--ink-dimmer);
+}
+.wallet-option-radio {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  position: relative;
+}
+.wallet-option.selected .wallet-option-radio {
+  border-color: var(--brand);
+}
+.wallet-option.selected .wallet-option-radio::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--brand);
+}
+
 .flipclock {
   display: flex;
   align-items: center;
@@ -978,7 +1321,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(180deg, #232f52, #131c37);
+  background: linear-gradient(180deg, #0c1636, #050b22);
   color: #fff;
   border-radius: 8px;
   font-size: 1.3rem;
@@ -1022,7 +1365,7 @@ onUnmounted(() => {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: #232f52;
+  background: rgba(255, 255, 255, 0.85);
 }
 .flipclock.expiring .flip-digit {
   background: linear-gradient(180deg, #b5342f, #7a1f1c);
@@ -1041,79 +1384,6 @@ onUnmounted(() => {
   }
 }
 
-.page {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 2.5rem 1rem;
-  z-index: 1;
-}
-.page-heading {
-  margin: 0 0 0.35rem;
-  font-size: 1.9rem;
-  font-weight: 800;
-  color: #14213d;
-}
-.page-subheading {
-  margin: 0 0 1.75rem;
-  color: #64748b;
-  font-size: 0.95rem;
-}
-.card {
-  width: 100%;
-  max-width: 420px;
-  background: #ffffff;
-  border: 1px solid #e3e9f7;
-  border-radius: 22px;
-  padding: 1.75rem;
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  gap: 0.9rem;
-  box-shadow: 0 24px 60px -18px rgba(20, 60, 140, 0.25);
-}
-.merchant-column,
-.form-column {
-  display: flex;
-  flex-direction: column;
-  gap: 0.9rem;
-  min-width: 0;
-}
-
-/* At desktop widths there's room to show the merchant/wallet card
-   alongside the phone/OTP/wallet-recognition form instead of stacking
-   them, so the customer can see who and how much they're paying without
-   scrolling past it first. */
-@media (min-width: 860px) {
-  .card {
-    max-width: 760px;
-    flex-direction: row;
-    align-items: flex-start;
-    text-align: left;
-    padding: 2rem;
-  }
-  .merchant-column {
-    flex: 0 0 320px;
-  }
-  .form-column {
-    flex: 1 1 auto;
-    justify-content: center;
-    padding-top: 0.5rem;
-    border-left: 1px solid #edf1fb;
-    padding-left: 2rem;
-  }
-  [dir='rtl'] .form-column {
-    border-left: none;
-    border-right: 1px solid #edf1fb;
-    padding-left: 0;
-    padding-right: 2rem;
-  }
-}
-
-/* The "physical card" visual: represents either the wallet the customer is
-   about to pay from, or (before one's chosen) the transaction itself. */
 .paycard {
   position: relative;
   width: 100%;
@@ -1124,7 +1394,7 @@ onUnmounted(() => {
   flex-direction: column;
   justify-content: space-between;
   gap: 10px;
-  text-align: left;
+  text-align: start;
   color: #fff;
   background: linear-gradient(135deg, #2f6fed 0%, #1550c9 60%, #103e9e 100%);
   box-shadow: 0 16px 34px -14px rgba(21, 80, 201, 0.55);
@@ -1202,7 +1472,7 @@ button.paycard.selected {
   min-width: 0;
 }
 .paycard-field-right {
-  text-align: right;
+  text-align: end;
   align-items: flex-end;
 }
 .paycard-label {
@@ -1233,135 +1503,78 @@ button.paycard.selected {
   color: rgba(255, 255, 255, 0.85);
 }
 
-.merchant-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.9rem 1rem;
-  border-radius: 14px;
-  background: #f4f8ff;
-  border: 1px solid #e3e9f7;
-  text-align: left;
-}
-.merchant-panel-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-.merchant-panel-title .merchant-panel-value {
-  font-size: 1rem;
-  font-weight: 800;
-  color: #14213d;
-}
-.merchant-panel-label {
-  font-size: 0.75rem;
-  color: #64748b;
-  white-space: nowrap;
-}
-.merchant-panel-value {
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: #1e2a4a;
-  text-align: right;
-  overflow-wrap: anywhere;
-}
 
-.totals-bar {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.85rem 1rem;
-  border-radius: 14px;
-  background: linear-gradient(135deg, #eaf1ff, #f7faff);
-  border: 1px solid #dce6fb;
-}
-.totals-icon {
-  width: 30px;
-  height: 30px;
-  flex: 0 0 auto;
-  color: #2f6fed;
-}
-.totals-icon svg {
-  width: 100%;
-  height: 100%;
-}
-.totals-text {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-}
-.totals-label {
-  font-size: 0.78rem;
-  color: #5b6b8c;
-}
-.totals-amount {
-  font-size: 1.4rem;
-  font-weight: 800;
-  color: #14213d;
-}
-.totals-amount-words {
-  font-size: 0.76rem;
-  font-weight: 500;
-  color: #5b6b8c;
-}
 .status {
-  color: #6b7280;
-  font-size: 0.9rem;
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 0.92rem;
 }
 .dev-hint {
+  margin: 0;
   color: #92400e;
   background: #fef3c7;
   border-radius: 10px;
-  padding: 0.5rem 0.7rem;
+  padding: 0.55rem 0.75rem;
   font-size: 0.85rem;
-  font-family: monospace;
+  font-family: ui-monospace, monospace;
 }
 .error {
-  color: #c62828;
-  font-size: 0.9rem;
+  margin: 0;
+  color: var(--danger);
+  background: rgba(209, 47, 47, 0.08);
+  border: 1px solid rgba(209, 47, 47, 0.2);
+  border-radius: 10px;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.88rem;
 }
 .redirect-url {
-  color: #9294ab;
+  margin: 0;
+  color: var(--ink-dimmer);
   font-size: 0.78rem;
   word-break: break-all;
-  font-family: monospace;
+  font-family: ui-monospace, monospace;
 }
 .actions {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
-  margin-top: 0.5rem;
+  margin-top: 0.25rem;
 }
-.actions button,
-.gateway-form button {
-  padding: 0.8rem;
-  border-radius: 999px;
+.confirm,
+.cancel {
+  min-height: 48px;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
   border: none;
+  font: inherit;
   font-size: 0.95rem;
   font-weight: 700;
   cursor: pointer;
+  transition: filter 0.15s, transform 0.08s;
 }
 .confirm {
-  background: linear-gradient(135deg, #4f8bff, #1550c9);
+  background: var(--brand-gradient);
   color: #fff;
-  padding: 0.8rem;
-  border-radius: 999px;
-  border: none;
-  font-size: 0.95rem;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 12px 24px -8px rgba(21, 80, 201, 0.55);
+  box-shadow: 0 12px 24px -10px rgba(36, 87, 214, 0.65);
+}
+.confirm:hover:not(:disabled) {
+  filter: brightness(1.07);
+}
+.confirm:active:not(:disabled),
+.cancel:active:not(:disabled) {
+  transform: translateY(1px);
 }
 .cancel {
   background: #fff;
-  color: #14213d;
-  border: 1px solid #e3e9f7 !important;
+  color: var(--ink);
+  border: 1px solid var(--line);
 }
-.actions button:disabled,
-.gateway-form button:disabled,
-.confirm:disabled {
+.cancel:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.confirm:disabled,
+.cancel:disabled {
   opacity: 0.55;
   cursor: not-allowed;
   box-shadow: none;
@@ -1369,135 +1582,147 @@ button.paycard.selected {
 .gateway-form {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.7rem;
 }
 .gateway-form input {
   width: 100%;
+  min-height: 46px;
   padding: 0.7rem 0.8rem;
-  border-radius: 12px;
-  border: 1px solid #e3e9f7;
-  background: #f4f8ff;
-  color: #14213d;
-  font-size: 0.95rem;
-  text-align: left;
-}
-.gateway-form input:focus {
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.98rem;
   outline: none;
-  border-color: #2f6fed;
-  box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.18);
 }
 .icon-field {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding-left: 0.7rem;
+  gap: 0.25rem;
+  padding-inline-start: 0.85rem;
   border-radius: 12px;
-  border: 1px solid #e3e9f7;
-  background: #f4f8ff;
+  border: 1px solid var(--line);
+  background: #fff;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 .icon-field:focus-within {
-  border-color: #2f6fed;
-  box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.18);
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(36, 87, 214, 0.15);
 }
 .icon-field-icon {
   width: 18px;
   height: 18px;
   flex: 0 0 auto;
-  color: #2f6fed;
+  color: var(--ink-dimmer);
+}
+.icon-field:focus-within .icon-field-icon {
+  color: var(--brand);
 }
 .icon-field-icon svg {
   width: 100%;
   height: 100%;
 }
-.icon-field input {
-  border: none !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  padding-left: 0 !important;
-}
 .captcha-label {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  color: #64748b;
+  gap: 0.5rem;
+  color: var(--ink-dim);
   font-size: 0.85rem;
 }
 .captcha-image {
   width: 180px;
   height: 56px;
-  align-self: center;
   border-radius: 12px;
-  border: 1px solid #e3e9f7;
+  border: 1px solid var(--line);
 }
 .link-btn {
+  align-self: center;
   background: none;
   border: none;
-  color: #2f6fed;
-  font-size: 0.82rem;
+  color: var(--brand);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
   cursor: pointer;
+  padding: 0.25rem;
+}
+.link-btn:hover {
   text-decoration: underline;
+}
+.link-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .otp-boxes {
   display: flex;
   justify-content: center;
   gap: 0.5rem;
+  direction: ltr;
 }
 .otp-box {
-  width: 42px;
-  height: 52px;
+  width: 46px;
+  height: 56px;
   border-radius: 12px;
-  border: 1px solid #e3e9f7;
-  background: #f4f8ff;
-  color: #14213d;
-  font-size: 1.3rem;
+  border: 1.5px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 1.35rem;
   font-weight: 700;
   text-align: center;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 .otp-box:focus {
   outline: none;
-  border-color: #2f6fed;
-  box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.18);
-}
-.carousel-wrap {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-.carousel {
-  flex: 1;
-  display: flex;
-  gap: 12px;
-  overflow-x: auto;
-  scroll-snap-type: x mandatory;
-  padding: 4px 2px 8px;
-  scrollbar-width: none;
-}
-.carousel::-webkit-scrollbar {
-  display: none;
-}
-.carousel-nav {
-  flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  border: 1px solid #e3e9f7;
-  background: #fff;
-  color: #2f6fed;
-  font-size: 1.1rem;
-  cursor: pointer;
-  box-shadow: 0 4px 10px rgba(20, 60, 140, 0.12);
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(36, 87, 214, 0.15);
 }
 
 .site-footer {
-  z-index: 1;
   text-align: center;
   padding: 1rem;
   font-size: 0.75rem;
-  color: #94a3b8;
-  border-top: 1px solid #e3e9f7;
-  background: rgba(255, 255, 255, 0.6);
+  color: var(--ink-dimmer);
 }
 .site-footer p {
   margin: 0;
+}
+
+@media (max-width: 820px) {
+  .checkout {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 480px;
+  }
+  .summary {
+    gap: 1rem;
+    padding: 1.4rem;
+  }
+  .summary-foot {
+    display: none;
+  }
+  .panel {
+    padding: 1.4rem;
+  }
+}
+@media (max-width: 480px) {
+  .page {
+    padding: 1rem 0.75rem 1.5rem;
+  }
+  .checkout {
+    border-radius: 20px;
+  }
+  .secure-badge {
+    display: none;
+  }
+  .stepper-label {
+    display: none;
+  }
+  .stepper li.current .stepper-label {
+    display: inline;
+  }
+  .otp-box {
+    width: 40px;
+    height: 50px;
+  }
 }
 </style>

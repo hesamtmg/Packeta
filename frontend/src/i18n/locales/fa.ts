@@ -1,5 +1,8 @@
 export default {
   common: {
+    lightMode: 'حالت روشن',
+    darkMode: 'حالت تیره',
+    openMenu: 'باز کردن منو',
     toggleLanguage: 'تغییر زبان',
     unknown: 'نامشخص',
     you: 'شما',
@@ -13,6 +16,7 @@ export default {
     },
   },
   nav: {
+    menu: 'منو',
     wallet: 'کیف پول',
     profile: 'پروفایل',
     adminPanel: 'پنل مدیریت',
@@ -20,6 +24,13 @@ export default {
     backToWallet: 'بازگشت به کیف پول من',
   },
   adminNav: {
+    panelTag: 'مدیریت',
+    group: {
+      overview: 'نمای کلی',
+      operations: 'عملیات',
+      people: 'کاربران',
+      system: 'پیکربندی',
+    },
     dashboard: 'داشبورد',
     transactions: 'تراکنش‌ها',
     wallets: 'کیف‌پول‌ها',
@@ -82,6 +93,8 @@ export default {
     },
   },
   dashboard: {
+    totalBalance: 'موجودی کل',
+    walletCount: '{count} کیف پول',
     title: 'کیف پول من',
     overviewEyebrow: 'نمای کلی',
     overviewHeading: 'همه کیف‌پول‌ها و ارزها، در یک مکان',
@@ -173,6 +186,15 @@ export default {
       },
     },
     wallets: {
+      subtitle: 'یک کیف پول را انتخاب کنید تا کارت، موجودی و عملیات آن را ببینید.',
+      searchPlaceholder: 'جستجوی کیف پول…',
+      showClosed: 'نمایش بسته‌شده‌ها ({count})',
+      emptyTitle: 'هنوز کیف پولی ندارید',
+      emptyHint: 'اولین کیف پول خود را بسازید تا بتوانید پول دریافت و ارسال کنید.',
+      noMatch: 'کیف پولی با این جستجو پیدا نشد.',
+      blockedShort: 'مسدود',
+      typeLabel: 'نوع کیف پول',
+      addWalletHint: 'نوع کیف پول را انتخاب کنید — تنظیمات بیشتر بسته به قابلیت‌های آن نوع نمایش داده می‌شود.',
       title: 'کیف‌پول‌ها',
       addPlaceholder: 'افزودن کیف پول…',
       verifyTimeoutLabel: 'مهلت تأیید (دقیقه):',
@@ -220,6 +242,7 @@ export default {
       cardBalanceLabel: 'موجودی',
     },
     actions: {
+      amountPlaceholder: 'مبلغ',
       deposit: { title: 'واریز', chooseWallet: 'انتخاب کیف پول', submit: 'واریز' },
       withdraw: {
         title: 'برداشت',
@@ -509,6 +532,15 @@ export default {
       colWhen: 'زمان',
     },
     wallets: {
+      statTotal: 'کل کیف‌پول‌ها',
+      statHeld: 'موجودی {currency}',
+      statusBlocked: 'مسدود',
+      allTypes: 'همه انواع',
+      allCurrencies: 'همه ارزها',
+      tableActions: 'عملیات',
+      adjustTitle: 'اصلاح دستی · {wallet}',
+      clearFilters: 'پاک کردن فیلترها',
+      filter: { all: 'همه', active: 'فعال', blocked: 'مسدود', closed: 'بسته' },
       title: 'کیف‌پول‌ها',
       allWallets: 'همه کیف‌پول‌ها ({count})',
       searchPlaceholder: 'جستجو بر اساس مالک یا نوع کیف پول…',

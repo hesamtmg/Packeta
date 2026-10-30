@@ -50,9 +50,10 @@ export function formatAmount(amount: string | number, currency: CurrencyInfo): s
     return currency.symbolPosition === 'PREFIX' ? `${symbol}${grouped}` : `${grouped} ${symbol}`;
   }
 
+  const grouped = groupThousands(formatted);
   return currency.symbolPosition === 'PREFIX'
-    ? `${currency.symbol}${formatted}`
-    : `${formatted} ${currency.symbol}`;
+    ? `${currency.symbol}${grouped}`
+    : `${grouped} ${currency.symbol}`;
 }
 
 // Mirrors backend/src/common/format-amount.ts's CURRENCY_UNIT_WORDS — used

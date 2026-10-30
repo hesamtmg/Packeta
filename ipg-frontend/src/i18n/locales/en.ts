@@ -1,4 +1,13 @@
 export default {
+  secureCheckout: 'Secure checkout',
+  payingTo: 'Paying to',
+  timeLeft: 'Time left',
+  protected: 'Your payment is protected and encrypted end to end.',
+  steps: {
+    identify: 'Verify',
+    wallet: 'Wallet',
+    pay: 'Pay',
+  },
   brand: 'Packeta',
   footer: 'Secured by Packeta IPG · Sandbox payment gateway — no real funds move outside Packeta wallets.',
   heading: 'Secure Payment',
@@ -38,6 +47,7 @@ export default {
     resend: 'Resend code',
   },
   wallet: {
+    available: 'Available',
     prompt: 'Choose which wallet to pay from.',
     none: 'You have no wallet eligible for this purchase.',
     continue: 'Continue',

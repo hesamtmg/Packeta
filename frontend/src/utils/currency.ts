@@ -31,9 +31,10 @@ export function formatAmount(amount: string | number, currency: CurrencyInfo): s
     return currency.symbolPosition === 'PREFIX' ? `${symbol}${grouped}` : `${grouped} ${symbol}`;
   }
 
+  const grouped = groupThousands(formatted);
   return currency.symbolPosition === 'PREFIX'
-    ? `${currency.symbol}${formatted}`
-    : `${formatted} ${currency.symbol}`;
+    ? `${currency.symbol}${grouped}`
+    : `${grouped} ${currency.symbol}`;
 }
 
 // Spells out an amount (minor units, same input as formatAmount) in words,

@@ -48,7 +48,7 @@ const emit = defineEmits<{ sort: [key: string] }>();
   opacity: 0.6;
 }
 .sort-arrows.active {
-  color: var(--accent-lime);
+  color: var(--accent-blue);
   opacity: 1;
 }
 </style>

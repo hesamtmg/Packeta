@@ -314,36 +314,83 @@ function toggleTx(id: string) {
 const currencyCount = computed(
   () => new Set(wallet.wallets.map((w) => w.walletType.currency.code)).size,
 );
-const typeCount = computed(
-  () => new Set(wallet.wallets.map((w) => w.walletType.code)).size,
-);
 const latestCluster = computed(() => historyClusters.value[0] ?? null);
 
-// Drives the wallet stack's peek/expanded state (item 3): pinning it open
-// (tap/click), editing a wallet, or having an inline deposit/withdraw/
-// transfer/purchase form open all keep it expanded so the form you're
-// using doesn't collapse out from under you. Real mouse-hover expansion is
-// handled separately in pure CSS (gated to `(hover: hover)` devices) —
-// tracking hover in JS caused stray state on touch: a tap leaves a
-// "phantom" :hover the way it does on any mobile site, and an SPA route
-// change can leave a real mouse sitting over content that just shifted
-// under it, both of which produced a stack stuck open. CSS `:hover` has
-// neither problem: it always matches the live cursor position and is
-// simply switched off outside real-hover devices.
-const stackPinned = ref(false);
+// Total balance per currency across the customer's open wallets — shown in
+// the overview banner. Balances are minor-unit integer strings, so they're
+// summed as BigInt to stay exact for large Rial amounts.
+const totalsByCurrency = computed(() => {
+  const map = new Map<string, { currency: CurrencyInfo; total: bigint; count: number }>();
+  for (const w of wallet.wallets) {
+    if (w.closedAt) continue;
+    const code = w.walletType.currency.code;
+    const entry = map.get(code) ?? { currency: w.walletType.currency, total: 0n, count: 0 };
+    try {
+      entry.total += BigInt(w.balance);
+    } catch {
+      entry.total += BigInt(Math.round(Number(w.balance)));
+    }
+    entry.count += 1;
+    map.set(code, entry);
+  }
+  return [...map.values()].sort((a, b) => b.count - a.count);
+});
+const activeWalletCount = computed(() => wallet.wallets.filter((w) => !w.closedAt).length);
+
+// Wallet list (left) + selected wallet panel (right). Open wallets first,
+// closed ones sink to the bottom; a search box narrows long lists.
+const walletSearch = ref('');
+const walletListShowClosed = ref(false);
+const closedWalletCount = computed(() => wallet.wallets.filter((w) => w.closedAt).length);
+const walletList = computed(() => {
+  const term = walletSearch.value.trim().toLowerCase();
+  return wallet.wallets
+    .filter((w) => walletListShowClosed.value || !w.closedAt)
+    .filter((w) =>
+      !term ||
+      [walletDisplayName(w), w.walletType.name, w.walletType.currency.code, w.id]
+        .some((field) => field.toLowerCase().includes(term)),
+    )
+    .sort((a, b) => Number(!!a.closedAt) - Number(!!b.closedAt));
+});
+
+const selectedWalletId = ref<string | null>(null);
+const selectedWallet = computed<Wallet | null>(() =>
+  (selectedWalletId.value && findWallet(selectedWalletId.value)) ||
+  wallet.wallets.find((w) => !w.closedAt) ||
+  wallet.wallets[0] ||
+  null,
+);
+
+function selectWallet(w: Wallet) {
+  if (selectedWallet.value?.id === w.id) return;
+  selectedWalletId.value = w.id;
+  openWalletAction.value = null;
+  editingWalletId.value = null;
+}
+
 const addWalletOpen = ref(false);
 const openWalletAction = ref<{
   walletId: string;
   action: 'deposit' | 'withdraw' | 'transfer' | 'purchase';
 } | null>(null);
 
-const stackExpanded = computed(
-  () =>
-    stackPinned.value ||
-    editingWalletId.value !== null ||
-    openWalletAction.value !== null ||
-    addWalletOpen.value,
-);
+function availableActions(w: Wallet): ('deposit' | 'withdraw' | 'transfer' | 'purchase')[] {
+  if (w.closedAt) return [];
+  const list: ('deposit' | 'withdraw' | 'transfer' | 'purchase')[] = [];
+  if (w.walletType.depositable && auth.canCustomerAction('deposit')) list.push('deposit');
+  if (withdrawableWallets.value.includes(w) && auth.canCustomerAction('withdraw')) list.push('withdraw');
+  if (p2pWallets.value.includes(w) && auth.canCustomerAction('transfer')) list.push('transfer');
+  if (purchaseWallets.value.includes(w) && auth.canCustomerAction('purchaseAction')) list.push('purchase');
+  return list;
+}
+
+const ACTION_ICONS: Record<'deposit' | 'withdraw' | 'transfer' | 'purchase', string> = {
+  deposit: 'M12 4v11m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2',
+  withdraw: 'M12 15V4m0 0-4 4m4-4 4 4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2',
+  transfer: 'M4 8h13m0 0-3.5-3.5M17 8l-3.5 3.5M20 16H7m0 0 3.5-3.5M7 16l3.5 3.5',
+  purchase: 'M6 2h12v20l-3-2-3 2-3-2-3 2V2zM9 8h6M9 12h6M9 16h3',
+};
 
 function isWalletActionOpen(w: Wallet, action: 'deposit' | 'withdraw' | 'transfer' | 'purchase'): boolean {
   return openWalletAction.value?.walletId === w.id && openWalletAction.value?.action === action;
@@ -358,6 +405,7 @@ function toggleWalletAction(w: Wallet, action: 'deposit' | 'withdraw' | 'transfe
     openWalletAction.value = null;
     return;
   }
+  editingWalletId.value = null;
   openWalletAction.value = { walletId: w.id, action };
   if (action === 'deposit') {
     depositWalletId.value = w.id;
@@ -487,6 +535,7 @@ function toggleEditWallet(w: Wallet) {
     return;
   }
   editingWalletId.value = w.id;
+  openWalletAction.value = null;
   editWalletName.value = w.name ?? '';
   editRestrictedCounterparties.value = (w.restrictedCounterparties ?? []).join(', ');
   editPurchaseTimeoutMinutes.value = w.purchaseTimeoutSeconds
@@ -744,145 +793,174 @@ async function onGrantCredit() {
 
 <template>
   <AppLayout :title="t('dashboard.title')">
-    <p v-if="actionError" class="admin-error">{{ actionError }}</p>
+    <p v-if="actionError && !addWalletOpen" class="admin-error">{{ actionError }}</p>
 
-    <div class="admin-grid admin-grid-2">
-      <div class="admin-card wallet-hero-card">
-        <div class="wallet-hero-head">
-          <div>
-            <span class="hero-eyebrow">{{ t('dashboard.overviewEyebrow') }}</span>
-            <h2>{{ t('dashboard.wallets.title') }}</h2>
+    <!-- Overview banner: total balance per currency + quick stats -->
+    <section class="overview-banner">
+      <div class="overview-main">
+        <span class="overview-eyebrow">{{ t('dashboard.totalBalance') }}</span>
+        <div class="overview-totals">
+          <div v-for="entry in totalsByCurrency" :key="entry.currency.code" class="overview-total">
+            <span class="overview-total-value">{{ formatAmount(entry.total.toString(), entry.currency) }}</span>
+            <span class="overview-total-meta">{{ entry.currency.code }} · {{ t('dashboard.walletCount', { count: entry.count }, entry.count) }}</span>
           </div>
-          <button type="button" class="admin-btn admin-btn-ghost" @click="stackPinned = !stackPinned">
-            {{ stackPinned ? t('dashboard.wallets.collapseStack') : t('dashboard.wallets.expandStack') }}
+          <div v-if="!totalsByCurrency.length" class="overview-total">
+            <span class="overview-total-value">—</span>
+            <span class="overview-total-meta">{{ t('dashboard.wallets.emptyTitle') }}</span>
+          </div>
+        </div>
+      </div>
+      <div class="overview-stats">
+        <div class="overview-stat">
+          <span class="overview-stat-value">{{ activeWalletCount }}</span>
+          <span class="overview-stat-label">{{ t('dashboard.walletsLabel') }}</span>
+        </div>
+        <div class="overview-stat">
+          <span class="overview-stat-value">{{ currencyCount }}</span>
+          <span class="overview-stat-label">{{ t('dashboard.currenciesLabel') }}</span>
+        </div>
+        <div class="overview-stat">
+          <span class="overview-stat-value">{{ wallet.transactions.length }}</span>
+          <span class="overview-stat-label">{{ t('dashboard.transactionsLabel') }}</span>
+        </div>
+        <button
+          v-if="auth.canCustomerAction('addWallet')"
+          type="button"
+          class="overview-add"
+          @click="addWalletOpen = true"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
+          {{ t('dashboard.wallets.addWalletCard') }}
+        </button>
+      </div>
+    </section>
+
+    <!-- Wallets: list on the left, the selected wallet on the right -->
+    <section class="admin-card wallets-card">
+      <div class="admin-card-head">
+        <div>
+          <h2>{{ t('dashboard.wallets.title') }}</h2>
+          <p class="admin-card-sub">{{ t('dashboard.wallets.subtitle') }}</p>
+        </div>
+        <div class="wallets-tools">
+          <label class="admin-search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
+            <input v-model="walletSearch" class="admin-input" :placeholder="t('dashboard.wallets.searchPlaceholder')" />
+          </label>
+          <button
+            v-if="closedWalletCount"
+            type="button"
+            class="admin-btn admin-btn-ghost admin-btn-sm"
+            :class="{ active: walletListShowClosed }"
+            @click="walletListShowClosed = !walletListShowClosed"
+          >
+            {{ t('dashboard.wallets.showClosed', { count: closedWalletCount }) }}
           </button>
         </div>
+      </div>
 
-        <div class="wallet-stack" :class="{ expanded: stackExpanded }">
-          <article
-            v-for="(w, i) in wallet.wallets"
-            :key="w.id"
-            class="wallet-card"
-            :class="{ 'is-peek': !stackExpanded }"
-            :style="{ zIndex: wallet.wallets.length - i }"
-          >
-            <div
-              class="card-face"
-              :style="cardFaceStyle(w)"
-              role="button"
-              tabindex="0"
-              @click="stackPinned = true"
-              @keydown.enter="stackPinned = true"
+      <div v-if="!wallet.wallets.length" class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7zM3 10h18M15 15h4" /></svg>
+        <strong>{{ t('dashboard.wallets.emptyTitle') }}</strong>
+        <span>{{ t('dashboard.wallets.emptyHint') }}</span>
+        <button v-if="auth.canCustomerAction('addWallet')" type="button" class="admin-btn admin-btn-primary" @click="addWalletOpen = true">
+          {{ t('dashboard.wallets.addWalletCard') }}
+        </button>
+      </div>
+
+      <div v-else class="wallets-layout">
+        <ul class="wallet-list" role="listbox" :aria-label="t('dashboard.wallets.title')">
+          <li v-for="w in walletList" :key="w.id">
+            <button
+              type="button"
+              role="option"
+              class="wallet-row"
+              :class="{ selected: selectedWallet?.id === w.id, closed: !!w.closedAt }"
+              :aria-selected="selectedWallet?.id === w.id"
+              @click="selectWallet(w)"
             >
-              <div class="card-face-top">
-                <img v-if="cardImageSrc(w)" :src="cardImageSrc(w)!" class="card-face-logo" alt="" />
-                <span v-else class="card-face-chip" aria-hidden="true">
-                  <svg viewBox="0 0 32 24" fill="none"><rect x="1" y="1" width="30" height="22" rx="4" fill="currentColor" opacity="0.9"/><path d="M1 9h30M1 15h30M11 1v22M21 1v22" stroke="#fff" stroke-width="1"/></svg>
+              <span class="wallet-row-chip" :style="cardFaceStyle(w)">
+                <img v-if="cardImageSrc(w)" :src="cardImageSrc(w)!" alt="" />
+                <template v-else>{{ w.walletType.currency.code.slice(0, 3) }}</template>
+              </span>
+              <span class="wallet-row-main">
+                <span class="wallet-row-name">{{ walletDisplayName(w) }}</span>
+                <span class="wallet-row-meta">
+                  {{ w.walletType.name }} · <span class="wallet-row-mask">•• {{ w.id.replace(/-/g, '').slice(-4).toUpperCase() }}</span>
                 </span>
-                <span class="card-face-top-right">
-                  <span class="card-face-contactless" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none"><path d="M7 9a7 7 0 0 1 0 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M10.3 6.5a11 11 0 0 1 0 11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M13.6 4a15 15 0 0 1 0 16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              </span>
+              <span class="wallet-row-end">
+                <span class="wallet-row-balance" :class="{ negative: w.balance.startsWith('-') }">{{ formatAmount(w.balance, w.walletType.currency) }}</span>
+                <span v-if="w.closedAt" class="admin-badge">{{ t('dashboard.wallets.closedBadge') }}</span>
+                <span v-else-if="w.blockedAt" class="admin-badge admin-badge-danger"><i class="status-dot" />{{ t('dashboard.wallets.blockedShort') }}</span>
+              </span>
+            </button>
+          </li>
+          <li v-if="!walletList.length" class="wallet-list-empty">{{ t('dashboard.wallets.noMatch') }}</li>
+        </ul>
+
+        <div v-if="selectedWallet" class="wallet-panel">
+          <template v-for="sw in [selectedWallet]" :key="sw.id">
+            <div class="wallet-panel-top">
+              <div class="card-face" :style="cardFaceStyle(sw)">
+                <div class="card-face-top">
+                  <img v-if="cardImageSrc(sw)" :src="cardImageSrc(sw)!" class="card-face-logo" alt="" />
+                  <span v-else class="card-face-chip" aria-hidden="true">
+                    <svg viewBox="0 0 32 24" fill="none"><rect x="1" y="1" width="30" height="22" rx="4" fill="currentColor" opacity="0.9"/><path d="M1 9h30M1 15h30M11 1v22M21 1v22" stroke="#fff" stroke-width="1"/></svg>
                   </span>
-                  <span class="card-face-brand">{{ t('dashboard.wallets.cardBrand') }}</span>
-                </span>
+                  <span class="card-face-top-right">
+                    <span class="card-face-contactless" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none"><path d="M7 9a7 7 0 0 1 0 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M10.3 6.5a11 11 0 0 1 0 11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M13.6 4a15 15 0 0 1 0 16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                    </span>
+                    <span class="card-face-brand">{{ t('dashboard.wallets.cardBrand') }}</span>
+                  </span>
+                </div>
+                <div class="card-face-number">{{ maskedWalletId(sw) }}</div>
+                <div class="card-face-bottom">
+                  <div class="card-face-field">
+                    <span class="card-face-label">{{ t('dashboard.wallets.cardWalletLabel') }}</span>
+                    <span class="card-face-value">{{ walletDisplayName(sw) }}</span>
+                  </div>
+                  <div class="card-face-field card-face-field-right">
+                    <span class="card-face-label">{{ sw.walletType.currency.code }}</span>
+                    <span class="card-face-value">{{ sw.walletType.name }}</span>
+                  </div>
+                </div>
               </div>
-              <div class="card-face-number">{{ maskedWalletId(w) }}</div>
-              <div class="card-face-bottom">
-                <div class="card-face-field">
-                  <span class="card-face-label">{{ t('dashboard.wallets.cardWalletLabel') }}</span>
-                  <span class="card-face-value">{{ walletDisplayName(w) }}</span>
+
+              <div class="wallet-panel-summary">
+                <span class="wallet-panel-label">{{ t('dashboard.wallets.cardBalanceLabel') }}</span>
+                <span class="wallet-panel-balance">{{ formatAmount(sw.balance, sw.walletType.currency) }}</span>
+                <span v-if="sw.balance !== '0'" class="amount-words">{{ formatAmountWords(sw.balance, sw.walletType.currency) }}</span>
+                <div v-if="badges(sw).length" class="badges">
+                  <span v-for="b in badges(sw)" :key="b" class="admin-badge">{{ b }}</span>
                 </div>
-                <div class="card-face-field card-face-field-right">
-                  <span class="card-face-label">{{ t('dashboard.wallets.cardBalanceLabel') }}</span>
-                  <span class="card-face-value">{{ formatAmount(w.balance, w.walletType.currency) }}</span>
-                </div>
+                <span class="mono-id">{{ sw.id }}</span>
               </div>
             </div>
 
-            <div class="card-body">
-              <span class="mono-id">{{ w.id }}</span>
-              <div class="badges">
-                <span v-for="b in badges(w)" :key="b" class="admin-badge">{{ b }}</span>
-              </div>
-              <div class="wallet-card-actions">
-                <router-link :to="{ name: 'wallet-detail', params: { id: w.id } }" class="admin-btn admin-btn-ghost">
-                  {{ t('walletDetail.viewLink') }}
-                </router-link>
-                <router-link
-                  v-if="w.walletType.code === 'CREDIT'"
-                  :to="{ name: 'wallet-installments', params: { walletId: w.id } }"
-                  class="admin-btn admin-btn-ghost"
-                >
-                  {{ t('dashboard.installments.viewLink') }}
-                </router-link>
-                <button
-                  type="button"
-                  class="admin-btn admin-btn-ghost"
-                  :disabled="!!w.closedAt"
-                  @click="toggleEditWallet(w)"
-                >
-                  {{ editingWalletId === w.id ? t('dashboard.wallets.cancelEdit') : t('dashboard.wallets.edit') }}
-                </button>
-                <button
-                  type="button"
-                  class="admin-btn admin-btn-danger"
-                  :disabled="busy || !!w.closedAt || w.balance !== '0'"
-                  :title="w.balance !== '0' ? t('dashboard.wallets.closeRequiresZero') : ''"
-                  @click="onCloseWallet(w)"
-                >
-                  {{ t('dashboard.wallets.close') }}
-                </button>
-              </div>
+            <div v-if="availableActions(sw).length" class="action-tiles">
+              <button
+                v-for="action in availableActions(sw)"
+                :key="action"
+                type="button"
+                class="action-tile"
+                :class="{ active: isWalletActionOpen(sw, action) }"
+                @click="toggleWalletAction(sw, action)"
+              >
+                <span class="action-tile-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path :d="ACTION_ICONS[action]" /></svg>
+                </span>
+                {{ t(`dashboard.actions.${action}.title`) }}
+              </button>
+            </div>
 
-              <!-- Item 2: quick actions live on the wallet that can actually
-                   perform them, instead of a separate panel with its own
-                   "choose wallet" dropdown. -->
-              <div class="wallet-quick-actions">
-                <button
-                  v-if="w.walletType.depositable && auth.canCustomerAction('deposit')"
-                  type="button"
-                  class="admin-btn admin-btn-ghost"
-                  :class="{ active: isWalletActionOpen(w, 'deposit') }"
-                  @click="toggleWalletAction(w, 'deposit')"
-                >
-                  {{ t('dashboard.actions.deposit.title') }}
-                </button>
-                <button
-                  v-if="withdrawableWallets.includes(w) && auth.canCustomerAction('withdraw')"
-                  type="button"
-                  class="admin-btn admin-btn-ghost"
-                  :class="{ active: isWalletActionOpen(w, 'withdraw') }"
-                  @click="toggleWalletAction(w, 'withdraw')"
-                >
-                  {{ t('dashboard.actions.withdraw.title') }}
-                </button>
-                <button
-                  v-if="p2pWallets.includes(w) && auth.canCustomerAction('transfer')"
-                  type="button"
-                  class="admin-btn admin-btn-ghost"
-                  :class="{ active: isWalletActionOpen(w, 'transfer') }"
-                  @click="toggleWalletAction(w, 'transfer')"
-                >
-                  {{ t('dashboard.actions.transfer.title') }}
-                </button>
-                <button
-                  v-if="purchaseWallets.includes(w) && auth.canCustomerAction('purchaseAction')"
-                  type="button"
-                  class="admin-btn admin-btn-ghost"
-                  :class="{ active: isWalletActionOpen(w, 'purchase') }"
-                  @click="toggleWalletAction(w, 'purchase')"
-                >
-                  {{ t('dashboard.actions.purchase.title') }}
-                </button>
-              </div>
-
-              <form v-if="isWalletActionOpen(w, 'deposit')" class="wallet-inline-form" @submit.prevent="onDeposit">
-                <input v-model="depositAmount" type="number" min="0" :step="depositStep" class="admin-input" required />
+            <form v-if="isWalletActionOpen(sw, 'deposit')" class="wallet-inline-form" @submit.prevent="onDeposit">
+                <input v-model="depositAmount" type="number" :placeholder="t('dashboard.actions.amountPlaceholder')" min="0" :step="depositStep" class="admin-input" required />
                 <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.actions.deposit.submit') }}</button>
               </form>
-
-              <form v-if="isWalletActionOpen(w, 'withdraw')" class="wallet-inline-form" @submit.prevent="onWithdraw">
-                <input v-model="withdrawAmount" type="number" min="0" :step="withdrawStep" class="admin-input" required />
+<form v-if="isWalletActionOpen(sw, 'withdraw')" class="wallet-inline-form" @submit.prevent="onWithdraw">
+                <input v-model="withdrawAmount" type="number" :placeholder="t('dashboard.actions.amountPlaceholder')" min="0" :step="withdrawStep" class="admin-input" required />
                 <select v-model="withdrawRailType" class="admin-input" required>
                   <option value="" disabled>{{ t('dashboard.actions.withdraw.chooseRail') }}</option>
                   <option value="POL_PAY">{{ t('dashboard.settlement.rail.POL_PAY') }}</option>
@@ -899,21 +977,51 @@ async function onGrantCredit() {
                 />
                 <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.actions.withdraw.submit') }}</button>
               </form>
-
-              <form v-if="isWalletActionOpen(w, 'transfer')" class="wallet-inline-form" @submit.prevent="onTransfer">
+<form v-if="isWalletActionOpen(sw, 'transfer')" class="wallet-inline-form" @submit.prevent="onTransfer">
                 <input v-model="transferEmail" type="email" :placeholder="t('dashboard.actions.transfer.recipientPlaceholder')" class="admin-input" required />
-                <input v-model="transferAmount" type="number" min="0" :step="transferStep" class="admin-input" required />
+                <input v-model="transferAmount" type="number" :placeholder="t('dashboard.actions.amountPlaceholder')" min="0" :step="transferStep" class="admin-input" required />
                 <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.actions.transfer.submit') }}</button>
               </form>
-
-              <form v-if="isWalletActionOpen(w, 'purchase')" class="wallet-inline-form" @submit.prevent="onPurchase">
+<form v-if="isWalletActionOpen(sw, 'purchase')" class="wallet-inline-form" @submit.prevent="onPurchase">
                 <input v-model="purchaseEmail" type="email" :placeholder="t('dashboard.actions.purchase.merchantPlaceholder')" class="admin-input" required />
-                <input v-model="purchaseAmount" type="number" min="0" :step="purchaseStep" class="admin-input" required />
+                <input v-model="purchaseAmount" type="number" :placeholder="t('dashboard.actions.amountPlaceholder')" min="0" :step="purchaseStep" class="admin-input" required />
                 <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.actions.purchase.submit') }}</button>
               </form>
 
-              <form v-if="editingWalletId === w.id" class="wallet-edit-form" @submit.prevent="onSaveWalletEdit(w)">
-                <label>
+            <div class="wallet-panel-links">
+              <router-link :to="{ name: 'wallet-detail', params: { id: sw.id } }" class="admin-btn admin-btn-ghost admin-btn-sm">
+                {{ t('walletDetail.viewLink') }}
+              </router-link>
+              <router-link
+                v-if="sw.walletType.code === 'CREDIT'"
+                :to="{ name: 'wallet-installments', params: { walletId: sw.id } }"
+                class="admin-btn admin-btn-ghost admin-btn-sm"
+              >
+                {{ t('dashboard.installments.viewLink') }}
+              </router-link>
+              <button
+                type="button"
+                class="admin-btn admin-btn-ghost admin-btn-sm"
+                :class="{ active: editingWalletId === sw.id }"
+                :disabled="!!sw.closedAt"
+                @click="toggleEditWallet(sw)"
+              >
+                {{ t('dashboard.wallets.edit') }}
+              </button>
+              <span class="wallet-panel-links-spacer" />
+              <button
+                type="button"
+                class="admin-btn admin-btn-danger admin-btn-sm"
+                :disabled="busy || !!sw.closedAt || sw.balance !== '0'"
+                :title="sw.balance !== '0' ? t('dashboard.wallets.closeRequiresZero') : ''"
+                @click="onCloseWallet(sw)"
+              >
+                {{ t('dashboard.wallets.close') }}
+              </button>
+            </div>
+
+            <form v-if="editingWalletId === sw.id" class="wallet-edit-form form-grid" @submit.prevent="onSaveWalletEdit(sw)">
+                <label class="field">
                   {{ t('dashboard.wallets.nameLabel') }}
                   <input
                     v-model="editWalletName"
@@ -923,7 +1031,7 @@ async function onGrantCredit() {
                     class="admin-input"
                   />
                 </label>
-                <label>
+                <label class="field">
                   {{ t('dashboard.wallets.marketLabel') }}
                   <input
                     v-model="editRestrictedCounterparties"
@@ -932,19 +1040,19 @@ async function onGrantCredit() {
                     class="admin-input"
                   />
                 </label>
-                <span class="hint">{{ t('dashboard.wallets.marketHint') }}</span>
+                <span class="field-hint span-2">{{ t('dashboard.wallets.marketHint') }}</span>
 
-                <label>
+                <label class="field">
                   {{ t('dashboard.wallets.minAmountLabel') }}
-                  <input v-model="editMinAmount" type="number" min="0" :step="amountStep(w.walletType.currency)" class="admin-input" />
+                  <input v-model="editMinAmount" type="number" min="0" :step="amountStep(sw.walletType.currency)" class="admin-input" />
                 </label>
-                <label>
+                <label class="field">
                   {{ t('dashboard.wallets.maxAmountLabel') }}
-                  <input v-model="editMaxAmount" type="number" min="0" :step="amountStep(w.walletType.currency)" class="admin-input" />
+                  <input v-model="editMaxAmount" type="number" min="0" :step="amountStep(sw.walletType.currency)" class="admin-input" />
                 </label>
 
-                <template v-if="w.walletType.supportsAutoWithdraw">
-                  <div class="settlement-rows">
+                <template v-if="sw.walletType.supportsAutoWithdraw">
+                  <div class="settlement-rows span-2">
                     <span class="hint">{{ t('dashboard.settlement.walletHint') }}</span>
                     <div v-for="(row, i2) in editSettlementAccounts" :key="i2" class="settlement-row">
                       <input v-model="row.iban" type="text" :placeholder="t('dashboard.settlement.ibanPlaceholder')" class="admin-input" />
@@ -957,7 +1065,7 @@ async function onGrantCredit() {
                     </button>
                   </div>
 
-                  <label>
+                  <label class="field">
                     {{ t('dashboard.settlement.railLabel') }}
                     <select v-model="editRailType" class="admin-input">
                       <option value="">{{ t('dashboard.settlement.railPlaceholder') }}</option>
@@ -967,7 +1075,7 @@ async function onGrantCredit() {
                       <option value="BANK_TRANSFER">{{ t('dashboard.settlement.rail.BANK_TRANSFER') }}</option>
                     </select>
                   </label>
-                  <label v-if="editRailType">
+                  <label v-if="editRailType" class="field">
                     {{ t('dashboard.settlement.railScheduleLabel') }}
                     <input
                       v-model="editRailScheduleTimes"
@@ -981,249 +1089,63 @@ async function onGrantCredit() {
                   </label>
                 </template>
 
-                <template v-if="w.walletType.allowPurchaseIn">
-                  <span class="hint">{{ t('dashboard.wallets.verifyTimeoutLabel') }}</span>
-                  <input v-model="editPurchaseTimeoutMinutes" type="number" min="1" placeholder="15" class="admin-input" />
-                  <label>
+                <template v-if="sw.walletType.allowPurchaseIn">
+                  <label class="field">
+                    {{ t('dashboard.wallets.verifyTimeoutLabel') }}
+                    <input v-model="editPurchaseTimeoutMinutes" type="number" min="1" placeholder="15" class="admin-input" />
+                  </label>
+                  <label class="field">
                     {{ t('dashboard.wallets.terminalIdLabel') }}
                     <input v-model="editTerminalId" type="text" class="admin-input" />
                   </label>
-                  <label>
+                  <label class="field">
                     {{ t('dashboard.wallets.acceptorCodeLabel') }}
                     <input v-model="editAcceptorCode" type="text" class="admin-input" />
                   </label>
-                  <label>
+                  <label class="field">
                     {{ t('dashboard.wallets.storeNameLabel') }}
                     <input v-model="editStoreName" type="text" class="admin-input" />
                   </label>
-                  <label>
+                  <label class="field">
                     {{ t('dashboard.wallets.storeSiteLabel') }}
                     <input v-model="editStoreSite" type="url" class="admin-input" />
                   </label>
-                  <label>
+                  <label class="field">
                     {{ t('dashboard.wallets.allowedIpsLabel') }}
                     <input v-model="editAllowedIps" type="text" :placeholder="t('dashboard.wallets.allowedIpsPlaceholder')" class="admin-input" />
                   </label>
-                  <label>
+                  <label class="field">
                     {{ t('dashboard.wallets.callbackUrlLabel') }}
                     <input v-model="editCallbackUrl" type="url" class="admin-input" />
                   </label>
-                  <label>
+                  <label class="field">
                     {{ t('dashboard.wallets.categoryLabel') }}
                     <input v-model="editCategory" type="text" class="admin-input" />
                   </label>
-                  <label>
+                  <label class="field">
                     {{ t('dashboard.wallets.subCategoryLabel') }}
                     <input v-model="editSubCategory" type="text" class="admin-input" />
                   </label>
                 </template>
 
-                <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.wallets.saveEdit') }}</button>
+                <div class="form-actions">
+                  <button type="button" class="admin-btn admin-btn-ghost" @click="editingWalletId = null">{{ t('dashboard.wallets.cancelEdit') }}</button>
+                  <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.wallets.saveEdit') }}</button>
+                </div>
               </form>
-            </div>
-          </article>
-
-          <article
-            v-if="auth.canCustomerAction('addWallet')"
-            class="wallet-card wallet-card-add"
-            :class="{ 'is-peek': !stackExpanded }"
-            :style="{ zIndex: 0 }"
-          >
-            <button
-              type="button"
-              class="card-face card-face-add"
-              @click="addWalletOpen = true"
-            >
-              <span class="card-face-add-icon" aria-hidden="true">+</span>
-              <span>{{ t('dashboard.wallets.addWalletCard') }}</span>
-            </button>
-
-            <div class="card-body">
-              <div class="wallet-card-add-head">
-                <span class="wallet-type">{{ t('dashboard.wallets.addWalletCard') }}</span>
-                <button type="button" class="admin-btn admin-btn-ghost" @click="addWalletOpen = false">
-                  {{ t('dashboard.wallets.cancelEdit') }}
-                </button>
-              </div>
-
-              <form class="add-wallet" @submit.prevent="onAddWallet">
-                <select v-model="newWalletType" class="admin-input" required>
-                  <option value="" disabled>{{ t('dashboard.wallets.addPlaceholder') }}</option>
-                  <option v-for="t2 in wallet.walletTypes" :key="t2.id" :value="t2.id">
-                    {{ t2.name }} ({{ t2.currency.code }})
-                  </option>
-                </select>
-
-                <label class="market-field">
-                  {{ t('dashboard.wallets.nameLabel') }}
-                  <input
-                    v-model="newWalletName"
-                    type="text"
-                    maxlength="100"
-                    :placeholder="t('dashboard.wallets.namePlaceholder')"
-                    class="admin-input"
-                  />
-                </label>
-
-                <label class="market-field">
-                  {{ t('dashboard.wallets.marketLabel') }}
-                  <input
-                    v-model="newWalletRestrictedCounterparties"
-                    type="text"
-                    :placeholder="t('dashboard.wallets.marketPlaceholder')"
-                    class="admin-input"
-                  />
-                </label>
-                <span class="hint">{{ t('dashboard.wallets.marketHint') }}</span>
-
-                <label class="market-field">
-                  {{ t('dashboard.wallets.minAmountLabel') }}
-                  <input
-                    v-model="newWalletMinAmount"
-                    type="number"
-                    min="0"
-                    :step="selectedNewWalletType ? amountStep(selectedNewWalletType.currency) : '0.01'"
-                    class="admin-input"
-                  />
-                </label>
-                <label class="market-field">
-                  {{ t('dashboard.wallets.maxAmountLabel') }}
-                  <input
-                    v-model="newWalletMaxAmount"
-                    type="number"
-                    min="0"
-                    :step="selectedNewWalletType ? amountStep(selectedNewWalletType.currency) : '0.01'"
-                    class="admin-input"
-                  />
-                </label>
-
-                <label v-if="showVirtualAmountField" class="market-field">
-                  {{ t('dashboard.wallets.virtualAmountLabel') }}
-                  <input
-                    v-model="newWalletVirtualAmount"
-                    type="number"
-                    min="0"
-                    :step="selectedNewWalletType ? amountStep(selectedNewWalletType.currency) : '0.01'"
-                    :placeholder="t('dashboard.wallets.virtualAmountPlaceholder')"
-                    class="admin-input"
-                  />
-                </label>
-
-                <template v-if="showAutoWithdrawFields">
-                  <div class="settlement-rows">
-                    <span class="hint">{{ t('dashboard.settlement.walletHint') }}</span>
-                    <div v-for="(row, i3) in newWalletSettlementAccounts" :key="i3" class="settlement-row">
-                      <input v-model="row.iban" type="text" :placeholder="t('dashboard.settlement.ibanPlaceholder')" class="admin-input" />
-                      <input v-model="row.label" type="text" :placeholder="t('dashboard.settlement.labelPlaceholder')" class="admin-input" />
-                      <input v-model="row.percent" type="number" min="0" max="100" :placeholder="t('dashboard.settlement.percentPlaceholder')" class="admin-input" />
-                      <button type="button" class="admin-btn admin-btn-ghost" @click="removeSettlementAccountRow(i3)">{{ t('dashboard.settlement.remove') }}</button>
-                    </div>
-                    <button type="button" class="admin-btn admin-btn-ghost" @click="addSettlementAccountRow">
-                      {{ t('dashboard.settlement.addAccount') }}
-                    </button>
-                  </div>
-
-                  <label class="market-field">
-                    {{ t('dashboard.settlement.railLabel') }}
-                    <select v-model="newWalletRailType" class="admin-input">
-                      <option value="">{{ t('dashboard.settlement.railPlaceholder') }}</option>
-                      <option value="POL_PAY">{{ t('dashboard.settlement.rail.POL_PAY') }}</option>
-                      <option value="PAYA">{{ t('dashboard.settlement.rail.PAYA') }}</option>
-                      <option value="SATNA">{{ t('dashboard.settlement.rail.SATNA') }}</option>
-                      <option value="BANK_TRANSFER">{{ t('dashboard.settlement.rail.BANK_TRANSFER') }}</option>
-                    </select>
-                  </label>
-                  <label v-if="newWalletRailType" class="market-field">
-                    {{ t('dashboard.settlement.railScheduleLabel') }}
-                    <input
-                      v-model="newWalletRailScheduleTimes"
-                      type="text"
-                      :placeholder="t('dashboard.settlement.railSchedulePlaceholder')"
-                      class="admin-input"
-                    />
-                    <span class="hint">
-                      {{ newWalletRailType === 'BANK_TRANSFER' ? t('dashboard.settlement.railScheduleRequiredHint') : t('dashboard.settlement.railScheduleHint') }}
-                    </span>
-                  </label>
-                </template>
-
-                <template v-if="showPurchaseTimeoutField">
-                  <span class="hint">{{ t('dashboard.wallets.verifyTimeoutLabel') }}</span>
-                  <input
-                    v-model="newWalletPurchaseTimeoutMinutes"
-                    type="number"
-                    min="1"
-                    placeholder="15"
-                    class="admin-input"
-                  />
-                  <label class="market-field">
-                    {{ t('dashboard.wallets.terminalIdLabel') }}
-                    <input v-model="newWalletTerminalId" type="text" class="admin-input" />
-                  </label>
-                  <label class="market-field">
-                    {{ t('dashboard.wallets.acceptorCodeLabel') }}
-                    <input v-model="newWalletAcceptorCode" type="text" class="admin-input" />
-                  </label>
-                  <label class="market-field">
-                    {{ t('dashboard.wallets.storeNameLabel') }}
-                    <input v-model="newWalletStoreName" type="text" class="admin-input" />
-                  </label>
-                  <label class="market-field">
-                    {{ t('dashboard.wallets.storeSiteLabel') }}
-                    <input v-model="newWalletStoreSite" type="url" class="admin-input" />
-                  </label>
-                  <label class="market-field">
-                    {{ t('dashboard.wallets.allowedIpsLabel') }}
-                    <input v-model="newWalletAllowedIps" type="text" :placeholder="t('dashboard.wallets.allowedIpsPlaceholder')" class="admin-input" />
-                  </label>
-                  <label class="market-field">
-                    {{ t('dashboard.wallets.callbackUrlLabel') }}
-                    <input v-model="newWalletCallbackUrl" type="url" class="admin-input" />
-                  </label>
-                  <label class="market-field">
-                    {{ t('dashboard.wallets.categoryLabel') }}
-                    <input v-model="newWalletCategory" type="text" class="admin-input" />
-                  </label>
-                  <label class="market-field">
-                    {{ t('dashboard.wallets.subCategoryLabel') }}
-                    <input v-model="newWalletSubCategory" type="text" class="admin-input" />
-                  </label>
-                </template>
-
-                <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.wallets.add') }}</button>
-              </form>
-            </div>
-          </article>
-        </div>
-
-        <div class="hero-pills">
-          <div class="pill">
-            <span class="pill-value">{{ wallet.wallets.length }}</span>
-            <span class="pill-label"><i class="dot dot-orange" />{{ t('dashboard.walletsLabel') }}</span>
-          </div>
-          <div class="pill">
-            <span class="pill-value">{{ currencyCount }}</span>
-            <span class="pill-label"><i class="dot dot-lime" />{{ t('dashboard.currenciesLabel') }}</span>
-          </div>
-          <div class="pill">
-            <span class="pill-value">{{ wallet.transactions.length }}</span>
-            <span class="pill-label"><i class="dot dot-blue" />{{ t('dashboard.transactionsLabel') }}</span>
-          </div>
-          <div class="pill">
-            <span class="pill-value">{{ typeCount }}</span>
-            <span class="pill-label"><i class="dot dot-red" />{{ t('dashboard.typesLabel') }}</span>
-          </div>
+          </template>
         </div>
       </div>
+    </section>
 
-      <div class="side-stack">
-        <div class="admin-card">
-          <h2>{{ t('dashboard.activityHeading') }}</h2>
-          <ActivityChart :transactions="wallet.transactions" />
-        </div>
-        <div class="admin-card">
-          <h2>{{ t('dashboard.latestTransactionHeading') }}</h2>
-          <template v-if="latestCluster">
+    <div class="admin-grid insights-grid">
+      <div class="admin-card">
+        <h2>{{ t('dashboard.activityHeading') }}</h2>
+        <ActivityChart :transactions="wallet.transactions" />
+      </div>
+      <div class="admin-card">
+        <h2>{{ t('dashboard.latestTransactionHeading') }}</h2>
+        <template v-if="latestCluster">
             <div class="latest-amount" :class="isIncoming(latestCluster.primary) ? 'money-in' : 'money-out'">
               {{ isIncoming(latestCluster.primary) ? '+' : '−' }} {{ formatTransactionAmount(latestCluster.primary) }}
             </div>
@@ -1282,11 +1204,10 @@ async function onGrantCredit() {
             </router-link>
           </template>
           <p v-else class="history-empty">{{ t('dashboard.latestTransactionEmpty') }}</p>
-        </div>
       </div>
     </div>
 
-    <div class="admin-grid admin-grid-2">
+    <div class="admin-grid tools-grid">
       <div v-if="purchaseInCurrencies.length" class="admin-card">
         <h2>{{ t('dashboard.charge.title') }}</h2>
         <p class="hint">{{ t('dashboard.charge.hint') }}</p>
@@ -1484,124 +1405,588 @@ async function onGrantCredit() {
         <p v-if="!historyClusters.length" class="history-empty">{{ t('dashboard.history.empty') }}</p>
       </div>
     </div>
+  
+    <Teleport to="body">
+      <div v-if="addWalletOpen" class="customer-theme app-themable modal-host" @keydown.esc="addWalletOpen = false">
+        <div class="admin-modal-backdrop" @click.self="addWalletOpen = false">
+          <div class="admin-modal" role="dialog" aria-modal="true" :aria-label="t('dashboard.wallets.addWalletCard')">
+            <div class="admin-modal-head">
+              <div>
+                <h2>{{ t('dashboard.wallets.addWalletCard') }}</h2>
+                <p class="admin-card-sub">{{ t('dashboard.wallets.addWalletHint') }}</p>
+              </div>
+              <button type="button" class="admin-icon-btn" :aria-label="t('dashboard.wallets.cancelEdit')" @click="addWalletOpen = false">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+              </button>
+            </div>
+            <form class="add-wallet form-grid" @submit.prevent="onAddWallet">
+                <label class="field span-2">
+                  {{ t('dashboard.wallets.typeLabel') }}
+                <select v-model="newWalletType" class="admin-input" required>
+                  <option value="" disabled>{{ t('dashboard.wallets.addPlaceholder') }}</option>
+                  <option v-for="t2 in wallet.walletTypes" :key="t2.id" :value="t2.id">
+                    {{ t2.name }} ({{ t2.currency.code }})
+                  </option>
+                </select>
+                </label>
+
+                <label class="field span-2">
+                  {{ t('dashboard.wallets.nameLabel') }}
+                  <input
+                    v-model="newWalletName"
+                    type="text"
+                    maxlength="100"
+                    :placeholder="t('dashboard.wallets.namePlaceholder')"
+                    class="admin-input"
+                  />
+                </label>
+
+                <label class="field">
+                  {{ t('dashboard.wallets.marketLabel') }}
+                  <input
+                    v-model="newWalletRestrictedCounterparties"
+                    type="text"
+                    :placeholder="t('dashboard.wallets.marketPlaceholder')"
+                    class="admin-input"
+                  />
+                </label>
+                <span class="field-hint span-2">{{ t('dashboard.wallets.marketHint') }}</span>
+
+                <label class="field">
+                  {{ t('dashboard.wallets.minAmountLabel') }}
+                  <input
+                    v-model="newWalletMinAmount"
+                    type="number"
+                    min="0"
+                    :step="selectedNewWalletType ? amountStep(selectedNewWalletType.currency) : '0.01'"
+                    class="admin-input"
+                  />
+                </label>
+                <label class="field">
+                  {{ t('dashboard.wallets.maxAmountLabel') }}
+                  <input
+                    v-model="newWalletMaxAmount"
+                    type="number"
+                    min="0"
+                    :step="selectedNewWalletType ? amountStep(selectedNewWalletType.currency) : '0.01'"
+                    class="admin-input"
+                  />
+                </label>
+
+                <label v-if="showVirtualAmountField" class="field">
+                  {{ t('dashboard.wallets.virtualAmountLabel') }}
+                  <input
+                    v-model="newWalletVirtualAmount"
+                    type="number"
+                    min="0"
+                    :step="selectedNewWalletType ? amountStep(selectedNewWalletType.currency) : '0.01'"
+                    :placeholder="t('dashboard.wallets.virtualAmountPlaceholder')"
+                    class="admin-input"
+                  />
+                </label>
+
+                <template v-if="showAutoWithdrawFields">
+                  <div class="settlement-rows span-2">
+                    <span class="hint">{{ t('dashboard.settlement.walletHint') }}</span>
+                    <div v-for="(row, i3) in newWalletSettlementAccounts" :key="i3" class="settlement-row">
+                      <input v-model="row.iban" type="text" :placeholder="t('dashboard.settlement.ibanPlaceholder')" class="admin-input" />
+                      <input v-model="row.label" type="text" :placeholder="t('dashboard.settlement.labelPlaceholder')" class="admin-input" />
+                      <input v-model="row.percent" type="number" min="0" max="100" :placeholder="t('dashboard.settlement.percentPlaceholder')" class="admin-input" />
+                      <button type="button" class="admin-btn admin-btn-ghost" @click="removeSettlementAccountRow(i3)">{{ t('dashboard.settlement.remove') }}</button>
+                    </div>
+                    <button type="button" class="admin-btn admin-btn-ghost" @click="addSettlementAccountRow">
+                      {{ t('dashboard.settlement.addAccount') }}
+                    </button>
+                  </div>
+
+                  <label class="field">
+                    {{ t('dashboard.settlement.railLabel') }}
+                    <select v-model="newWalletRailType" class="admin-input">
+                      <option value="">{{ t('dashboard.settlement.railPlaceholder') }}</option>
+                      <option value="POL_PAY">{{ t('dashboard.settlement.rail.POL_PAY') }}</option>
+                      <option value="PAYA">{{ t('dashboard.settlement.rail.PAYA') }}</option>
+                      <option value="SATNA">{{ t('dashboard.settlement.rail.SATNA') }}</option>
+                      <option value="BANK_TRANSFER">{{ t('dashboard.settlement.rail.BANK_TRANSFER') }}</option>
+                    </select>
+                  </label>
+                  <label v-if="newWalletRailType" class="field">
+                    {{ t('dashboard.settlement.railScheduleLabel') }}
+                    <input
+                      v-model="newWalletRailScheduleTimes"
+                      type="text"
+                      :placeholder="t('dashboard.settlement.railSchedulePlaceholder')"
+                      class="admin-input"
+                    />
+                    <span class="hint">
+                      {{ newWalletRailType === 'BANK_TRANSFER' ? t('dashboard.settlement.railScheduleRequiredHint') : t('dashboard.settlement.railScheduleHint') }}
+                    </span>
+                  </label>
+                </template>
+
+                <template v-if="showPurchaseTimeoutField">
+                  <label class="field">
+                    {{ t('dashboard.wallets.verifyTimeoutLabel') }}
+                    <input v-model="newWalletPurchaseTimeoutMinutes" type="number" min="1" placeholder="15" class="admin-input" />
+                  </label>
+                  <label class="field">
+                    {{ t('dashboard.wallets.terminalIdLabel') }}
+                    <input v-model="newWalletTerminalId" type="text" class="admin-input" />
+                  </label>
+                  <label class="field">
+                    {{ t('dashboard.wallets.acceptorCodeLabel') }}
+                    <input v-model="newWalletAcceptorCode" type="text" class="admin-input" />
+                  </label>
+                  <label class="field">
+                    {{ t('dashboard.wallets.storeNameLabel') }}
+                    <input v-model="newWalletStoreName" type="text" class="admin-input" />
+                  </label>
+                  <label class="field">
+                    {{ t('dashboard.wallets.storeSiteLabel') }}
+                    <input v-model="newWalletStoreSite" type="url" class="admin-input" />
+                  </label>
+                  <label class="field">
+                    {{ t('dashboard.wallets.allowedIpsLabel') }}
+                    <input v-model="newWalletAllowedIps" type="text" :placeholder="t('dashboard.wallets.allowedIpsPlaceholder')" class="admin-input" />
+                  </label>
+                  <label class="field">
+                    {{ t('dashboard.wallets.callbackUrlLabel') }}
+                    <input v-model="newWalletCallbackUrl" type="url" class="admin-input" />
+                  </label>
+                  <label class="field">
+                    {{ t('dashboard.wallets.categoryLabel') }}
+                    <input v-model="newWalletCategory" type="text" class="admin-input" />
+                  </label>
+                  <label class="field">
+                    {{ t('dashboard.wallets.subCategoryLabel') }}
+                    <input v-model="newWalletSubCategory" type="text" class="admin-input" />
+                  </label>
+                </template>
+
+                <p v-if="actionError" class="admin-error span-2">{{ actionError }}</p>
+                <div class="form-actions">
+                  <button type="button" class="admin-btn admin-btn-ghost" @click="addWalletOpen = false">{{ t('dashboard.wallets.cancelEdit') }}</button>
+                  <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy || !newWalletType">{{ t('dashboard.wallets.add') }}</button>
+                </div>
+              </form>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </AppLayout>
 </template>
 
 <style scoped>
-.hero-eyebrow {
-  font-size: 0.78rem;
-  color: var(--accent-blue);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 600;
-}
-
-.wallet-hero-card {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  align-self: start;
-}
-
-.wallet-hero-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-.wallet-hero-head h2 {
-  margin: 4px 0 0;
-}
-
-/* Item 3: wallets stack like cards in a wallet — peeking behind the top
-   one until the stack is hovered, pinned open, or a card inside it needs
-   attention (editing, an inline action form). */
-/* Item: the wallet stack is capped so the payment-card visual stays a
-   sensible size on wide desktop columns; on narrow/mobile viewports the
-   container itself is narrower than the cap, so the card just fills it. */
-.wallet-stack {
-  display: flex;
-  flex-direction: column;
-  max-width: 340px;
-}
-.wallet-card {
+/* ---------- Overview banner ---------- */
+.overview-banner {
   position: relative;
-  transition: margin-top 260ms ease;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  padding: 26px 28px;
+  border-radius: var(--radius-lg);
+  background: var(--hero-gradient);
+  color: #fff;
+  box-shadow: 0 20px 44px -24px rgba(26, 63, 168, 0.75);
 }
-/* A percentage margin-top resolves against the *containing block's width*,
-   not the element's own height — exploited here so each card overlaps the
-   one before it by a fixed fraction of the (fluid) card width, leaving a
-   proportional sliver visible no matter the viewport size. */
-.wallet-stack:not(.expanded) .wallet-card:not(:first-child) {
-  margin-top: -52%;
+.overview-banner::before,
+.overview-banner::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.22), transparent 70%);
 }
-.wallet-stack.expanded .wallet-card:not(:first-child) {
-  margin-top: 14px;
+.overview-banner::before {
+  width: 360px;
+  height: 360px;
+  top: -180px;
+  inset-inline-end: -60px;
 }
-.wallet-stack .wallet-card:first-child {
-  margin-top: 0 !important;
+.overview-banner::after {
+  width: 260px;
+  height: 260px;
+  bottom: -160px;
+  inset-inline-start: 30%;
+  opacity: 0.6;
 }
-.wallet-card.is-peek .card-body {
-  display: none;
+.overview-main,
+.overview-stats {
+  position: relative;
+}
+.overview-eyebrow {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.75);
+}
+.overview-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 36px;
+  margin-top: 6px;
+}
+.overview-total {
+  display: flex;
+  flex-direction: column;
+}
+.overview-total-value {
+  font-size: clamp(1.6rem, 3.4vw, 2.3rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.overview-total-meta {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.75);
+}
+.overview-stats {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.overview-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 82px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(6px);
+}
+.overview-stat-value {
+  font-size: 1.2rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.overview-stat-label {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.78);
+}
+.overview-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 46px;
+  padding: 0 18px;
+  border-radius: 14px;
+  border: none;
+  background: #fff;
+  color: #1a3fa8;
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.88rem;
+  cursor: pointer;
+  box-shadow: 0 10px 24px -12px rgba(0, 0, 0, 0.5);
+  transition: transform 0.12s;
+}
+.overview-add:hover {
+  transform: translateY(-1px);
+}
+.overview-add svg {
+  width: 18px;
+  height: 18px;
 }
 
-/* Real-hover devices (a mouse, not a finger) also get pointer-driven
-   expand — CSS `:hover`, not JS state, so it always tracks the live
-   cursor with no way to get stuck open the way a tap's synthetic hover
-   can on touch. Touch/no-hover devices rely solely on tapping a card or
-   the "Show all wallets" button (stackPinned) — see the note by
-   stackExpanded's declaration. */
-@media (hover: hover) and (pointer: fine) {
-  .wallet-stack:not(.expanded):hover .wallet-card:not(:first-child) {
-    margin-top: 14px;
-  }
-  .wallet-stack:not(.expanded):hover .wallet-card.is-peek .card-body {
-    display: flex;
-  }
-  .wallet-stack:not(.expanded) .card-face:hover {
-    transform: translateY(-3px);
-  }
+/* ---------- Wallet list + panel ---------- */
+.wallets-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
-.card-face:focus-visible {
-  outline: 2px solid #fff;
-  outline-offset: 2px;
+.wallets-tools .admin-search {
+  width: 240px;
+}
+.wallets-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 22px;
+  align-items: start;
+}
+.wallet-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 640px;
+  overflow-y: auto;
+  padding-inline-end: 4px;
+}
+.wallet-list-empty {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  padding: 18px 8px;
+  text-align: center;
+}
+.wallet-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.wallet-row:hover {
+  background: var(--hover-tint);
+}
+.wallet-row.selected {
+  background: var(--active-tint);
+  border-color: color-mix(in srgb, var(--accent-blue) 40%, transparent);
+}
+.wallet-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.wallet-row.closed {
+  opacity: 0.6;
+}
+.wallet-row-chip {
+  flex: none;
+  width: 52px;
+  height: 34px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  box-shadow: 0 6px 14px -8px rgba(15, 23, 42, 0.6), inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+}
+.wallet-row-chip img {
+  max-width: 34px;
+  max-height: 18px;
+  object-fit: contain;
+}
+.wallet-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.wallet-row-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wallet-row-meta {
+  font-size: 0.76rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wallet-row-mask {
+  direction: ltr;
+  unicode-bidi: isolate;
+  font-variant-numeric: tabular-nums;
+}
+.wallet-row-end {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+.wallet-row-balance {
+  font-weight: 700;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.wallet-row-balance.negative {
+  color: var(--accent-red);
 }
 
-/* The payment-card face itself: fixed aspect ratio so it always reads as
-   a card, a deterministic gradient per wallet type, a chip + masked
-   number + balance + wallet/currency row like a real bank card. */
+.wallet-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+  border-radius: var(--radius-md);
+  background: var(--panel-bg);
+  border: 1px solid var(--card-border);
+  min-width: 0;
+}
+.wallet-panel-top {
+  display: grid;
+  grid-template-columns: minmax(0, 260px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: center;
+}
+.wallet-panel-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.wallet-panel-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.wallet-panel-balance {
+  font-size: 1.9rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
+}
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.action-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 10px;
+}
+.action-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 8px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.1s, box-shadow 0.15s;
+}
+.action-tile:hover {
+  border-color: var(--accent-blue);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-card);
+}
+.action-tile.active {
+  border-color: var(--accent-blue);
+  background: var(--active-tint);
+  color: var(--accent-blue);
+}
+.action-tile-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--badge-tint-blue);
+  color: var(--accent-blue);
+}
+.action-tile.active .action-tile-icon {
+  background: var(--accent-blue);
+  color: #fff;
+}
+.action-tile-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.wallet-inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 14px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  animation: pop-in 0.15s ease;
+}
+.wallet-inline-form input,
+.wallet-inline-form select {
+  flex: 1;
+  min-width: 150px;
+}
+
+.wallet-panel-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--card-border);
+}
+.wallet-panel-links-spacer {
+  flex: 1;
+}
+
+.wallet-edit-form {
+  padding: 16px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+}
+
+.modal-host {
+  min-height: 0;
+  background: none;
+}
+
+.insights-grid {
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+}
+.tools-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+}
+
+/* The payment-card face: fixed aspect ratio so it always reads as a card,
+   a deterministic gradient per wallet type, a chip + masked number like a
+   real bank card. Matches ipg-frontend's PayView .paycard. */
 .card-face {
   position: relative;
   width: 100%;
   aspect-ratio: 1.586 / 1; /* ISO/IEC 7810 ID-1 bank-card ratio */
-  border-radius: 14px;
-  padding: 14px 16px;
+  border-radius: 16px;
+  padding: 16px 18px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   color: #fff;
   overflow: hidden;
-  cursor: pointer;
-  box-shadow: 0 10px 22px -14px rgba(20, 30, 70, 0.5);
-  transition: transform 200ms ease, box-shadow 200ms ease;
-  font-family: inherit;
-  border: none;
+  box-shadow: 0 18px 36px -18px rgba(20, 30, 70, 0.7);
   text-align: start;
 }
 .card-face::before {
   content: '';
   position: absolute;
   inset: -35% -15% auto auto;
-  width: 60%;
+  width: 70%;
   aspect-ratio: 1;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.18), transparent 70%);
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.22), transparent 70%);
   pointer-events: none;
 }
-/* Matches ipg-frontend's PayView .paycard element-for-element (chip,
-   contactless mark + brand, masked number, wallet/balance fields) so a
-   wallet looks like the same physical card here and on the pay page. */
 .card-face-top {
   position: relative;
   display: flex;
@@ -1609,9 +1994,9 @@ async function onGrantCredit() {
   justify-content: space-between;
 }
 .card-face-chip {
-  width: 28px;
-  height: 20px;
-  color: rgba(255, 255, 255, 0.85);
+  width: 30px;
+  height: 22px;
+  color: rgba(255, 223, 140, 0.95);
   flex: none;
 }
 .card-face-chip svg,
@@ -1621,8 +2006,8 @@ async function onGrantCredit() {
 }
 .card-face-logo {
   flex: none;
-  height: 20px;
-  max-width: 56px;
+  height: 22px;
+  max-width: 64px;
   width: auto;
   object-fit: contain;
 }
@@ -1638,16 +2023,16 @@ async function onGrantCredit() {
   flex: none;
 }
 .card-face-brand {
-  font-size: 0.65rem;
+  font-size: 0.7rem;
   font-weight: 800;
-  letter-spacing: 0.04em;
-  color: rgba(255, 255, 255, 0.85);
+  letter-spacing: 0.05em;
+  color: rgba(255, 255, 255, 0.9);
 }
 .card-face-number {
   position: relative;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   font-variant-numeric: tabular-nums;
   direction: ltr;
   text-align: start;
@@ -1671,130 +2056,61 @@ async function onGrantCredit() {
   text-align: end;
 }
 .card-face-label {
-  font-size: 0.55rem;
+  font-size: 0.58rem;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: rgba(255, 255, 255, 0.65);
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.7);
 }
 .card-face-value {
-  font-size: 0.75rem;
+  font-size: 0.78rem;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.card-face-add {
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  background: var(--panel-bg);
-  border: 1.5px dashed var(--card-border);
-  color: var(--text-dim);
-  box-shadow: none;
-  font-weight: 600;
-  font-size: 0.88rem;
+@media (max-width: 1200px) {
+  .wallets-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .wallet-list {
+    max-height: 340px;
+  }
 }
-.card-face-add:hover {
-  border-color: var(--accent-blue);
-  color: var(--accent-blue);
+@media (max-width: 1024px) {
+  .insights-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
-.card-face-add-icon {
-  font-size: 1.3rem;
-  line-height: 1;
-}
-
-.card-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 14px 2px 4px;
-}
-
-.wallet-card-add-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-@media (max-width: 420px) {
+@media (max-width: 640px) {
+  .overview-banner {
+    padding: 20px;
+  }
+  .overview-stats {
+    width: 100%;
+  }
+  .overview-stat {
+    flex: 1;
+    min-width: 0;
+  }
+  .overview-add {
+    width: 100%;
+    justify-content: center;
+  }
+  .wallets-tools,
+  .wallets-tools .admin-search {
+    width: 100%;
+  }
+  .wallet-panel {
+    padding: 14px;
+  }
+  .wallet-panel-top {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .card-face {
-    padding: 12px 14px;
-    border-radius: 12px;
-  }
-  .card-face-number {
-    font-size: 0.82rem;
-    letter-spacing: 0.06em;
+    max-width: 340px;
   }
 }
-
-.wallet-quick-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding-top: 4px;
-  border-top: 1px dashed var(--card-border);
-}
-.wallet-quick-actions .admin-btn.active {
-  background: var(--hover-tint, rgba(21, 80, 201, 0.1));
-  color: var(--accent-blue);
-  border-color: var(--accent-blue);
-}
-.wallet-inline-form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  padding: 10px;
-  background: var(--panel-bg);
-  border-radius: var(--radius-sm);
-}
-.wallet-inline-form input,
-.wallet-inline-form select {
-  flex: 1;
-  min-width: 140px;
-}
-
-.hero-pills {
-  display: flex;
-  flex-wrap: wrap;
-  background: var(--panel-bg);
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-md);
-  padding: 16px 20px;
-  gap: 16px 28px;
-}
-
-.pill {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.pill-value {
-  font-size: 1.4rem;
-  font-weight: 700;
-}
-
-.pill-label {
-  font-size: 0.75rem;
-  color: var(--text-dim);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  display: inline-block;
-}
-.dot-orange { background: var(--accent-orange); }
-.dot-lime { background: var(--accent-lime); }
-.dot-blue { background: var(--accent-blue); }
-.dot-red { background: var(--accent-red); }
 
 .side-stack {
   display: flex;
@@ -1805,6 +2121,8 @@ async function onGrantCredit() {
 .latest-amount {
   font-size: 1.8rem;
   font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
 }
 
 .latest-meta {
@@ -1832,48 +2150,6 @@ async function onGrantCredit() {
   color: var(--text-dim);
 }
 
-.wallet-type {
-  font-size: 0.72rem;
-  color: var(--text-dimmer);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.wallet-card-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.wallet-edit-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 4px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--card-border);
-}
-.wallet-edit-form label,
-.market-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 0.8rem;
-  color: var(--text-dim);
-}
-.add-wallet {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-}
-.add-wallet select {
-  flex: 1;
-  min-width: 160px;
-}
 .hint {
   font-size: 0.8rem;
   color: var(--text-dim);
@@ -1912,7 +2188,7 @@ async function onGrantCredit() {
 
 .history-list {
   border: 1px solid var(--card-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 .history-row-wrap {

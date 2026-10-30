@@ -1,5 +1,8 @@
 export default {
   common: {
+    lightMode: 'Light mode',
+    darkMode: 'Dark mode',
+    openMenu: 'Open menu',
     toggleLanguage: 'Switch language',
     unknown: 'Unknown',
     you: 'You',
@@ -13,6 +16,7 @@ export default {
     },
   },
   nav: {
+    menu: 'Menu',
     wallet: 'Wallet',
     profile: 'Profile',
     adminPanel: 'Admin panel',
@@ -20,6 +24,13 @@ export default {
     backToWallet: 'Back to my wallet',
   },
   adminNav: {
+    panelTag: 'Admin',
+    group: {
+      overview: 'Overview',
+      operations: 'Operations',
+      people: 'People',
+      system: 'Configuration',
+    },
     dashboard: 'Dashboard',
     transactions: 'Transactions',
     wallets: 'Wallets',
@@ -82,6 +93,8 @@ export default {
     },
   },
   dashboard: {
+    totalBalance: 'Total balance',
+    walletCount: '{count} wallet | {count} wallets',
     title: 'My Wallet',
     overviewEyebrow: 'Overview',
     overviewHeading: 'Every wallet and currency, in one place',
@@ -173,6 +186,15 @@ export default {
       },
     },
     wallets: {
+      subtitle: 'Select a wallet to see its card, balance and actions.',
+      searchPlaceholder: 'Search wallets…',
+      showClosed: 'Show closed ({count})',
+      emptyTitle: 'No wallets yet',
+      emptyHint: 'Open your first wallet to start receiving and sending money.',
+      noMatch: 'No wallets match your search.',
+      blockedShort: 'Blocked',
+      typeLabel: 'Wallet type',
+      addWalletHint: 'Pick a wallet type — extra settings appear depending on what the type supports.',
       title: 'Wallets',
       addPlaceholder: 'Add a wallet…',
       verifyTimeoutLabel: 'Verify timeout (minutes):',
@@ -220,6 +242,7 @@ export default {
       cardBalanceLabel: 'Balance',
     },
     actions: {
+      amountPlaceholder: 'Amount',
       deposit: { title: 'Deposit', chooseWallet: 'Choose wallet', submit: 'Deposit' },
       withdraw: {
         title: 'Withdraw',
@@ -509,6 +532,15 @@ export default {
       colWhen: 'When',
     },
     wallets: {
+      statTotal: 'Total wallets',
+      statHeld: 'Held in {currency}',
+      statusBlocked: 'Blocked',
+      allTypes: 'All types',
+      allCurrencies: 'All currencies',
+      tableActions: 'Actions',
+      adjustTitle: 'Manual adjustment · {wallet}',
+      clearFilters: 'Clear filters',
+      filter: { all: 'All', active: 'Active', blocked: 'Blocked', closed: 'Closed' },
       title: 'Wallets',
       allWallets: 'All wallets ({count})',
       searchPlaceholder: 'Search by owner or wallet type…',
