@@ -838,6 +838,96 @@ export default {
     },
   },
   landing: {
+    extra: {
+      heroBadge: 'New: a redesigned wallet experience',
+      trust1: 'Double-entry ledger on every transaction',
+      trust2: 'Credit lines with installments',
+      trust3: 'Persian & English, RTL-ready',
+      railsHeading: 'Settles through the rails you already use',
+      mock: {
+        totalBalance: 'Total balance',
+        daily: 'Daily spending',
+        savings: 'Rent savings',
+        merchant: 'Coffee shop',
+        travel: 'Trip to Istanbul',
+        received: 'Payment received',
+        ledgerBalanced: 'Ledger balanced',
+        journal: 'Journal entry #10482',
+        credit: 'Credit line',
+        used: 'Used this period',
+        sweep: 'Auto-withdraw sweep',
+      },
+      how: {
+        nav: 'How it works',
+        eyebrow: 'How it works',
+        title: 'From sign-up to settled money in three steps',
+        subtitle: 'No integration project to get started — open an account and your wallets are live in minutes.',
+        step1: {
+          title: 'Create your account',
+          desc: 'Sign up with your phone number and a one-time code. No paperwork to start.',
+        },
+        step2: {
+          title: 'Open the wallets you need',
+          desc: 'Personal, savings, merchant, credit — each wallet type brings its own rules, limits and card.',
+        },
+        step3: {
+          title: 'Move money, get paid',
+          desc: 'Deposit, transfer, charge customers and let scheduled payouts settle to your IBANs automatically.',
+        },
+      },
+      useCases: {
+        eyebrow: 'Built for',
+        title: 'One platform, many ways to use it',
+        subtitle: 'Whether you sell coffee or run a marketplace, the same ledger keeps every rial in place.',
+        merchants: {
+          title: 'Shops & merchants',
+          desc: 'Accept wallet payments with a link or a button and get paid out to your bank on schedule.',
+        },
+        companies: {
+          title: 'Companies & payroll',
+          desc: 'Grant employees credit lines from a repository wallet and collect repayments in installments.',
+        },
+        marketplaces: {
+          title: 'Marketplaces',
+          desc: 'Split every payout between sellers and your fee account with percent or fixed shares.',
+        },
+        developers: {
+          title: 'Developers',
+          desc: 'A clean REST API with idempotency keys, plus drop-in widgets when you don’t want to build UI.',
+        },
+      },
+      faq: {
+        nav: 'FAQ',
+        eyebrow: 'FAQ',
+        title: 'Questions, answered',
+        q1: {
+          q: 'Do my customers need a Packeta account to pay me?',
+          a: 'No. A payment link lets them identify themselves with their phone number and a one-time code, pick a wallet and pay — no sign-up needed.',
+        },
+        q2: {
+          q: 'Which currencies are supported?',
+          a: 'Any currency an administrator defines, with its own decimal places and symbol. Rial and dollar wallets run side by side.',
+        },
+        q3: {
+          q: 'How do payouts reach my bank account?',
+          a: 'Merchant wallets sweep automatically on a schedule through POL Pay, PAYA, SATNA or bank transfer, and can split each payout across several IBANs.',
+        },
+        q4: {
+          q: 'How is the balance kept correct?',
+          a: 'Every movement is posted as a balanced double-entry journal entry, and wallet balances are derived from the ledger — not stored separately.',
+        },
+        q5: {
+          q: 'Is the app available in Persian?',
+          a: 'Yes. The whole app — customer, admin and payment gateway — works in Persian (right-to-left) and English, switchable at any time.',
+        },
+      },
+      footer: {
+        product: 'Product',
+        developers: 'Developers',
+        account: 'Account',
+        backToTop: 'Back to top',
+      },
+    },
     nav: {
       features: 'Features',
       accounting: 'Accounting',
