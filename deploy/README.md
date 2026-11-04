@@ -98,6 +98,28 @@ this to the host's crontab:
 0 3 * * * cd /path/to/Packeta && docker compose run --rm certbot renew --webroot -w /var/www/certbot -q && docker compose exec nginx nginx -s reload
 ```
 
+### 6. Deploying updates
+
+After the first-time setup above, every later deploy is one command on the
+server, from the repo checkout:
+
+```bash
+./deploy/docker/deploy.sh                          # current branch
+./deploy/docker/deploy.sh claude/sweet-tesla-n03qtm  # or a specific branch
+```
+
+It pulls the branch (fast-forward only), dumps the wallet database to
+`./backups/` (last 10 kept), rebuilds the four app images, and restarts
+them. The backend container runs pending migrations on start. The script
+then waits for the backend to answer and reloads nginx. If the backend
+doesn't come up, it prints the backend logs and stops. Restore a dump with:
+
+```bash
+gunzip -c backups/packeta-YYYYMMDD-HHMMSS.sql.gz | docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+```
+
+Options: `SKIP_BACKUP=1`, `SKIP_PULL=1`, `BACKUP_KEEP=<n>`.
+
 ## Option B — Bare metal (host nginx + systemd)
 
 If you'd rather run nginx and the two Nest backends directly on the host
