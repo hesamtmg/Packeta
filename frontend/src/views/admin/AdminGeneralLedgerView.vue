@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../../api/client';
 import { formatAmount, type CurrencyInfo } from '../../utils/currency';
 import { formatDate } from '../../utils/date';
-import { i18n } from '../../i18n';
+import { formatTime } from '../../utils/adminFormat';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
 import AdminDrawer from '../../components/admin/AdminDrawer.vue';
 
@@ -165,10 +165,6 @@ const ledgerRows = computed(() => {
   });
 });
 
-function formatTime(value: string): string {
-  const locale = (i18n.global.locale as unknown as { value: string }).value === 'fa' ? 'fa-IR' : 'en-US';
-  return new Date(value).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
-}
 
 const TYPE_ICONS: Record<AccountType, string> = {
   ASSET: 'M4 10h16M6 10v8M10 10v8M14 10v8M18 10v8M3 20h18M12 3l9 5H3l9-5z',
@@ -566,36 +562,6 @@ onMounted(load);
   font-weight: 600;
   color: var(--text-dim);
   cursor: pointer;
-}
-.switch {
-  appearance: none;
-  flex: none;
-  width: 34px;
-  height: 20px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--text-dimmer) 45%, transparent);
-  position: relative;
-  cursor: pointer;
-  margin: 0;
-  transition: background 0.15s;
-}
-.switch::after {
-  content: '';
-  position: absolute;
-  top: 3px;
-  inset-inline-start: 3px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.3);
-  transition: inset-inline-start 0.15s;
-}
-.switch:checked {
-  background: var(--accent-blue);
-}
-.switch:checked::after {
-  inset-inline-start: 17px;
 }
 .gl-table th.num {
   text-align: end;

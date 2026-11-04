@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { formatDateTime } from '../../utils/date';
+import { formatRelative, formatTime, TX_TYPE_ICONS } from '../../utils/adminFormat';
 import {
   transactionStatusClass,
   transactionTypeClass,
@@ -9,7 +9,7 @@ import {
   type AdminTransactionType,
 } from '../../types/admin';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
-import MiniLineChart from '../../components/admin/MiniLineChart.vue';
+import TrendChart from '../../components/admin/TrendChart.vue';
 import { useAdminLiveSocket } from '../../composables/useAdminLiveSocket';
 
 const { t } = useI18n();
@@ -77,6 +77,34 @@ watch(totalEventCount, (value) => {
   lastSeenTotal = value;
 });
 
+const minuteLabels = computed(() =>
+  minuteBuckets.value.map((_, i) => {
+    const ago = MINUTE_BUCKETS - 1 - i;
+    return ago === 0 ? t('admin.liveActivity.now') : t('admin.liveActivity.minutesAgo', { count: ago });
+  }),
+);
+const totalLast30 = computed(() => minuteBuckets.value.reduce((a, b) => a + b, 0));
+
+// Re-render relative times ("12s ago") every 10 seconds.
+const clock = ref(0);
+const timer = window.setInterval(() => (clock.value += 1), 10_000);
+onBeforeUnmount(() => window.clearInterval(timer));
+function ago(value: string): string {
+  void clock.value;
+  return formatRelative(value);
+}
+
+const tabs = computed(() => [
+  { key: 'transactions' as FeedTab, label: t('admin.liveActivity.tabTransactions'), count: transactions.value.length },
+  { key: 'wallets' as FeedTab, label: t('admin.liveActivity.tabWallets'), count: walletChanges.value.length },
+  { key: 'gl' as FeedTab, label: t('admin.liveActivity.tabGl'), count: glPostings.value.length },
+  { key: 'settlement' as FeedTab, label: t('admin.liveActivity.tabSettlement'), count: settlementActivity.value.length + installmentActivity.value.length },
+]);
+
+function txIcon(type: string): string {
+  return TX_TYPE_ICONS[type as AdminTransactionType] ?? TX_TYPE_ICONS.VIRTUAL;
+}
+
 const eventsPerMinute = computed(() => minuteBuckets.value[minuteBuckets.value.length - 1]);
 </script>
 
@@ -84,285 +112,317 @@ const eventsPerMinute = computed(() => minuteBuckets.value[minuteBuckets.value.l
   <AdminLayout :title="t('admin.liveActivity.title')">
     <p v-if="unauthorized" class="admin-error">{{ t('admin.liveActivity.unauthorized') }}</p>
 
-    <div class="kpi-grid">
-      <div class="admin-card kpi-card">
-        <span class="kpi-value">
-          <span class="status-dot" :class="connected ? 'status-dot-live' : 'status-dot-off'" />
+    <div class="stat-tiles">
+      <div class="stat-tile conn" :class="connected ? 'is-live' : 'is-off'">
+        <span class="stat-tile-label">{{ t('admin.liveActivity.connection') }}</span>
+        <span class="stat-tile-value conn-value">
+          <span class="pulse" />
           {{ connected ? t('admin.liveActivity.live') : t('admin.liveActivity.reconnecting') }}
         </span>
-        <span class="kpi-label">{{ t('admin.liveActivity.connection') }}</span>
+        <span class="stat-tile-meta">{{ connected ? t('admin.liveActivity.streaming') : t('admin.liveActivity.retrying') }}</span>
       </div>
-      <div class="admin-card kpi-card">
-        <span class="kpi-value">{{ eventsPerMinute }}</span>
-        <span class="kpi-label">{{ t('admin.liveActivity.eventsPerMinute') }}</span>
+      <div class="stat-tile">
+        <span class="stat-tile-label">{{ t('admin.liveActivity.eventsPerMinute') }}</span>
+        <span class="stat-tile-value">{{ eventsPerMinute }}</span>
+        <span class="stat-tile-meta">{{ t('admin.liveActivity.last30Total', { count: totalLast30 }) }}</span>
       </div>
-      <div class="admin-card kpi-card">
-        <span class="kpi-value">{{ transactions.length }}</span>
-        <span class="kpi-label">{{ t('admin.liveActivity.transactionsSeen') }}</span>
+      <div class="stat-tile">
+        <span class="stat-tile-label">{{ t('admin.liveActivity.transactionsSeen') }}</span>
+        <span class="stat-tile-value">{{ transactions.length }}</span>
+        <span class="stat-tile-meta">{{ t('admin.liveActivity.statusChangesCount', { count: statusChanges.length }) }}</span>
       </div>
-      <div class="admin-card kpi-card">
-        <span class="kpi-value">{{ glPostings.length }}</span>
-        <span class="kpi-label">{{ t('admin.liveActivity.glPostingsSeen') }}</span>
-      </div>
-    </div>
-
-    <div class="admin-card">
-      <h2>{{ t('admin.liveActivity.activityHeading') }}</h2>
-      <MiniLineChart :data="minuteBuckets" color="#d8ff5c" :height="90" />
-    </div>
-
-    <div class="admin-card">
-      <div class="feed-tabs">
-        <button
-          type="button"
-          class="feed-tab"
-          :class="{ active: activeTab === 'transactions' }"
-          @click="activeTab = 'transactions'"
-        >
-          {{ t('admin.liveActivity.tabTransactions') }} ({{ transactions.length }})
-        </button>
-        <button
-          type="button"
-          class="feed-tab"
-          :class="{ active: activeTab === 'wallets' }"
-          @click="activeTab = 'wallets'"
-        >
-          {{ t('admin.liveActivity.tabWallets') }} ({{ walletChanges.length }})
-        </button>
-        <button
-          type="button"
-          class="feed-tab"
-          :class="{ active: activeTab === 'gl' }"
-          @click="activeTab = 'gl'"
-        >
-          {{ t('admin.liveActivity.tabGl') }} ({{ glPostings.length }})
-        </button>
-        <button
-          type="button"
-          class="feed-tab"
-          :class="{ active: activeTab === 'settlement' }"
-          @click="activeTab = 'settlement'"
-        >
-          {{ t('admin.liveActivity.tabSettlement') }} ({{
-            settlementActivity.length + installmentActivity.length
-          }})
-        </button>
-      </div>
-
-      <div v-if="activeTab === 'transactions'" class="table-scroll">
-        <table class="admin-table">
-          <thead>
-            <tr>
-              <th>{{ t('admin.liveActivity.tableType') }}</th>
-              <th>{{ t('admin.liveActivity.tableStatus') }}</th>
-              <th>{{ t('admin.liveActivity.tableAmount') }}</th>
-              <th>{{ t('admin.liveActivity.tableWhen') }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="tx in transactions" :key="tx.id">
-              <td>
-                <span class="admin-badge" :class="transactionTypeClass(tx.type as AdminTransactionType)">
-                  {{ t(`admin.transactions.${tx.type.toLowerCase()}`) }}
-                </span>
-              </td>
-              <td>
-                <span class="admin-badge" :class="transactionStatusClass(tx.status as AdminTransactionStatus)">
-                  {{ t(`admin.transactions.status${tx.status}`) }}
-                </span>
-              </td>
-              <td>{{ formatRaw(tx.amount) }}</td>
-              <td>{{ formatDateTime(tx.createdAt) }}</td>
-            </tr>
-            <tr v-if="!transactions.length">
-              <td colspan="4">{{ t('admin.liveActivity.waiting') }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <h3 v-if="statusChanges.length" class="feed-subheading">
-          {{ t('admin.liveActivity.statusChangesHeading') }}
-        </h3>
-        <table v-if="statusChanges.length" class="admin-table">
-          <thead>
-            <tr>
-              <th>{{ t('admin.liveActivity.tableStatus') }}</th>
-              <th>{{ t('admin.liveActivity.tableReason') }}</th>
-              <th>{{ t('admin.liveActivity.tableWhen') }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(change, i) in statusChanges" :key="`${change.id}-${i}`">
-              <td>
-                <span
-                  class="admin-badge"
-                  :class="transactionStatusClass(change.status as AdminTransactionStatus)"
-                >
-                  {{ t(`admin.transactions.status${change.status}`) }}
-                </span>
-              </td>
-              <td>{{ change.reason ?? '—' }}</td>
-              <td>{{ formatDateTime(change.updatedAt) }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div v-else-if="activeTab === 'wallets'" class="table-scroll">
-        <table class="admin-table">
-          <thead>
-            <tr>
-              <th>{{ t('admin.liveActivity.tableWallet') }}</th>
-              <th>{{ t('admin.liveActivity.tableDelta') }}</th>
-              <th>{{ t('admin.liveActivity.tableDescription') }}</th>
-              <th>{{ t('admin.liveActivity.tableWhen') }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(change, i) in walletChanges" :key="`${change.walletId}-${i}`">
-              <td class="mono">{{ change.walletId.slice(0, 8) }}</td>
-              <td :class="change.delta.startsWith('-') ? 'delta-negative' : 'delta-positive'">
-                {{ change.delta.startsWith('-') ? '' : '+' }}{{ formatRaw(change.delta) }}
-              </td>
-              <td>{{ change.description }}</td>
-              <td>{{ formatDateTime(change.at) }}</td>
-            </tr>
-            <tr v-if="!walletChanges.length">
-              <td colspan="4">{{ t('admin.liveActivity.waiting') }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div v-else-if="activeTab === 'gl'" class="table-scroll">
-        <table class="admin-table">
-          <thead>
-            <tr>
-              <th>{{ t('admin.liveActivity.tableDescription') }}</th>
-              <th>{{ t('admin.liveActivity.tableLegs') }}</th>
-              <th>{{ t('admin.liveActivity.tableWhen') }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="posting in glPostings" :key="posting.journalEntryId">
-              <td>{{ posting.description }}</td>
-              <td>
-                <span v-for="(leg, i) in posting.postings" :key="i" class="gl-leg">
-                  {{ leg.accountCode }} {{ leg.direction }} {{ formatRaw(leg.amount) }}
-                </span>
-              </td>
-              <td>{{ formatDateTime(posting.at) }}</td>
-            </tr>
-            <tr v-if="!glPostings.length">
-              <td colspan="3">{{ t('admin.liveActivity.waiting') }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div v-else class="table-scroll">
-        <table class="admin-table">
-          <thead>
-            <tr>
-              <th>{{ t('admin.liveActivity.tableKind') }}</th>
-              <th>{{ t('admin.liveActivity.tableDetail') }}</th>
-              <th>{{ t('admin.liveActivity.tableWhen') }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(activity, i) in settlementActivity" :key="`settle-${i}`">
-              <td>{{ t('admin.liveActivity.kindSettlement') }}</td>
-              <td>{{ activity.transactionIds.length }} {{ t('admin.liveActivity.withdrawals') }}</td>
-              <td>{{ formatDateTime(activity.at) }}</td>
-            </tr>
-            <tr v-for="(activity, i) in installmentActivity" :key="`inst-${i}`">
-              <td>{{ t(`admin.liveActivity.kind${activity.kind === 'generated' ? 'Generated' : 'Overdue'}`) }}</td>
-              <td>{{ activity.count }}</td>
-              <td>{{ formatDateTime(activity.at) }}</td>
-            </tr>
-            <tr v-if="!settlementActivity.length && !installmentActivity.length">
-              <td colspan="3">{{ t('admin.liveActivity.waiting') }}</td>
-            </tr>
-          </tbody>
-        </table>
+      <div class="stat-tile">
+        <span class="stat-tile-label">{{ t('admin.liveActivity.glPostingsSeen') }}</span>
+        <span class="stat-tile-value">{{ glPostings.length }}</span>
+        <span class="stat-tile-meta">{{ t('admin.liveActivity.sinceOpened') }}</span>
       </div>
     </div>
+
+    <section class="admin-card">
+      <div class="admin-card-head">
+        <div>
+          <h2>{{ t('admin.liveActivity.activityHeading') }}</h2>
+          <p class="admin-card-sub">{{ t('admin.liveActivity.chartHint') }}</p>
+        </div>
+      </div>
+      <TrendChart :data="minuteBuckets" :labels="minuteLabels" :unit="t('admin.liveActivity.events')" :height="160" />
+    </section>
+
+    <section class="admin-card">
+      <div class="feed-head">
+        <div class="segmented" role="tablist">
+          <button v-for="tab in tabs" :key="tab.key" type="button" role="tab" :aria-selected="activeTab === tab.key" :class="{ active: activeTab === tab.key }" @click="activeTab = tab.key">
+            {{ tab.label }} <span class="count">{{ tab.count }}</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Transactions -->
+      <template v-if="activeTab === 'transactions'">
+        <TransitionGroup tag="ul" name="feed" class="feed">
+          <li v-for="tx in transactions" :key="tx.id" class="feed-item">
+            <span class="type-icon" :class="transactionTypeClass(tx.type as AdminTransactionType)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path :d="txIcon(tx.type)" /></svg>
+            </span>
+            <span class="feed-main">
+              <span class="feed-title">
+                {{ t(`admin.transactions.${tx.type.toLowerCase()}`) }}
+                <span class="admin-badge" :class="transactionStatusClass(tx.status as AdminTransactionStatus)">{{ t(`admin.transactions.status${tx.status}`) }}</span>
+              </span>
+              <router-link class="feed-sub mono" :to="{ name: 'admin-transaction-detail', params: { id: tx.id } }">#{{ tx.id.slice(0, 8) }}</router-link>
+            </span>
+            <span class="feed-amount">{{ formatRaw(tx.amount) }}</span>
+            <span class="feed-time" :title="formatTime(tx.createdAt)">{{ ago(tx.createdAt) }}</span>
+          </li>
+        </TransitionGroup>
+        <div v-if="!transactions.length" class="waiting"><span class="pulse" />{{ t('admin.liveActivity.waiting') }}</div>
+
+        <template v-if="statusChanges.length">
+          <span class="group-label status-head">{{ t('admin.liveActivity.statusChangesHeading') }}</span>
+          <ul class="feed">
+            <li v-for="(change, i) in statusChanges" :key="`${change.id}-${i}`" class="feed-item compact">
+              <span class="admin-badge" :class="transactionStatusClass(change.status as AdminTransactionStatus)">{{ t(`admin.transactions.status${change.status}`) }}</span>
+              <span class="feed-main"><span class="feed-title light">{{ change.reason ?? '—' }}</span></span>
+              <router-link class="feed-sub mono" :to="{ name: 'admin-transaction-detail', params: { id: change.id } }">#{{ change.id.slice(0, 8) }}</router-link>
+              <span class="feed-time">{{ ago(change.updatedAt) }}</span>
+            </li>
+          </ul>
+        </template>
+      </template>
+
+      <!-- Wallet balance changes -->
+      <template v-else-if="activeTab === 'wallets'">
+        <TransitionGroup tag="ul" name="feed" class="feed">
+          <li v-for="(change, i) in walletChanges" :key="`${change.walletId}-${change.transactionId}-${i}`" class="feed-item">
+            <span class="delta-icon" :class="change.delta.startsWith('-') ? 'neg' : 'pos'">{{ change.delta.startsWith('-') ? '−' : '+' }}</span>
+            <span class="feed-main">
+              <span class="feed-title">{{ change.description }}</span>
+              <router-link class="feed-sub mono" :to="{ name: 'admin-wallet-detail', params: { id: change.walletId } }">{{ t('admin.liveActivity.tableWallet') }} #{{ change.walletId.slice(0, 8) }}</router-link>
+            </span>
+            <span class="feed-amount" :class="change.delta.startsWith('-') ? 'neg' : 'pos'">{{ change.delta.startsWith('-') ? '' : '+' }}{{ formatRaw(change.delta) }}</span>
+            <span class="feed-time">{{ ago(change.at) }}</span>
+          </li>
+        </TransitionGroup>
+        <div v-if="!walletChanges.length" class="waiting"><span class="pulse" />{{ t('admin.liveActivity.waiting') }}</div>
+      </template>
+
+      <!-- GL postings -->
+      <template v-else-if="activeTab === 'gl'">
+        <TransitionGroup tag="ul" name="feed" class="feed">
+          <li v-for="posting in glPostings" :key="posting.journalEntryId" class="feed-item gl-item">
+            <span class="type-icon stat-icon-blue">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h3" /></svg>
+            </span>
+            <span class="feed-main">
+              <span class="feed-title">{{ posting.description }}</span>
+              <span class="legs">
+                <span v-for="(leg, i) in posting.postings" :key="i" class="leg" :class="leg.direction === 'DEBIT' ? 'dr' : 'cr'">
+                  <span class="leg-side">{{ leg.direction === 'DEBIT' ? 'Dr' : 'Cr' }}</span>
+                  <span class="leg-acct">{{ leg.accountCode }}</span>
+                  <span class="leg-amt">{{ formatRaw(leg.amount) }}</span>
+                </span>
+              </span>
+            </span>
+            <span class="feed-time">{{ ago(posting.at) }}</span>
+          </li>
+        </TransitionGroup>
+        <div v-if="!glPostings.length" class="waiting"><span class="pulse" />{{ t('admin.liveActivity.waiting') }}</div>
+      </template>
+
+      <!-- Settlement & installments -->
+      <template v-else>
+        <ul class="feed">
+          <li v-for="(activity, i) in settlementActivity" :key="`settle-${i}`" class="feed-item">
+            <span class="type-icon stat-icon-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 10h16M6 10v8M10 10v8M14 10v8M18 10v8M3 20h18M12 3l9 5H3l9-5z" /></svg></span>
+            <span class="feed-main">
+              <span class="feed-title">{{ t('admin.liveActivity.kindSettlement') }}</span>
+              <span class="feed-sub">{{ activity.transactionIds.length }} {{ t('admin.liveActivity.withdrawals') }}<template v-if="activity.railType"> · {{ activity.railType }}</template></span>
+            </span>
+            <span class="feed-time">{{ ago(activity.at) }}</span>
+          </li>
+          <li v-for="(activity, i) in installmentActivity" :key="`inst-${i}`" class="feed-item">
+            <span class="type-icon" :class="activity.kind === 'generated' ? 'stat-icon-blue' : 'stat-icon-red'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="16" rx="2" /><path d="M8 3v4M16 3v4M4 10h16" /></svg></span>
+            <span class="feed-main">
+              <span class="feed-title">{{ t(`admin.liveActivity.kind${activity.kind === 'generated' ? 'Generated' : 'Overdue'}`) }}</span>
+              <span class="feed-sub">{{ t('admin.liveActivity.installmentsCount', { count: activity.count }) }}</span>
+            </span>
+            <span class="feed-time">{{ ago(activity.at) }}</span>
+          </li>
+        </ul>
+        <div v-if="!settlementActivity.length && !installmentActivity.length" class="waiting"><span class="pulse" />{{ t('admin.liveActivity.waiting') }}</div>
+      </template>
+    </section>
   </AdminLayout>
 </template>
 
 <style scoped>
-.kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 16px;
-  margin-bottom: 20px;
+.conn-value {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
-.kpi-card {
+.pulse {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-dimmer);
+}
+.is-live .pulse,
+.waiting .pulse {
+  background: var(--accent-lime);
+  animation: pulse 1.6s ease-out infinite;
+}
+.is-live {
+  border-color: color-mix(in srgb, var(--accent-lime) 35%, var(--card-border));
+}
+.is-live .conn-value {
+  color: var(--accent-lime);
+}
+.is-off .pulse {
+  background: var(--accent-orange);
+}
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-lime) 55%, transparent); }
+  100% { box-shadow: 0 0 0 10px transparent; }
+}
+.feed-head {
+  margin-bottom: 10px;
+  overflow-x: auto;
+}
+.feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 560px;
+  overflow-y: auto;
+}
+.feed-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto 80px;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 6px;
+  border-bottom: 1px solid var(--divider);
+}
+.feed-item.compact {
+  grid-template-columns: auto minmax(0, 1fr) auto 80px;
+  padding-block: 8px;
+}
+.gl-item {
+  grid-template-columns: auto minmax(0, 1fr) 80px;
+  align-items: flex-start;
+}
+.feed-main {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
-.kpi-value {
-  font-size: 1.6rem;
-  font-weight: 700;
+.feed-title {
   display: flex;
   align-items: center;
   gap: 8px;
+  font-weight: 600;
+  font-size: 0.88rem;
 }
-.kpi-label {
-  font-size: 0.8rem;
-  color: var(--text-dim);
+.feed-title.light {
+  font-weight: 500;
 }
-.status-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  display: inline-block;
+.feed-sub {
+  font-size: 0.76rem;
+  color: var(--text-dimmer);
+  text-decoration: none;
 }
-.status-dot-live {
-  background: var(--accent-lime, #d8ff5c);
-  box-shadow: 0 0 6px var(--accent-lime, #d8ff5c);
-}
-.status-dot-off {
-  background: var(--accent-red, #ff4d4f);
-}
-.feed-tabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-.feed-tab {
-  padding: 6px 14px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: transparent;
-  color: var(--text-dim);
-  font-size: 0.82rem;
-  cursor: pointer;
-}
-.feed-tab.active {
-  background: var(--accent-lime, #d8ff5c);
-  color: #10130c;
-  border-color: transparent;
-}
-.feed-subheading {
-  margin-top: 20px;
-  font-size: 0.95rem;
+a.feed-sub:hover {
+  color: var(--accent-blue);
 }
 .mono {
-  font-family: monospace;
-  font-size: 0.82rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
-.delta-positive {
-  color: var(--accent-lime, #d8ff5c);
+.feed-amount {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
-.delta-negative {
-  color: var(--accent-red, #ff4d4f);
+.feed-amount.pos { color: var(--accent-lime); }
+.feed-amount.neg { color: var(--accent-red); }
+.feed-time {
+  font-size: 0.76rem;
+  color: var(--text-dimmer);
+  text-align: end;
+  white-space: nowrap;
 }
-.gl-leg {
-  display: inline-block;
-  margin-inline-end: 10px;
-  font-size: 0.78rem;
+.delta-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+.delta-icon.pos { background: var(--badge-tint-lime); color: var(--accent-lime); }
+.delta-icon.neg { background: var(--badge-tint-red); color: var(--accent-red); }
+.legs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+.leg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.74rem;
+  padding: 2px 8px 2px 2px;
+  border-radius: 999px;
+  background: var(--panel-bg);
+  border: 1px solid var(--divider);
+}
+.leg-side {
+  font-weight: 700;
+  font-size: 0.66rem;
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+.leg.dr .leg-side { background: var(--badge-tint-blue); color: var(--accent-blue); }
+.leg.cr .leg-side { background: var(--badge-tint-orange); color: var(--accent-orange); }
+.leg-acct {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: var(--text-dim);
+}
+.leg-amt {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.status-head {
+  margin-top: 20px;
+}
+.waiting {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 36px 0;
+  color: var(--text-dim);
+  font-size: 0.88rem;
+}
+.feed-enter-active {
+  transition: background 1.2s ease, transform 0.25s ease, opacity 0.25s ease;
+}
+.feed-enter-from {
+  opacity: 0;
+  transform: translateY(-6px);
+  background: var(--active-tint);
+}
+@media (max-width: 640px) {
+  .feed-item {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .feed-time {
+    display: none;
+  }
 }
 </style>

@@ -5,7 +5,7 @@ import { useRouter } from 'vue-router';
 import { apiRequest, ApiError } from '../../api/client';
 import { formatAmount, type CurrencyInfo } from '../../utils/currency';
 import { formatDate } from '../../utils/date';
-import { i18n } from '../../i18n';
+import { formatTime, TX_TYPE_ICONS } from '../../utils/adminFormat';
 import { displayIdentity } from '../../utils/identity';
 import { walletDisplayName } from '../../utils/wallet-name';
 import {
@@ -123,10 +123,6 @@ function shortId(id: string): string {
   return id.slice(0, 8);
 }
 
-function formatTime(value: string): string {
-  const locale = (i18n.global.locale as unknown as { value: string }).value === 'fa' ? 'fa-IR' : 'en-US';
-  return new Date(value).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
-}
 
 function dayKey(value: string): string {
   const d = new Date(value);
@@ -142,14 +138,7 @@ function dayLabel(value: string): string {
   return formatDate(value);
 }
 
-const TYPE_ICONS: Record<AdminTransactionType, string> = {
-  DEPOSIT: 'M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 20h14',
-  WITHDRAW: 'M12 20V9m0 0l-4.5 4.5M12 9l4.5 4.5M5 4h14',
-  TRANSFER: 'M4 8h13m0 0l-3.5-3.5M17 8l-3.5 3.5M20 16H7m0 0l3.5-3.5M7 16l3.5 3.5',
-  PURCHASE: 'M5.5 8h13l-1 12h-11l-1-12zM9 8V7a3 3 0 016 0v1',
-  ADJUSTMENT: 'M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4',
-  VIRTUAL: 'M12 3v5M12 16v5M3 12h5M16 12h5M6.3 6.3l2.5 2.5M15.2 15.2l2.5 2.5M6.3 17.7l2.5-2.5M15.2 8.8l2.5-2.5',
-};
+const TYPE_ICONS = TX_TYPE_ICONS;
 
 const copiedId = ref<string | null>(null);
 async function copyId(id: string) {
@@ -505,40 +494,6 @@ onMounted(load);
   color: var(--text-dim);
   cursor: pointer;
   white-space: nowrap;
-}
-.switch {
-  appearance: none;
-  flex: none;
-  width: 34px;
-  height: 20px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--text-dimmer) 45%, transparent);
-  position: relative;
-  cursor: pointer;
-  margin: 0;
-  transition: background 0.15s;
-}
-.switch::after {
-  content: '';
-  position: absolute;
-  top: 3px;
-  inset-inline-start: 3px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.3);
-  transition: inset-inline-start 0.15s;
-}
-.switch:checked {
-  background: var(--accent-blue);
-}
-.switch:checked::after {
-  inset-inline-start: 17px;
-}
-.switch:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
 }
 .toolbar-filters {
   display: flex;

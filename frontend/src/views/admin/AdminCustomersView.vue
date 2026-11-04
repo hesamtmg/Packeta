@@ -3,13 +3,11 @@ import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../../api/client';
 import { amountStep, formatAmount, toMinorUnits, type CurrencyInfo } from '../../utils/currency';
-import { formatDate, formatDateTime } from '../../utils/date';
+import { formatDate } from '../../utils/date';
 import { displayIdentity } from '../../utils/identity';
 import {
   walletLookup,
   transactionCurrency,
-  partyWalletLabel,
-  partyOwner,
   transactionTypeClass,
   transactionStatusClass,
   type AdminUser,
@@ -19,6 +17,10 @@ import {
 } from '../../types/admin';
 import { useListControls } from '../../composables/useListControls';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
+import AdminDrawer from '../../components/admin/AdminDrawer.vue';
+import { cardGradient } from '../../utils/cardTheme';
+import { formatRelative, initials, TX_TYPE_ICONS } from '../../utils/adminFormat';
+import { walletDisplayName } from '../../utils/wallet-name';
 import BatchImportCard from '../../components/admin/BatchImportCard.vue';
 import SortableTh from '../../components/admin/SortableTh.vue';
 import ListPagination from '../../components/admin/ListPagination.vue';
@@ -39,6 +41,7 @@ interface WalletType {
   allowP2pIn: boolean;
   depositable: boolean;
   hasVirtualBalance: boolean;
+  cardColor?: string | null;
 }
 
 interface Wallet {
@@ -87,6 +90,54 @@ const newWalletType = computed(() =>
 
 const walletsById = computed(() => walletLookup(allWallets.value));
 
+// walletId lists per owner, for the wallet-count column.
+const walletsByOwner = computed(() => {
+  const map = new Map<string, AdminWallet[]>();
+  for (const w of allWallets.value) {
+    const list = map.get(w.ownerId);
+    if (list) list.push(w);
+    else map.set(w.ownerId, [w]);
+  }
+  return map;
+});
+function walletSummary(userId: string): { count: number; currencies: string } {
+  const list = (walletsByOwner.value.get(userId) ?? []).filter((w) => !w.closedAt);
+  return { count: list.length, currencies: [...new Set(list.map((w) => w.walletType.currency.code))].join(' · ') };
+}
+function secondaryIdentity(u: AdminUser): string {
+  const primary = displayIdentity(u);
+  if (primary !== u.email) return '';
+  return u.phoneNumber ?? '';
+}
+const showImport = ref(false);
+const drawerOpen = ref(false);
+const loadingDetail = ref(false);
+async function openCustomer(id: string) {
+  drawerOpen.value = true;
+  loadingDetail.value = true;
+  selected.value = null;
+  await selectUser(id);
+  loadingDetail.value = false;
+}
+function txAmount(tx: AdminTransaction): string {
+  const c = txCurrency(tx);
+  return c ? formatAmount(tx.amount, c) : tx.amount;
+}
+function txWallet(id: string | null): string {
+  if (!id) return t('admin.transactions.external');
+  const w = walletsById.value.get(id);
+  return w ? walletDisplayName(w) : t('common.unknown');
+}
+// Sign relative to this customer: money landing in one of their wallets is +.
+function txSign(tx: AdminTransaction): '+' | '−' | '' {
+  const own = new Set((selected.value?.wallets ?? []).map((w) => w.id));
+  const toOwn = tx.toWalletId && own.has(tx.toWalletId);
+  const fromOwn = tx.fromWalletId && own.has(tx.fromWalletId);
+  if (toOwn && !fromOwn) return '+';
+  if (fromOwn && !toOwn) return '−';
+  return '';
+}
+
 const customers = computed(() => users.value.filter((u) => u.role === 'USER' || u.role === 'ADMIN' ));
 
 const {
@@ -101,7 +152,7 @@ const {
   toggleSort,
   goToPage,
 } = useListControls(customers, {
-  searchFields: (u) => [u.email, u.phoneNumber],
+  searchFields: (u) => [u.email, u.phoneNumber, u.id],
   sortAccessors: {
     identity: (u) => displayIdentity(u).toLowerCase(),
     joined: (u) => new Date(u.createdAt).getTime(),
@@ -281,31 +332,74 @@ loadRoles();
   <AdminLayout :title="t('admin.customers.title')">
     <p v-if="listError" class="admin-error">{{ listError }}</p>
 
-    <div class="admin-card">
-      <div class="filter-row">
-        <h2>{{ t('admin.customers.heading', { count: sorted.length }) }}</h2>
-        <input v-model="search" class="admin-input" :placeholder="t('admin.customers.searchPlaceholder')" />
+    <section class="admin-card">
+      <div class="toolbar">
+        <div>
+          <h2>{{ t('admin.customers.heading', { count: sorted.length }) }}</h2>
+          <p class="admin-card-sub">{{ t('admin.customers.subtitle') }}</p>
+        </div>
+        <div class="toolbar-right">
+          <label class="admin-search search-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
+            <input v-model="search" type="search" class="admin-input" :placeholder="t('admin.customers.searchPlaceholder')" />
+          </label>
+          <button v-if="auth.isSuperAdmin" type="button" class="admin-btn admin-btn-ghost" :class="{ active: showImport }" @click="showImport = !showImport">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4m0 0L8 8m4-4l4 4M5 15v3a2 2 0 002 2h10a2 2 0 002-2v-3" /></svg>
+            {{ t('admin.customers.bulkImport') }}
+          </button>
+        </div>
       </div>
+
+      <BatchImportCard
+        v-if="auth.isSuperAdmin && showImport"
+        class="import-card"
+        endpoint="/admin/customers/batch"
+        sample-url="/samples/customers-sample.xlsx"
+        :title="t('admin.batchImport.customersTitle')"
+        :hint="t('admin.batchImport.customersHint')"
+        @imported="loadUsers"
+      />
+
       <div class="table-scroll">
-      <table class="admin-table">
-        <thead>
-          <tr>
-            <SortableTh :label="t('admin.customers.tableEmail')" col-key="identity" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
-            <SortableTh :label="t('admin.customers.tableJoined')" col-key="joined" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
-            <th>{{ t('admin.customers.tableId') }}</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="u in pageItems" :key="u.id">
-            <td>{{ displayIdentity(u) }}</td>
-            <td>{{ formatDate(u.createdAt) }}</td>
-            <td class="mono-id">{{ u.id }}</td>
-            <td><button class="admin-btn admin-btn-ghost" @click="selectUser(u.id)">{{ t('admin.customers.view') }}</button></td>
-          </tr>
-          <tr v-if="!pageItems.length"><td colspan="4">{{ t('admin.customers.noCustomers') }}</td></tr>
-        </tbody>
-      </table>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <SortableTh :label="t('admin.customers.tableCustomer')" col-key="identity" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
+              <th>{{ t('admin.customers.tableWallets') }}</th>
+              <th>{{ t('admin.customers.tableAccess') }}</th>
+              <SortableTh :label="t('admin.customers.tableJoined')" col-key="joined" :active-key="sortKey" :dir="sortDir" @sort="toggleSort" />
+              <th class="chev-col" />
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="u in pageItems" :key="u.id" class="clickable-row" data-shot="row" tabindex="0" @click="openCustomer(u.id)" @keydown.enter="openCustomer(u.id)">
+              <td>
+                <div class="person">
+                  <span class="avatar">{{ initials(displayIdentity(u)) }}</span>
+                  <span class="person-text">
+                    <span class="person-name">{{ displayIdentity(u) }}</span>
+                    <span class="person-sub">{{ secondaryIdentity(u) || `#${u.id.slice(0, 8)}` }}</span>
+                  </span>
+                </div>
+              </td>
+              <td>
+                <span class="wallet-count">{{ walletSummary(u.id).count }}</span>
+                <span class="wallet-cur">{{ walletSummary(u.id).currencies }}</span>
+              </td>
+              <td>
+                <span v-if="u.role === 'ADMIN'" class="admin-badge admin-badge-info">{{ t('admin.admins.roleAdmin') }}</span>
+                <span v-else-if="u.panelRole" class="admin-badge">{{ u.panelRole.name }}</span>
+                <span v-else class="muted">{{ t('admin.customers.fullAccess') }}</span>
+              </td>
+              <td>
+                <span class="joined">{{ formatDate(u.createdAt) }}</span>
+                <span class="joined-rel">{{ formatRelative(u.createdAt) }}</span>
+              </td>
+              <td class="chev-col"><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6" /></svg></td>
+            </tr>
+            <tr v-if="!pageItems.length"><td colspan="5"><div class="empty-state">{{ t('admin.customers.noCustomers') }}</div></td></tr>
+          </tbody>
+        </table>
       </div>
       <ListPagination
         :page="page"
@@ -315,266 +409,402 @@ loadRoles();
         @update:page="goToPage"
         @update:page-size="pageSize = $event"
       />
-    </div>
+    </section>
 
-    <BatchImportCard
-      v-if="auth.isSuperAdmin"
-      endpoint="/admin/customers/batch"
-      sample-url="/samples/customers-sample.xlsx"
-      :title="t('admin.batchImport.customersTitle')"
-      :hint="t('admin.batchImport.customersHint')"
-      @imported="loadUsers"
-    />
-
-    <div v-if="selected" class="admin-card">
-      <h2>{{ displayIdentity(selected) }}</h2>
+    <AdminDrawer
+      :open="drawerOpen"
+      :title="selected ? displayIdentity(selected) : t('admin.customers.title')"
+      :eyebrow="t('admin.customers.profile')"
+      :close-label="t('admin.generalLedger.close')"
+      width="720px"
+      @close="drawerOpen = false"
+    >
       <p v-if="detailError" class="admin-error">{{ detailError }}</p>
-      <p v-if="walletError" class="admin-error">{{ walletError }}</p>
+      <div v-if="loadingDetail" class="loading"><span v-for="i in 4" :key="i" class="skeleton" /></div>
 
-      <div v-if="auth.hasSection('roles')" class="assign-block">
-        <h3>{{ t('admin.customers.assignHeading') }}</h3>
-        <p class="hint">{{ t('admin.customers.assignHint') }}</p>
-        <p v-if="assignError" class="admin-error">{{ assignError }}</p>
-        <div class="assign-row">
-          <select v-model="assignRoleDraft" class="admin-input">
-            <option value="">{{ t('admin.admins.noRole') }}</option>
-            <option v-for="role in roles" :key="role.id" :value="role.id">{{ role.name }}</option>
-          </select>
-          <button class="admin-btn admin-btn-primary" :disabled="assignBusy" @click="saveAssignment">
-            {{ t('admin.admins.assignSave') }}
-          </button>
+      <template v-if="selected && !loadingDetail">
+        <div class="profile-card">
+          <span class="avatar avatar-lg">{{ initials(displayIdentity(selected)) }}</span>
+          <div class="profile-meta">
+            <span class="profile-name">{{ displayIdentity(selected) }}</span>
+            <span class="profile-line">
+              <span v-if="selected.phoneNumber && selected.phoneNumber !== displayIdentity(selected)">{{ selected.phoneNumber }}</span>
+              <span>{{ t('admin.customers.joinedOn', { date: formatDate(selected.createdAt) }) }}</span>
+              <span class="mono">#{{ selected.id.slice(0, 8) }}</span>
+            </span>
+          </div>
         </div>
-        <p v-if="assignSuccess" class="admins-success">{{ assignSuccess }}</p>
-      </div>
 
-      <div class="wallets">
-        <article v-for="w in selected.wallets" :key="w.id" class="wallet-card">
-          <span class="wallet-type">{{ w.walletType.name }} · {{ w.walletType.currency.code }}</span>
-          <span v-if="w.name" class="wallet-type-sub">{{ w.name }}</span>
-          <span class="wallet-balance">{{ formatAmount(w.balance, w.walletType.currency) }}</span>
-          <span class="mono-id">{{ w.id }}</span>
-          <div class="badges">
-            <span v-for="b in badges(w)" :key="b" class="admin-badge">{{ b }}</span>
-          </div>
-          <div class="wallet-card-actions">
-            <router-link :to="{ name: 'admin-wallet-detail', params: { id: w.id } }" class="admin-btn admin-btn-ghost">
-              {{ t('walletDetail.viewLink') }}
-            </router-link>
-            <router-link
-              v-if="w.walletType.code === 'CREDIT'"
-              :to="{ name: 'wallet-installments', params: { walletId: w.id } }"
-              class="admin-btn admin-btn-ghost"
-            >
-              {{ t('dashboard.installments.viewLink') }}
-            </router-link>
-            <button
-              v-if="w.closedAt"
-              type="button"
-              class="admin-btn admin-btn-ghost"
-              :disabled="walletBusy"
-              @click="reopenWallet(w)"
-            >
-              {{ t('admin.wallets.reopen') }}
-            </button>
-            <button
-              v-else
-              type="button"
-              class="admin-btn admin-btn-danger"
-              :disabled="walletBusy || w.balance !== '0'"
-              :title="w.balance !== '0' ? t('dashboard.wallets.closeRequiresZero') : ''"
-              @click="closeWallet(w)"
-            >
-              {{ t('admin.wallets.close') }}
-            </button>
-          </div>
-        </article>
-      </div>
+        <p v-if="walletError" class="admin-error">{{ walletError }}</p>
 
-      <template v-if="auth.isSuperAdmin">
-      <h3>{{ t('admin.customers.addWalletHeading') }}</h3>
-      <p v-if="addWalletError" class="admin-error">{{ addWalletError }}</p>
-      <form class="add-wallet-form" @submit.prevent="onAddWallet">
-        <select v-model="newWalletTypeId" class="admin-input" required>
-          <option value="" disabled>{{ t('admin.customers.addWalletChooseType') }}</option>
-          <option v-for="wt in walletTypes" :key="wt.id" :value="wt.id">
-            {{ wt.name }} ({{ wt.currency.code }})
-          </option>
-        </select>
-        <input
-          v-if="newWalletType?.hasVirtualBalance"
-          v-model="newWalletVirtualAmount"
-          type="number"
-          min="0"
-          :step="amountStep(newWalletType.currency)"
-          class="admin-input"
-          :placeholder="t('admin.customers.addWalletVirtualAmountPlaceholder')"
-        />
-        <input
-          v-model="newWalletNationalCode"
-          type="text"
-          class="admin-input"
-          :placeholder="t('admin.customers.addWalletNationalCodePlaceholder')"
-        />
-        <button type="submit" class="admin-btn admin-btn-primary" :disabled="addWalletBusy">
-          {{ t('admin.customers.addWallet') }}
-        </button>
-      </form>
+        <section class="d-section">
+          <span class="group-label">{{ t('admin.customers.walletsHeading', { count: selected.wallets.length }) }}</span>
+          <div class="wallets">
+            <article v-for="w in selected.wallets" :key="w.id" class="wallet-card" :class="{ closed: w.closedAt }">
+              <div class="wallet-top" :style="{ background: cardGradient({ code: w.walletType.code, cardColor: w.walletType.cardColor }, !!w.closedAt) }">
+                <span class="wallet-type">{{ w.name || w.walletType.name }}</span>
+                <span class="wallet-balance">{{ formatAmount(w.balance, w.walletType.currency) }}</span>
+                <span class="wallet-code">{{ w.walletType.code }} · {{ w.walletType.currency.code }}</span>
+              </div>
+              <div class="wallet-bottom">
+                <div v-if="badges(w).length" class="badges">
+                  <span v-for="b in badges(w)" :key="b" class="admin-badge">{{ b }}</span>
+                </div>
+                <div class="wallet-actions">
+                  <router-link :to="{ name: 'admin-wallet-detail', params: { id: w.id } }" class="admin-btn admin-btn-ghost admin-btn-sm">{{ t('walletDetail.viewLink') }}</router-link>
+                  <router-link v-if="w.walletType.code === 'CREDIT'" :to="{ name: 'wallet-installments', params: { walletId: w.id } }" class="admin-btn admin-btn-ghost admin-btn-sm">{{ t('dashboard.installments.viewLink') }}</router-link>
+                  <span class="spacer" />
+                  <button v-if="w.closedAt" type="button" class="admin-btn admin-btn-ghost admin-btn-sm" :disabled="walletBusy" @click="reopenWallet(w)">{{ t('admin.wallets.reopen') }}</button>
+                  <button
+                    v-else
+                    type="button"
+                    class="admin-btn admin-btn-danger admin-btn-sm"
+                    :disabled="walletBusy || w.balance !== '0'"
+                    :title="w.balance !== '0' ? t('dashboard.wallets.closeRequiresZero') : ''"
+                    @click="closeWallet(w)"
+                  >{{ t('admin.wallets.close') }}</button>
+                </div>
+              </div>
+            </article>
+            <p v-if="!selected.wallets.length" class="muted">{{ t('admin.customers.noWallets') }}</p>
+          </div>
+
+          <form v-if="auth.isSuperAdmin" class="add-wallet" @submit.prevent="onAddWallet">
+            <span class="add-title">{{ t('admin.customers.addWalletHeading') }}</span>
+            <p v-if="addWalletError" class="admin-error">{{ addWalletError }}</p>
+            <div class="add-fields">
+              <select v-model="newWalletTypeId" class="admin-input" required>
+                <option value="" disabled>{{ t('admin.customers.addWalletChooseType') }}</option>
+                <option v-for="wt in walletTypes" :key="wt.id" :value="wt.id">{{ wt.name }} ({{ wt.currency.code }})</option>
+              </select>
+              <input
+                v-if="newWalletType?.hasVirtualBalance"
+                v-model="newWalletVirtualAmount"
+                type="number"
+                min="0"
+                :step="amountStep(newWalletType.currency)"
+                class="admin-input"
+                :placeholder="t('admin.customers.addWalletVirtualAmountPlaceholder')"
+              />
+              <input v-model="newWalletNationalCode" type="text" class="admin-input" :placeholder="t('admin.customers.addWalletNationalCodePlaceholder')" />
+              <button type="submit" class="admin-btn admin-btn-primary" :disabled="addWalletBusy">{{ t('admin.customers.addWallet') }}</button>
+            </div>
+          </form>
+        </section>
+
+        <section v-if="auth.hasSection('roles')" class="d-section">
+          <span class="group-label">{{ t('admin.customers.assignHeading') }}</span>
+          <p class="hint">{{ t('admin.customers.assignHint') }}</p>
+          <p v-if="assignError" class="admin-error">{{ assignError }}</p>
+          <div class="assign-row">
+            <select v-model="assignRoleDraft" class="admin-input">
+              <option value="">{{ t('admin.admins.noRole') }}</option>
+              <option v-for="role in roles" :key="role.id" :value="role.id">{{ role.name }}</option>
+            </select>
+            <button class="admin-btn admin-btn-primary" :disabled="assignBusy" @click="saveAssignment">{{ t('admin.admins.assignSave') }}</button>
+          </div>
+          <p v-if="assignSuccess" class="admin-success">{{ assignSuccess }}</p>
+        </section>
+
+        <section class="d-section">
+          <span class="group-label">{{ t('admin.customers.historyHeading') }}</span>
+          <ul v-if="transactions.length" class="tx-list">
+            <li v-for="tx in transactions" :key="tx.id">
+              <router-link :to="{ name: 'admin-transaction-detail', params: { id: tx.id } }" class="tx-row">
+                <span class="type-icon" :class="transactionTypeClass(tx.type)">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path :d="TX_TYPE_ICONS[tx.type]" /></svg>
+                </span>
+                <span class="tx-main">
+                  <span class="tx-title">
+                    {{ t(`admin.transactions.${tx.type.toLowerCase()}`) }}
+                    <span v-if="tx.status !== 'COMPLETED'" class="admin-badge" :class="transactionStatusClass(tx.status)">{{ t(`admin.transactions.status${tx.status}`) }}</span>
+                  </span>
+                  <span class="tx-sub">{{ txWallet(tx.fromWalletId) }} → {{ txWallet(tx.toWalletId) }}<template v-if="tx.note"> · {{ tx.note }}</template></span>
+                </span>
+                <span class="tx-amount" :class="{ pos: txSign(tx) === '+', neg: txSign(tx) === '−' }">{{ txSign(tx) }}{{ txSign(tx) ? ' ' : '' }}{{ txAmount(tx) }}</span>
+                <span class="tx-time">{{ formatRelative(tx.createdAt) }}</span>
+              </router-link>
+            </li>
+          </ul>
+          <p v-else class="muted">{{ t('admin.customers.noTransactions') }}</p>
+        </section>
       </template>
-
-      <h3>{{ t('admin.customers.historyHeading') }}</h3>
-      <div class="table-scroll">
-      <table class="admin-table">
-        <thead>
-          <tr>
-            <th>{{ t('admin.customers.tableType') }}</th>
-            <th>{{ t('admin.transactions.tableStatus') }}</th>
-            <th>{{ t('admin.customers.tableAmount') }}</th>
-            <th>{{ t('admin.transactions.tableFrom') }}</th>
-            <th>{{ t('admin.transactions.tableTo') }}</th>
-            <th>{{ t('admin.customers.tableNote') }}</th>
-            <th>{{ t('admin.transactions.tableId') }}</th>
-            <th>{{ t('admin.customers.tableDate') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="tx in transactions"
-            :key="tx.id"
-            class="tx-row-clickable"
-            @click="$router.push({ name: 'admin-transaction-detail', params: { id: tx.id } })"
-          >
-            <td><span class="admin-badge" :class="transactionTypeClass(tx.type)">{{ t(`admin.transactions.${tx.type.toLowerCase()}`) }}</span></td>
-            <td><span class="admin-badge" :class="transactionStatusClass(tx.status)">{{ t(`admin.transactions.status${tx.status}`) }}</span></td>
-            <td>{{ txCurrency(tx) ? formatAmount(tx.amount, txCurrency(tx)!) : tx.amount }}</td>
-            <td>
-              <div v-if="tx.fromWalletId" class="party-cell">
-                <router-link
-                  class="party-label"
-                  :to="{ name: 'admin-wallet-detail', params: { id: tx.fromWalletId } }"
-                  @click.stop
-                >
-                  {{ partyWalletLabel(tx.fromWalletId, walletsById) ?? t('common.unknown') }}
-                </router-link>
-                <span class="party-owner">{{ partyOwner(tx.fromWalletId, walletsById) ? displayIdentity(partyOwner(tx.fromWalletId, walletsById)!) : t('common.unknown') }}</span>
-                <span class="money-chip money-out">− {{ txCurrency(tx) ? formatAmount(tx.amount, txCurrency(tx)!) : tx.amount }}</span>
-              </div>
-              <span v-else class="party-empty">{{ t('admin.transactions.externalSource') }}</span>
-            </td>
-            <td>
-              <div v-if="tx.toWalletId" class="party-cell">
-                <router-link
-                  class="party-label"
-                  :to="{ name: 'admin-wallet-detail', params: { id: tx.toWalletId } }"
-                  @click.stop
-                >
-                  {{ partyWalletLabel(tx.toWalletId, walletsById) ?? t('common.unknown') }}
-                </router-link>
-                <span class="party-owner">{{ partyOwner(tx.toWalletId, walletsById) ? displayIdentity(partyOwner(tx.toWalletId, walletsById)!) : t('common.unknown') }}</span>
-                <span class="money-chip money-in">+ {{ txCurrency(tx) ? formatAmount(tx.amount, txCurrency(tx)!) : tx.amount }}</span>
-              </div>
-              <span v-else class="party-empty">{{ t('admin.transactions.externalDestination') }}</span>
-            </td>
-            <td>{{ tx.note ?? t('common.none') }}</td>
-            <td class="mono-id">{{ tx.id }}</td>
-            <td>{{ formatDateTime(tx.createdAt) }}</td>
-          </tr>
-          <tr v-if="!transactions.length"><td colspan="8">{{ t('admin.customers.noTransactions') }}</td></tr>
-        </tbody>
-      </table>
-      </div>
-    </div>
+    </AdminDrawer>
   </AdminLayout>
 </template>
 
 <style scoped>
-.tx-row-clickable {
-  cursor: pointer;
-}
-.filter-row {
+.toolbar {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 14px;
   gap: 12px;
   flex-wrap: wrap;
+  margin-bottom: 16px;
 }
-.filter-row h2 {
+.toolbar h2 {
   margin: 0;
-  white-space: nowrap;
 }
-.filter-row input {
-  min-width: 260px;
-}
-h3 {
-  font-size: 0.85rem;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  margin: 20px 0 10px;
-}
-.assign-block {
-  margin-bottom: 10px;
-}
-.assign-row {
+.toolbar-right {
   display: flex;
   gap: 10px;
-  margin: 10px 0;
+  flex-wrap: wrap;
 }
-.assign-row select {
-  flex: 1;
-  max-width: 320px;
+.search-box {
+  width: 280px;
+  max-width: 100%;
 }
-.admins-success {
-  color: var(--accent-lime);
-  font-size: 0.85rem;
+.import-card {
+  margin-bottom: 16px;
+  box-shadow: none;
+  background: var(--panel-bg);
+}
+.wallet-count {
+  font-weight: 650;
+  margin-inline-end: 6px;
+}
+.wallet-cur {
+  font-size: 0.76rem;
+  color: var(--text-dimmer);
+}
+.muted {
+  color: var(--text-dimmer);
+  font-size: 0.84rem;
+  margin: 0;
+}
+.joined {
+  display: block;
+  white-space: nowrap;
+}
+.joined-rel {
+  display: block;
+  font-size: 0.76rem;
+  color: var(--text-dimmer);
+}
+.chev-col {
+  width: 36px;
+}
+.chev {
+  width: 16px;
+  height: 16px;
+  color: var(--text-dimmer);
+  display: block;
+}
+[dir='rtl'] .chev {
+  transform: scaleX(-1);
+}
+.clickable-row:hover .chev {
+  color: var(--accent-blue);
+}
+.clickable-row:focus-visible {
+  outline: none;
+  box-shadow: inset var(--focus-ring);
+}
+
+/* Drawer */
+.profile-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  margin-bottom: 14px;
+}
+.profile-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.profile-name {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+.profile-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--text-dimmer);
+}
+.d-section {
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  margin-bottom: 14px;
+}
+.hint {
+  margin: -4px 0 10px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
 }
 .wallets {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 14px;
-  margin-top: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
 }
 .wallet-card {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--card-border);
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-sm);
-  padding: 14px;
+}
+.wallet-top {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 16px;
+  color: #fff;
 }
 .wallet-type {
-  font-size: 0.78rem;
-  color: var(--text-dim);
-  text-transform: uppercase;
-}
-.wallet-type-sub {
-  font-size: 0.68rem;
-  color: var(--text-dimmer);
-  opacity: 0.7;
-  margin-top: -6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  opacity: 0.9;
 }
 .wallet-balance {
-  font-size: 1.3rem;
+  font-size: 1.25rem;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.wallet-code {
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  opacity: 0.8;
+}
+.wallet-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  flex: 1;
 }
 .badges {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 5px;
 }
-.wallet-card-actions {
+.badges .admin-badge {
+  font-size: 0.68rem;
+  padding: 2px 8px;
+}
+.wallet-actions {
   display: flex;
+  align-items: center;
+  gap: 6px;
   flex-wrap: wrap;
+  margin-top: auto;
+}
+.spacer {
+  flex: 1;
+}
+.add-wallet {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--divider);
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
-.add-wallet-form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
+.add-title {
+  font-size: 0.84rem;
+  font-weight: 650;
 }
-.add-wallet-form .admin-input {
+.add-fields {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.add-fields .admin-input {
   flex: 1;
-  min-width: 180px;
+  min-width: 160px;
+}
+.assign-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.assign-row select {
+  flex: 1;
+}
+.tx-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.tx-list li + li {
+  border-top: 1px solid var(--divider);
+}
+.tx-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto 70px;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 6px;
+  margin: 0 -6px;
+  border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+.tx-row:hover {
+  background: var(--hover-tint);
+}
+.tx-row .type-icon {
+  width: 30px;
+  height: 30px;
+}
+.tx-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.tx-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 0.86rem;
+}
+.tx-sub {
+  font-size: 0.76rem;
+  color: var(--text-dimmer);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tx-amount {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  font-size: 0.86rem;
+}
+.tx-amount.pos { color: var(--accent-lime); }
+.tx-amount.neg { color: var(--accent-red); }
+.tx-time {
+  font-size: 0.74rem;
+  color: var(--text-dimmer);
+  text-align: end;
+  white-space: nowrap;
+}
+.loading {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.skeleton {
+  height: 60px;
+  border-radius: 12px;
+  background: linear-gradient(90deg, var(--panel-bg) 25%, var(--divider) 50%, var(--panel-bg) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s infinite linear;
+}
+@keyframes shimmer {
+  to { background-position: -200% 0; }
 }
 </style>
