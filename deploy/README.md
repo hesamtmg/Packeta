@@ -112,7 +112,7 @@ It pulls the branch (fast-forward only), dumps the wallet database to
 `./backups/` (last 10 kept), rebuilds the four app images, and restarts
 them. The backend container runs pending migrations on start. The script
 then waits for the backend to answer and reloads nginx. If the backend
-doesn't come up, it prints the backend logs and stops. Restore a dump with:
+doesn't come up, it prints the backend logs and stops. To roll back, check out the previous commit, recreate an empty `packeta` database, and load the dump into it:
 
 ```bash
 gunzip -c backups/packeta-YYYYMMDD-HHMMSS.sql.gz | docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
