@@ -184,151 +184,202 @@ describe('InstallmentsService.computeDeadlineDate', () => {
   });
 });
 
-describe('InstallmentsService.generateDue', () => {
-  const wallet = {
-    id: 'wallet-1',
-    repositoryWalletId: 'repo-1',
-    walletType: {
-      installmentCount: 3,
-      feePercent: '10',
-      paymentDeadlineDate: 15,
-    },
-  };
+describe('InstallmentsService.buildSchedule', () => {
+  const { service } = buildService({});
 
-  it("sums the wallet's own VIRTUAL transactions over the one-month window and splits that total across a full installmentCount batch, spread one month apart", async () => {
-    const { service, installmentsRepository } = buildService({
-      wallets: [wallet],
-      virtualSumByWallet: { 'wallet-1': '900' },
-    });
-
-    const today = new Date(2026, 0, 1); // Jan 1, 2026
-    const created = await service.generateDue(today);
-
-    expect(created).toHaveLength(3);
-    expect(installmentsRepository.create).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        walletId: 'wallet-1',
-        sequenceNumber: 1,
-        principalAmount: '300', // 900/3
-        feeAmount: '30', // 10% of principal
-        amount: '330', // principal 300 + 10% fee (30)
-        periodStart: '2025-12-01',
-        periodEnd: '2026-01-01',
-        dueDate: '2026-01-01',
-        deadlineDate: '2026-01-15',
-        status: InstallmentStatus.PENDING,
-      }),
-    );
-    expect(installmentsRepository.create).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        sequenceNumber: 2,
-        principalAmount: '300',
-        dueDate: '2026-02-01',
-        deadlineDate: '2026-02-15',
-      }),
-    );
-    expect(installmentsRepository.create).toHaveBeenNthCalledWith(
-      3,
-      expect.objectContaining({
-        sequenceNumber: 3,
-        principalAmount: '300',
-        dueDate: '2026-03-01',
-        deadlineDate: '2026-03-15',
-      }),
-    );
-  });
-
-  it('skips a wallet with no VIRTUAL activity in the collection window', async () => {
-    const { service, installmentsRepository } = buildService({
-      wallets: [wallet],
-      virtualSumByWallet: {},
-    });
-
-    const created = await service.generateDue(new Date(2026, 0, 1));
-
-    expect(created).toHaveLength(0);
-    expect(installmentsRepository.create).not.toHaveBeenCalled();
-  });
-
-  it('skips a wallet that already has a batch generated for a period ending today', async () => {
-    const { service, installmentsRepository } = buildService({
-      wallets: [wallet],
-      virtualSumByWallet: { 'wallet-1': '900' },
-      existingByWalletAndPeriodEnd: {
-        'wallet-1': { '2026-01-01': [{ sequenceNumber: 1 }] },
+  it('splits a purchase across installmentCount monthly rows due on the next installmentDate, fee on top and remainder folded into the last', () => {
+    const schedule = service.buildSchedule(
+      1000n,
+      {
+        installmentCount: 3,
+        installmentDate: 5,
+        paymentDeadlineDate: 15,
+        feePercent: '10',
       },
-    });
+      new Date(2026, 0, 20), // Jan 20 — past the 5th, so first due Feb 5
+    );
 
-    const created = await service.generateDue(new Date(2026, 0, 1));
+    expect(schedule).toEqual([
+      {
+        sequenceNumber: 1,
+        principalAmount: '333',
+        feeAmount: '33',
+        amount: '366',
+        dueDate: '2026-02-05',
+        deadlineDate: '2026-02-15',
+      },
+      {
+        sequenceNumber: 2,
+        principalAmount: '333',
+        feeAmount: '33',
+        amount: '366',
+        dueDate: '2026-03-05',
+        deadlineDate: '2026-03-15',
+      },
+      {
+        sequenceNumber: 3,
+        principalAmount: '334',
+        feeAmount: '33',
+        amount: '367',
+        dueDate: '2026-04-05',
+        deadlineDate: '2026-04-15',
+      },
+    ]);
+  });
 
-    expect(created).toHaveLength(0);
-    expect(installmentsRepository.create).not.toHaveBeenCalled();
+  it('falls due later the same month when installmentDate has not passed yet', () => {
+    const schedule = service.buildSchedule(
+      200n,
+      {
+        installmentCount: 2,
+        installmentDate: 25,
+        paymentDeadlineDate: null,
+        feePercent: null,
+      },
+      new Date(2026, 0, 10),
+    );
+    expect(schedule.map((r) => r.dueDate)).toEqual([
+      '2026-01-25',
+      '2026-02-25',
+    ]);
+    // No paymentDeadlineDate: the deadline is the due date itself.
+    expect(schedule.map((r) => r.deadlineDate)).toEqual([
+      '2026-01-25',
+      '2026-02-25',
+    ]);
+  });
+
+  it('with no installmentDate, falls due monthly on the purchase day, clamped to short months', () => {
+    const schedule = service.buildSchedule(
+      300n,
+      {
+        installmentCount: 3,
+        installmentDate: null,
+        paymentDeadlineDate: null,
+        feePercent: null,
+      },
+      new Date(2026, 0, 31),
+    );
+    expect(schedule.map((r) => r.dueDate)).toEqual([
+      '2026-02-28',
+      '2026-03-31',
+      '2026-04-30',
+    ]);
+  });
+
+  it('returns no schedule for a type without installmentCount', () => {
+    expect(
+      service.buildSchedule(
+        500n,
+        {
+          installmentCount: null,
+          installmentDate: 1,
+          paymentDeadlineDate: null,
+          feePercent: null,
+        },
+        new Date(2026, 0, 1),
+      ),
+    ).toEqual([]);
   });
 });
 
-// A customer who already has installments from a prior period, then spends
-// nothing the following month: generateDue must NOT invent a new batch (no
-// "same amount every month" regardless of activity), while
-// applyOverduePenalties keeps accruing on whatever they still owe from
-// before — and, if that debt sits unpaid long enough, blocks them. This is
-// the exact "I didn't spend this month" scenario, exercised end to end
-// across both scheduler entry points against the same wallet.
-describe('InstallmentsService generateDue + applyOverduePenalties (no-spend month)', () => {
-  it("skips generating a new batch for a period with zero spend, and still accrues penalty (and eventually blocks) on the customer's untouched prior-period installment", async () => {
-    const wallet = {
-      id: 'wallet-1',
-      repositoryWalletId: 'repo-1',
-      walletType: {
-        installmentCount: 3,
-        feePercent: '10',
-        paymentDeadlineDate: 15,
-        penaltyPercentPerDay: '2',
-        overdueDaysBeforeBlock: 3,
-      },
-    };
-    // Last period's installment, still unpaid, now past its deadline.
-    const priorInstallment = {
-      id: 'installment-prior',
-      amount: '330',
-      principalAmount: '300',
-      penaltyApplied: false,
-      penaltyDaysApplied: 0,
-      status: InstallmentStatus.PENDING,
-      deadlineDate: '2026-01-15',
-      wallet: {
-        id: 'wallet-1',
-        userId: 'user-1',
-        blockedAt: null,
-        walletType: wallet.walletType,
-      },
-    };
+describe('InstallmentsService.createForPurchase', () => {
+  const walletType: any = {
+    installmentCount: 2,
+    installmentDate: 1,
+    paymentDeadlineDate: 10,
+    feePercent: '0',
+  };
 
-    const { service, installmentsRepository, walletsRepository } = buildService(
-      {
-        wallets: [wallet],
-        virtualSumByWallet: {}, // no VIRTUAL draw-downs this period at all
-        overdueRows: [priorInstallment],
-      },
+  function buildManager(existing: any[] = []) {
+    return {
+      find: jest.fn(async () => existing),
+      create: jest.fn((_entity: any, data: any) => ({ ...data })),
+      save: jest.fn(async (data: any) => ({
+        id: `i-${data.sequenceNumber}`,
+        ...data,
+      })),
+    };
+  }
+
+  it("saves the purchase's plan, linked to the purchase, the moment it settles", async () => {
+    const { service } = buildService({});
+    const manager = buildManager();
+
+    const created = await service.createForPurchase(
+      manager as any,
+      { id: 'wallet-1', walletType },
+      { id: 'purchase-1' },
+      600n,
+      new Date(2026, 4, 12),
     );
 
-    // This month's generation run: no new spend -> no new batch.
-    const created = await service.generateDue(new Date(2026, 1, 1));
-    expect(created).toHaveLength(0);
-    expect(installmentsRepository.create).not.toHaveBeenCalled();
+    expect(created).toHaveLength(2);
+    expect(created[0]).toEqual(
+      expect.objectContaining({
+        walletId: 'wallet-1',
+        purchaseTransactionId: 'purchase-1',
+        periodStart: '2026-05-12',
+        periodEnd: '2026-05-12',
+        sequenceNumber: 1,
+        amount: '300',
+        dueDate: '2026-06-01',
+        deadlineDate: '2026-06-10',
+        status: InstallmentStatus.PENDING,
+      }),
+    );
+    expect(created[1].dueDate).toBe('2026-07-01');
+  });
 
-    // The same day's overdue sweep: 17 days past the Jan 15 deadline,
-    // 2%/day of the 300 principal = 6/day x 17 = 102 penalty, and since
-    // 17 > overdueDaysBeforeBlock (3), the wallet gets blocked.
-    const affected = await service.applyOverduePenalties(new Date(2026, 1, 1));
+  it('is idempotent per purchase', async () => {
+    const { service } = buildService({});
+    const existing = [{ id: 'already', purchaseTransactionId: 'purchase-1' }];
+    const manager = buildManager(existing);
 
-    expect(affected).toBe(1);
-    expect(priorInstallment.amount).toBe('432'); // 330 + 102
-    expect(priorInstallment.status).toBe(InstallmentStatus.OVERDUE);
-    expect(walletsRepository.update).toHaveBeenCalledWith('wallet-1', {
-      blockedAt: expect.any(Date),
+    const result = await service.createForPurchase(
+      manager as any,
+      { id: 'wallet-1', walletType },
+      { id: 'purchase-1' },
+      600n,
+    );
+
+    expect(result).toBe(existing);
+    expect(manager.save).not.toHaveBeenCalled();
+  });
+});
+
+describe('InstallmentsService.checkDueInstallments', () => {
+  it('stamps installments due today, and cancels those whose purchase was refunded', async () => {
+    const live = {
+      id: 'i-live',
+      purchaseTransactionId: 'p-live',
+      status: InstallmentStatus.PENDING,
+      dueCheckedAt: null,
+    };
+    const refunded = {
+      id: 'i-refunded',
+      purchaseTransactionId: 'p-refunded',
+      status: InstallmentStatus.PENDING,
+      dueCheckedAt: null,
+    };
+    const { service, installmentsRepository } = buildService({
+      overdueRows: [live, refunded],
+      transactionsById: {
+        'p-live': { id: 'p-live', status: 'COMPLETED' },
+        'p-refunded': { id: 'p-refunded', status: 'REVERSED' },
+      },
     });
+
+    const { due, canceled } = await service.checkDueInstallments(
+      new Date(2026, 1, 1),
+    );
+
+    expect(due.map((i) => i.id)).toEqual(['i-live']);
+    expect(canceled.map((i) => i.id)).toEqual(['i-refunded']);
+    expect(live.status).toBe(InstallmentStatus.PENDING);
+    expect(live.dueCheckedAt).toBeInstanceOf(Date);
+    expect(refunded.status).toBe(InstallmentStatus.CANCELED);
+    expect(installmentsRepository.save).toHaveBeenCalledTimes(2);
   });
 });
 

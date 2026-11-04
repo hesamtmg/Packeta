@@ -54,7 +54,7 @@ export interface LiveSettlementActivity {
 }
 
 export interface LiveInstallmentActivity {
-  kind: 'generated' | 'overdue_penalty';
+  kind: 'generated' | 'due' | 'overdue_penalty';
   count: number;
   installmentIds?: string[];
   at: string;

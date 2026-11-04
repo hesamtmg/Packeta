@@ -9,8 +9,10 @@ import { Installment, InstallmentStatus } from './entities/installment.entity';
 import { Wallet } from '../wallets/entities/wallet.entity';
 import {
   Transaction,
+  TransactionStatus,
   TransactionType,
 } from '../transactions/entities/transaction.entity';
+import { WalletType } from '../wallet-types/entities/wallet-type.entity';
 import { UsersService } from '../users/users.service';
 import { displayIdentity } from '../common/synthetic-email';
 import { LoggingService } from '../logging/logging.service';
@@ -28,6 +30,17 @@ export interface SpendDetail {
   merchantName: string;
   amount: string;
   spentAt: Date;
+}
+
+// One row of a purchase's repayment plan, before (or independent of) being
+// saved — see InstallmentsService.buildSchedule.
+export interface ScheduledInstallment {
+  sequenceNumber: number;
+  principalAmount: string;
+  feeAmount: string;
+  amount: string;
+  dueDate: string;
+  deadlineDate: string;
 }
 
 // One row of the admin overdue-collection queue — see
@@ -76,8 +89,7 @@ export class InstallmentsService {
     private readonly ledgerService: LedgerService,
   ) {}
 
-  // Splits a billing period's total (the sum of a credit wallet's VIRTUAL
-  // transactions over that period — see generateDue) into installmentCount
+  // Splits a purchase's credit-drawn amount (see buildSchedule) into installmentCount
   // equal shares — the remainder, if any, folds into the last installment so
   // the total always reconciles exactly. This is the fee/penalty percentage
   // base (Installment.principalAmount), fixed at generation time.
@@ -145,103 +157,205 @@ export class InstallmentsService {
     return candidate;
   }
 
-  // Once a month, on the day matching its type's installmentDate, every
-  // repository-backed credit wallet gets a brand-new installmentCount-row
-  // repayment plan (sequenceNumber 1..installmentCount, due this month,
-  // +1 month, ... up to installmentCount-1 months later) covering exactly
-  // what happened to *that wallet's own* virtualAmount over the one month
-  // preceding today — its VIRTUAL transactions (see WalletsService
-  // .grantCredit's grant, TransactionsService.settleCreditFundedPurchase's
-  // draw-downs, and markPaid's restores below — all three touch this
-  // wallet), not the repository's. Idempotent per period: skips a wallet
-  // that already has a batch on record for a period ending today.
-  //
-  // The window is [oneMonthBefore(today), today) — a half-open interval so
-  // consecutive months tile exactly, with no gap and no overlap; a
-  // transaction landing exactly at today's boundary belongs to the next
-  // period, not this one.
-  async generateDue(today: Date = new Date()): Promise<Installment[]> {
-    const dayOfMonth = today.getDate();
-    const todayDate = toDateOnly(today);
-    const periodStartAt = dateForDayOfMonth(
-      today.getFullYear(),
-      today.getMonth() - 1,
-      today.getDate(),
+  // The repayment schedule one credit-funded purchase of `amount` turns
+  // into, without persisting anything — shared by createForPurchase (which
+  // saves it) and previewSchedule (shown to the customer on the pay page
+  // before they confirm). `amount` is split into installmentCount equal
+  // principal shares (remainder folded into the last), each with the
+  // type's feePercent on top. Installment 1 falls due on the next
+  // installmentDate day-of-month after the purchase (or one month after the
+  // purchase, if the type sets no installmentDate), and each later one a
+  // month after the previous. Returns [] when the type has no
+  // installmentCount (not an installment-based credit line).
+  buildSchedule(
+    amount: bigint,
+    walletType: Pick<
+      WalletType,
+      | 'installmentCount'
+      | 'installmentDate'
+      | 'paymentDeadlineDate'
+      | 'feePercent'
+    >,
+    purchasedAt: Date,
+  ): ScheduledInstallment[] {
+    const installmentCount = walletType.installmentCount;
+    if (!installmentCount || installmentCount < 1 || amount <= 0n) return [];
+
+    const purchaseDay = new Date(
+      purchasedAt.getFullYear(),
+      purchasedAt.getMonth(),
+      purchasedAt.getDate(),
     );
-  
-    const periodStart = toDateOnly(periodStartAt);
+    const anchorDay = walletType.installmentDate ?? purchaseDay.getDate();
+    let firstMonthOffset = 1;
+    if (walletType.installmentDate) {
+      const sameMonth = dateForDayOfMonth(
+        purchaseDay.getFullYear(),
+        purchaseDay.getMonth(),
+        anchorDay,
+      );
+      firstMonthOffset = sameMonth.getTime() > purchaseDay.getTime() ? 0 : 1;
+    }
 
-    const wallets = await this.walletsRepository
-      .createQueryBuilder('wallet')
-      .innerJoinAndSelect('wallet.walletType', 'walletType')
-      .where('wallet.repositoryWalletId IS NOT NULL')
-      .andWhere('wallet.closedAt IS NULL')
-      .andWhere('walletType.installmentDate = :dayOfMonth', { dayOfMonth })
-      .andWhere('walletType.installmentCount IS NOT NULL')
-      .getMany();
-
-    const created: Installment[] = [];
-    for (const wallet of wallets) {
-      const installmentCount = wallet.walletType.installmentCount!;
-
-      const alreadyGenerated = await this.installmentsRepository.find({
-        where: { walletId: wallet.id, periodEnd: todayDate },
+    const schedule: ScheduledInstallment[] = [];
+    for (
+      let sequenceNumber = 1;
+      sequenceNumber <= installmentCount;
+      sequenceNumber++
+    ) {
+      const principal = this.computeInstallmentPrincipal(
+        amount,
+        installmentCount,
+        sequenceNumber,
+      );
+      const fee = this.percentOf(principal, walletType.feePercent);
+      const dueDate = dateForDayOfMonth(
+        purchaseDay.getFullYear(),
+        purchaseDay.getMonth() + firstMonthOffset + (sequenceNumber - 1),
+        anchorDay,
+      );
+      const deadlineDate = walletType.paymentDeadlineDate
+        ? this.computeDeadlineDate(dueDate, walletType.paymentDeadlineDate)
+        : dueDate;
+      schedule.push({
+        sequenceNumber,
+        principalAmount: principal.toString(),
+        feeAmount: fee.toString(),
+        amount: (principal + fee).toString(),
+        dueDate: toDateOnly(dueDate),
+        deadlineDate: toDateOnly(deadlineDate),
       });
-      if (alreadyGenerated.length > 0) continue;
+    }
+    return schedule;
+  }
 
-      const { total } = (await this.transactionsRepository
-        .createQueryBuilder('t')
-        .select('COALESCE(SUM(t.amount), 0)', 'total')
-        .where('t.type = :type', { type: TransactionType.VIRTUAL })
-        .andWhere('(t.fromWalletId = :walletId)', {
-          walletId: wallet.id,
-        })
-        .andWhere('t.createdAt >= :periodStartAt', { periodStartAt })
-        .andWhere('t.createdAt < :today', { today })
-        .getRawOne()) ?? { total: '0' };
-      const periodTotal = BigInt(total ?? '0');
-      if (periodTotal <= 0n) continue;
-   console.log('InstallmentSweepService3');
-      for (
-        let sequenceNumber = 1;
-        sequenceNumber <= installmentCount;
-        sequenceNumber++
-      ) {
-        const principal = this.computeInstallmentPrincipal(
-          periodTotal,
-          installmentCount,
-          sequenceNumber,
-        );
-        const fee = this.percentOf(principal, wallet.walletType.feePercent);
-        const amount = principal + fee;
-        const dueDateForSequence = dateForDayOfMonth(
-          today.getFullYear(),
-          today.getMonth() + (sequenceNumber - 1),
-          today.getDate(),
-        );
-        const deadlineDate = wallet.walletType.paymentDeadlineDate
-          ? this.computeDeadlineDate(
-              dueDateForSequence,
-              wallet.walletType.paymentDeadlineDate,
-            )
-          : dueDateForSequence;
+  // Called from inside TransactionsService.settleCreditFundedPurchase's DB
+  // transaction the moment a credit-funded purchase completes: turns the
+  // slice of it that was drawn on the credit line (`drawnAmount` — not any
+  // part already paid in real money via a support top-up) into its own
+  // installment plan, so the customer can see what they owe for that
+  // purchase straight away. Idempotent per purchase — a repeat call finds
+  // the plan already on record and returns it unchanged.
+  async createForPurchase(
+    manager: EntityManager,
+    wallet: Pick<Wallet, 'id'> & { walletType: WalletType },
+    purchase: Pick<Transaction, 'id'>,
+    drawnAmount: bigint,
+    purchasedAt: Date = new Date(),
+  ): Promise<Installment[]> {
+    const existing = await manager.find(Installment, {
+      where: { purchaseTransactionId: purchase.id },
+      order: { sequenceNumber: 'ASC' },
+    });
+    if (existing.length) return existing;
 
-        const installment = this.installmentsRepository.create({
-          walletId: wallet.id,
-          periodStart,
-          periodEnd: todayDate,
-          sequenceNumber,
-          amount: amount.toString(),
-          principalAmount: principal.toString(),
-          feeAmount: fee.toString(),
-          dueDate: toDateOnly(dueDateForSequence),
-          deadlineDate: toDateOnly(deadlineDate),
-          status: InstallmentStatus.PENDING,
-        });
-        created.push(await this.installmentsRepository.save(installment));
-      }
+    const schedule = this.buildSchedule(
+      drawnAmount,
+      wallet.walletType,
+      purchasedAt,
+    );
+    const purchaseDate = toDateOnly(
+      new Date(
+        purchasedAt.getFullYear(),
+        purchasedAt.getMonth(),
+        purchasedAt.getDate(),
+      ),
+    );
+    const created: Installment[] = [];
+    for (const row of schedule) {
+      const installment = manager.create(Installment, {
+        walletId: wallet.id,
+        purchaseTransactionId: purchase.id,
+        periodStart: purchaseDate,
+        periodEnd: purchaseDate,
+        sequenceNumber: row.sequenceNumber,
+        amount: row.amount,
+        principalAmount: row.principalAmount,
+        feeAmount: row.feeAmount,
+        dueDate: row.dueDate,
+        deadlineDate: row.deadlineDate,
+        status: InstallmentStatus.PENDING,
+      });
+      created.push(await manager.save(installment));
     }
     return created;
+  }
+
+  // The installment plan a given purchase produced, in order.
+  async findForPurchase(purchaseTransactionId: string): Promise<Installment[]> {
+    return this.installmentsRepository.find({
+      where: { purchaseTransactionId },
+      order: { sequenceNumber: 'ASC' },
+    });
+  }
+
+  // Called from inside TransactionsService.reverseTransaction when a
+  // credit-funded purchase is refunded: every still-unpaid installment of
+  // its plan is CANCELED — the refund already returned the drawn amount to
+  // the repository and restored the ceiling, so nothing is owed any more.
+  // Returns how many rows were canceled.
+  async cancelForPurchase(
+    manager: EntityManager,
+    purchaseTransactionId: string,
+  ): Promise<number> {
+    const result = await manager
+      .createQueryBuilder()
+      .update(Installment)
+      .set({ status: InstallmentStatus.CANCELED })
+      .where('purchaseTransactionId = :purchaseTransactionId', {
+        purchaseTransactionId,
+      })
+      .andWhere('status IN (:...statuses)', {
+        statuses: [InstallmentStatus.PENDING, InstallmentStatus.OVERDUE],
+      })
+      .execute();
+    return result.affected ?? 0;
+  }
+
+  // The daily due-date check: every still-PENDING installment whose dueDate
+  // has arrived and that hasn't been checked yet is looked at again. If the
+  // purchase it came from has since been reversed, the installment is
+  // CANCELED (nothing is owed); otherwise it's stamped dueCheckedAt and
+  // reported back as due today, so the scheduler can log/notify it. Safe to
+  // run any number of times a day — each installment is checked once.
+  async checkDueInstallments(
+    today: Date = new Date(),
+  ): Promise<{ due: Installment[]; canceled: Installment[] }> {
+    const todayDate = toDateOnly(today);
+    const candidates = await this.installmentsRepository
+      .createQueryBuilder('installment')
+      .where('installment.status = :status', {
+        status: InstallmentStatus.PENDING,
+      })
+      .andWhere('installment.dueDate <= :todayDate', { todayDate })
+      .andWhere('installment.dueCheckedAt IS NULL')
+      .getMany();
+
+    const due: Installment[] = [];
+    const canceled: Installment[] = [];
+    const purchaseStatus = new Map<string, TransactionStatus | null>();
+    for (const installment of candidates) {
+      let status: TransactionStatus | null = TransactionStatus.COMPLETED;
+      if (installment.purchaseTransactionId) {
+        const id = installment.purchaseTransactionId;
+        if (!purchaseStatus.has(id)) {
+          const purchase = await this.transactionsRepository.findOne({
+            where: { id },
+          });
+          purchaseStatus.set(id, purchase?.status ?? null);
+        }
+        status = purchaseStatus.get(id)!;
+      }
+
+      installment.dueCheckedAt = new Date();
+      if (status === TransactionStatus.REVERSED) {
+        installment.status = InstallmentStatus.CANCELED;
+        canceled.push(await this.installmentsRepository.save(installment));
+      } else {
+        due.push(await this.installmentsRepository.save(installment));
+      }
+    }
+    return { due, canceled };
   }
 
   // Every still-unpaid installment past its deadline (PENDING transitioning
@@ -443,27 +557,41 @@ export class InstallmentsService {
     const details: SpendDetail[] = [];
     for (const drawDown of drawDowns) {
       if (!drawDown.relatedPurchaseId) continue;
-      const purchase = await this.transactionsRepository.findOne({
-        where: { id: drawDown.relatedPurchaseId },
-      });
-      if (!purchase?.toWalletId) continue;
-      const merchantWallet = await this.walletsRepository.findOne({
-        where: { id: purchase.toWalletId },
-      });
-      if (!merchantWallet) continue;
-      const merchantUser = await this.usersService.findById(
-        merchantWallet.userId,
-      );
+      const detail = await this.describePurchase(drawDown.relatedPurchaseId);
+      if (!detail) continue;
       details.push({
-        purchaseId: purchase.id,
-        merchantName:
-          merchantWallet.storeName ||
-          (merchantUser ? displayIdentity(merchantUser) : 'Merchant'),
+        ...detail,
         amount: drawDown.amount,
         spentAt: drawDown.createdAt,
       });
     }
     return details;
+  }
+
+  // Resolves one purchase to the merchant it paid, for the spend detail
+  // shown beside an installment.
+  private async describePurchase(
+    purchaseId: string,
+  ): Promise<SpendDetail | null> {
+    const purchase = await this.transactionsRepository.findOne({
+      where: { id: purchaseId },
+    });
+    if (!purchase?.toWalletId) return null;
+    const merchantWallet = await this.walletsRepository.findOne({
+      where: { id: purchase.toWalletId },
+    });
+    if (!merchantWallet) return null;
+    const merchantUser = await this.usersService.findById(
+      merchantWallet.userId,
+    );
+    return {
+      purchaseId: purchase.id,
+      merchantName:
+        merchantWallet.storeName ||
+        (merchantUser ? displayIdentity(merchantUser) : 'Merchant'),
+      amount: purchase.amount,
+      spentAt: purchase.createdAt,
+    };
   }
 
   // Batched version of getSpendBreakdown for a whole list of installments
@@ -483,7 +611,16 @@ export class InstallmentsService {
         installmentIds: string[];
       }
     >();
+    const byPurchase = new Map<string, string[]>();
     for (const installment of installments) {
+      // Per-purchase plans resolve straight to the one purchase they repay.
+      if (installment.purchaseTransactionId) {
+        const ids = byPurchase.get(installment.purchaseTransactionId);
+        if (ids) ids.push(installment.id);
+        else
+          byPurchase.set(installment.purchaseTransactionId, [installment.id]);
+        continue;
+      }
       const key = `${installment.walletId}:${installment.periodStart}:${installment.periodEnd}`;
       const entry = periods.get(key);
       if (entry) {
@@ -499,6 +636,12 @@ export class InstallmentsService {
     }
 
     const result = new Map<string, SpendDetail[]>();
+    for (const [purchaseId, installmentIds] of byPurchase) {
+      const detail = await this.describePurchase(purchaseId);
+      for (const id of installmentIds) {
+        result.set(id, detail ? [detail] : []);
+      }
+    }
     for (const {
       walletId,
       periodStart,

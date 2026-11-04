@@ -5,3 +5,4 @@ coverage/
 *.log
 backend/uploads/
 deploy/certbot/
+backups/

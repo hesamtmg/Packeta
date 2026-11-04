@@ -39,6 +39,7 @@ import { displayIdentity } from '../common/synthetic-email';
 import { SettlementService } from '../settlement/settlement.service';
 import { SettlementSplitDto } from '../settlement/dto/settlement-split.dto';
 import { InstallmentsService } from '../installments/installments.service';
+import { serializeInstallment } from '../installments/installment.serializer';
 import {
   Installment,
   InstallmentStatus,
@@ -80,6 +81,18 @@ export interface PurchaseVerifyResult {
   // or the other — not the server-to-server webhook notifyMerchantCallback
   // already fired, but the customer-facing return trip.
   redirectUrl?: string;
+  // Set once a credit-funded purchase completes: the installment plan the
+  // amount drawn on the credit line was just split into (see
+  // InstallmentsService.createForPurchase), so the result page can show
+  // the customer what they owe and when.
+  installments?: ReturnType<typeof serializeInstallment>[];
+  // The credit wallet's currency, for formatting `installments`' amounts.
+  installmentCurrency?: {
+    code: string;
+    symbol: string;
+    symbolPosition: string;
+    decimalPlaces: number;
+  };
 }
 
 const DEFAULT_PURCHASE_TIMEOUT_SECONDS = 900;
@@ -1771,6 +1784,10 @@ export class TransactionsService {
   // at attach-wallet time (itself gated by phone+OTP), and the IPG's own
   // verify call is one-time-use, so an early or duplicate call is harmless.
   async verifyPurchase(transactionId: string): Promise<PurchaseVerifyResult> {
+    // The purchase whose installment plan (if any) to hand back once
+    // verified — the purchase itself, or for a support top-up the purchase
+    // it completed. Never a deposit or installment repayment.
+    let planPurchaseId: string | null = null;
     const result = await this.dataSource.transaction(async (manager) => {
       const transaction = await manager
         .createQueryBuilder(Transaction, 't')
@@ -1798,6 +1815,11 @@ export class TransactionsService {
       // identify themselves and pick a wallet at the IPG (see
       // attachPurchaseWallet), which genuinely can't be verified yet.
       const isSupportTopUp = !!transaction.completesPurchaseId;
+      if (isSupportTopUp) {
+        planPurchaseId = transaction.completesPurchaseId;
+      } else if (transaction.type === TransactionType.PURCHASE) {
+        planPurchaseId = transaction.id;
+      }
       const isRealMoneyIn =
         transaction.type === TransactionType.DEPOSIT ||
         !!transaction.installmentId ||
@@ -1966,6 +1988,25 @@ export class TransactionsService {
     });
 
     void this.emitTransactionStatusChanged(result.transactionId, result.reason);
+
+    if (result.status === TransactionStatus.COMPLETED && planPurchaseId) {
+      const installments =
+        await this.installmentsService.findForPurchase(planPurchaseId);
+      if (installments.length) {
+        result.installments = installments.map((i) => serializeInstallment(i));
+        const creditWallet = await this.walletsService.getByIdUnscoped(
+          installments[0].walletId,
+        );
+        const { code, symbol, symbolPosition, decimalPlaces } =
+          creditWallet.walletType.currency;
+        result.installmentCurrency = {
+          code,
+          symbol,
+          symbolPosition,
+          decimalPlaces,
+        };
+      }
+    }
     return result;
   }
 
@@ -2129,6 +2170,17 @@ export class TransactionsService {
         relatedPurchaseId: transaction.id,
       });
       await manager.save(ceilingDrawDown);
+
+      // The amount just drawn on the credit line becomes this purchase's
+      // own installment plan right away (no-op for a type with no
+      // installmentCount) — returned from verifyPurchase so the customer
+      // sees it on the result page.
+      await this.installmentsService.createForPurchase(
+        manager,
+        { id: fromWallet.id, walletType: fromWalletRef.walletType },
+        transaction,
+        remainder,
+      );
     }
 
     const floor = 0n; // wallets never go negative — a credit line is tracked as CREDIT_RECEIVABLE instead
@@ -2385,9 +2437,24 @@ export class TransactionsService {
         const repositoryFundingLeg = await manager.findOne(Transaction, {
           where: { idempotencyKey: `credit-fund:${original.id}` },
         });
-        const repositoryAmount = repositoryFundingLeg
+        const drawnAmount = repositoryFundingLeg
           ? BigInt(repositoryFundingLeg.amount)
           : 0n;
+        // Whatever principal of this purchase's installment plan the
+        // customer has already repaid (real money, into the repository,
+        // with the ceiling already restored by that much — see
+        // InstallmentsService.settleOneInstallment) goes back to the
+        // customer's own real balance; only the still-unpaid rest returns
+        // to the repository and the ceiling.
+        const plan = await this.installmentsService.findForPurchase(
+          original.id,
+        );
+        const paidPrincipal = plan
+          .filter((i) => i.status === InstallmentStatus.PAID)
+          .reduce((sum, i) => sum + BigInt(i.principalAmount), 0n);
+        const repaidAmount =
+          paidPrincipal > drawnAmount ? drawnAmount : paidPrincipal;
+        const repositoryAmount = drawnAmount - repaidAmount;
         const customerCreditAmount = BigInt(original.amount) - repositoryAmount;
 
         const merchantFloor = 0n; // wallets never go negative — a credit line is tracked as CREDIT_RECEIVABLE instead
@@ -2468,6 +2535,27 @@ export class TransactionsService {
             relatedPurchaseId: original.id,
           });
           await manager.save(ceilingRestore);
+        }
+
+        if (plan.length) {
+          // Nothing is owed on this purchase any more: cancel its unpaid
+          // installments and take their principal off the receivable.
+          await this.installmentsService.cancelForPurchase(
+            manager,
+            original.id,
+          );
+          if (repositoryAmount > 0n) {
+            await this.ledgerService.postCreditReceivable(
+              manager,
+              original.id,
+              'Installment plan canceled by refund',
+              {
+                id: customerWalletRef.id,
+                walletType: customerWalletRef.walletType,
+              },
+              -repositoryAmount,
+            );
+          }
         }
 
         original.status = TransactionStatus.REVERSED;

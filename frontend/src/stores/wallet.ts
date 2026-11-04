@@ -168,20 +168,24 @@ export interface InstallmentSpendDetail {
 export interface Installment {
   id: string;
   walletId: string;
-  // The exact one-month window this installment's batch was summed over
-  // (see backend InstallmentsService.generateDue) — every installment
-  // generated in the same monthly tick shares the same periodStart/
-  // periodEnd, and shares the same spendBreakdown.
+  // The credit purchase this installment's plan was generated from (see
+  // backend InstallmentsService.createForPurchase) — null on rows from the
+  // older monthly-billing model.
+  purchaseTransactionId: string | null;
+  // The purchase date for a per-purchase plan; for older rows, the
+  // one-month window their batch was summed over.
   periodStart: string;
   periodEnd: string;
   sequenceNumber: number;
   amount: string;
   principalAmount: string;
+  feeAmount: string;
   penaltyApplied: boolean;
   penaltyDaysApplied: number;
   dueDate: string;
   deadlineDate: string;
-  status: 'PENDING' | 'OVERDUE' | 'PAID';
+  dueCheckedAt: string | null;
+  status: 'PENDING' | 'OVERDUE' | 'PAID' | 'CANCELED';
   paidAt: string | null;
   paymentTransactionId: string | null;
   createdAt: string;

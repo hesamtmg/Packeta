@@ -159,6 +159,19 @@ A multi-wallet app, plus a standalone sandbox payment gateway (IPG) it settles m
   yourself; regular admins get a read-only view), **Wallet Types** (the type/currency rule editor —
   create/edit/delete is super-admin-only, regular admins get a read-only view), and **Reports** (30-day
   activity chart, breakdowns by transaction type and wallet type, most-active customers).
+- **Credit installments (one plan per purchase)**: when a customer pays with a repository-backed `CREDIT`
+  wallet, the slice drawn on the credit line becomes that purchase's own installment plan in the same DB
+  transaction that settles it (`InstallmentsService.createForPurchase`). The plan is split into the type's
+  `installmentCount` monthly rows, with `feePercent` added to each. Installment 1 is due on the next
+  `installmentDate` day-of-month after the purchase (or one month after the purchase if the type sets no
+  `installmentDate`), and `paymentDeadlineDate` sets each row's deadline. The customer sees the plan before
+  paying, on the IPG pay page (`installmentPlan` on `GET /purchase-gateway/charge/:authority/status`), and
+  again on the result page (`installments` on `POST /transactions/purchase/:id/verify`). The scheduler then
+  checks each installment again on its due date (`checkDueInstallments`): it cancels the installment if the
+  purchase was refunded in the meantime, otherwise records it as due. After that, the overdue sweep applies
+  penalties and blocks the wallet. Refunding a credit purchase cancels its unpaid installments. Principal
+  the customer already repaid goes back to their own balance; only the unpaid rest returns to the
+  repository and the credit ceiling.
 - **Market restrictions ("closed marketplace")**: any wallet can optionally carry a
   `restrictedCounterparties` list of emails. If set, that wallet may only send/receive transfers and
   purchases with those counterparties — unless the *other* wallet's own list allows the pairing back

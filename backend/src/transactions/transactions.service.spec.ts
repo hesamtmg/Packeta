@@ -347,7 +347,13 @@ function buildService(options: {
     configService as any,
     {} as any,
     settlementService as any,
-    (installmentsService ?? {}) as any,
+    {
+      // Per-purchase installment plan hooks — no plan by default.
+      createForPurchase: jest.fn(async () => []),
+      findForPurchase: jest.fn(async () => []),
+      cancelForPurchase: jest.fn(async () => 0),
+      ...(installmentsService ?? {}),
+    } as any,
     railSettlementsService as any,
     ledgerService as any,
     {} as any,
@@ -1343,10 +1349,27 @@ describe('TransactionsService.verifyPurchase', () => {
       balance: '0',
       walletType: walletType({ allowPurchaseIn: true }),
     };
+    const plannedInstallment = {
+      id: 'installment-1',
+      walletId: creditWallet.id,
+      purchaseTransactionId: 'purchase-tx-1',
+      sequenceNumber: 1,
+      amount: '150',
+      principalAmount: '150',
+      feeAmount: '0',
+      dueDate: '2026-02-01',
+      deadlineDate: '2026-02-10',
+      status: 'PENDING',
+    };
+    const installmentsService = {
+      createForPurchase: jest.fn(async () => [plannedInstallment]),
+      findForPurchase: jest.fn(async () => [plannedInstallment]),
+    };
     const { service, manager, ledgerService } = buildService({
       senderWallet: creditWallet,
       recipientWallet: merchantWallet,
       repositoryWallet,
+      installmentsService: installmentsService as any,
     });
 
     const pendingPurchase = {
@@ -1401,6 +1424,20 @@ describe('TransactionsService.verifyPurchase', () => {
       { id: creditWallet.id, walletType: creditWallet.walletType },
       150n,
     );
+    // The drawn amount becomes this purchase's own installment plan right
+    // away, and is handed back so the result page can show it.
+    expect(installmentsService.createForPurchase).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({ id: creditWallet.id }),
+      expect.objectContaining({ id: 'purchase-tx-1' }),
+      150n,
+    );
+    expect(installmentsService.findForPurchase).toHaveBeenCalledWith(
+      'purchase-tx-1',
+    );
+    expect(result.installments).toEqual([
+      expect.objectContaining({ id: 'installment-1', dueDate: '2026-02-01' }),
+    ]);
     // 2. the credit wallet's remaining credit ceiling (virtualAmount) is
     // drawn down by the repository-funded amount.
     expect(manager.update).toHaveBeenCalledWith(
@@ -3140,6 +3177,95 @@ describe('TransactionsService.reverseTransaction', () => {
       },
     );
     expect(result.balance).toBe('300');
+  });
+
+  it('refunds a partly-repaid credit purchase: repaid principal goes back to the customer, only the unpaid rest returns to the repository, and the remaining installments are canceled', async () => {
+    const repositoryWallet: WalletFixture = {
+      id: 'repo-1',
+      balance: '4300',
+      walletType: walletType({ name: 'Repository', allowPurchaseIn: true }),
+    };
+    const creditWallet: WalletFixture = {
+      id: 'credit-wallet-1',
+      userId: 'personnel-1',
+      balance: '0',
+      // 1000 limit, 600 drawn, 200 of it already repaid and restored.
+      virtualAmount: '600',
+      repositoryWalletId: 'repo-1',
+      walletType: walletType({ code: 'CREDIT', allowPurchaseOut: true }),
+    };
+    const merchantWallet: WalletFixture = {
+      id: 'merchant-wallet-1',
+      balance: '1000',
+      walletType: walletType({ allowPurchaseIn: true }),
+    };
+    const installmentsService = {
+      findForPurchase: jest.fn(async () => [
+        { id: 'i-1', status: 'PAID', principalAmount: '200' },
+        { id: 'i-2', status: 'PENDING', principalAmount: '200' },
+        { id: 'i-3', status: 'PENDING', principalAmount: '200' },
+      ]),
+      cancelForPurchase: jest.fn(async () => 2),
+    };
+    const { service, manager, ledgerService } = buildService({
+      senderWallet: creditWallet,
+      recipientWallet: merchantWallet,
+      repositoryWallet,
+      installmentsService: installmentsService as any,
+    });
+    const original = {
+      id: 'purchase-5',
+      type: TransactionType.PURCHASE,
+      status: 'COMPLETED',
+      fromWalletId: creditWallet.id,
+      toWalletId: merchantWallet.id,
+      amount: '600',
+    };
+    mockQueryBuilderFor(manager, original);
+    mockRepositoryLeg(manager, {
+      id: 'fund-5',
+      fromWalletId: repositoryWallet.id,
+      toWalletId: creditWallet.id,
+      amount: '600',
+      idempotencyKey: `credit-fund:${original.id}`,
+    });
+
+    const result = await service.reverseTransaction(
+      'personnel-1',
+      'purchase-5',
+      undefined,
+      'idem-reverse-5',
+    );
+
+    expect(ledgerService.postReversal).toHaveBeenCalledWith(
+      manager,
+      'purchase-5',
+      undefined,
+      'Refund',
+      [{ wallet: { id: merchantWallet.id, walletType: merchantWallet.walletType }, amount: 600n }],
+      [
+        { wallet: { id: creditWallet.id, walletType: creditWallet.walletType }, amount: 200n },
+        { wallet: { id: repositoryWallet.id, walletType: repositoryWallet.walletType }, amount: 400n },
+      ],
+    );
+    // Ceiling back to the full 1000: 600 + the 400 still unpaid.
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      creditWallet.id,
+      { virtualAmount: '1000' },
+    );
+    expect(installmentsService.cancelForPurchase).toHaveBeenCalledWith(
+      manager,
+      'purchase-5',
+    );
+    expect(ledgerService.postCreditReceivable).toHaveBeenCalledWith(
+      manager,
+      'purchase-5',
+      expect.any(String),
+      { id: creditWallet.id, walletType: creditWallet.walletType },
+      -400n,
+    );
+    expect(result.balance).toBe('200');
   });
 
   it('rejects reversing an already-reversed purchase', async () => {

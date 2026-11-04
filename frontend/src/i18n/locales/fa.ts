@@ -151,6 +151,7 @@ export default {
       statusPending: 'در انتظار',
       statusOverdue: 'معوق',
       statusPaid: 'پرداخت‌شده',
+      statusCanceled: 'لغوشده (استرداد)',
       pay: 'پرداخت',
       viewLink: 'مشاهده اقساط',
       none: 'هنوز قسطی وجود ندارد.',
@@ -409,6 +410,11 @@ export default {
     couldNotVerify: 'پرداخت هنوز قابل تأیید نیست.',
     verificationFailed: 'تأیید ناموفق بود',
     viewTransaction: 'مشاهده تراکنش',
+    planHeading: 'برنامه اقساط شما',
+    planHint: 'پرداخت اعتباری — {total} در {count} قسط.',
+    planDue: 'سررسید {date}',
+    planDeadline: 'مهلت پرداخت {date}',
+    viewInstallments: 'مشاهده همه اقساط',
   },
   admin: {
     dashboard: {
@@ -570,6 +576,7 @@ export default {
         auto_withdraw_sweep: 'برداشت خودکار',
         rail_settlement_sweep: 'تسویه ریلی',
         installment_generate: 'ایجاد قسط',
+        installment_due_check: 'بررسی سررسید اقساط',
         installment_overdue_penalty: 'اعمال جریمه تأخیر',
         installment_overdue_block: 'مسدودسازی کیف پول (تأخیر)',
         purchase_timeout_reverse: 'برگشت پرداخت منقضی‌شده',
@@ -1013,6 +1020,7 @@ export default {
       instPENDING: 'در انتظار',
       instOVERDUE: 'معوق',
       instPAID: 'پرداخت‌شده',
+      instCANCELED: 'لغوشده',
     },
     liveActivity: {
       title: 'فعالیت زنده',
@@ -1042,6 +1050,7 @@ export default {
       statusChangesHeading: 'تغییرات وضعیت',
       kindSettlement: 'تسویه برداشت خودکار',
       kindGenerated: 'اقساط تولید شد',
+      kindDue: 'بررسی اقساط سررسید امروز',
       kindOverdue: 'جریمه تأخیر اعمال شد',
       withdrawals: 'برداشت',
       waiting: 'در انتظار فعالیت…',

@@ -151,6 +151,7 @@ export default {
       statusPending: 'Pending',
       statusOverdue: 'Overdue',
       statusPaid: 'Paid',
+      statusCanceled: 'Canceled (refunded)',
       pay: 'Pay',
       viewLink: 'View installments',
       none: 'No installments yet.',
@@ -409,6 +410,11 @@ export default {
     couldNotVerify: 'Payment could not be verified yet.',
     verificationFailed: 'Verification failed',
     viewTransaction: 'View transaction',
+    planHeading: 'Your installment plan',
+    planHint: 'Paid on credit — {total} split into {count} installments.',
+    planDue: 'Due {date}',
+    planDeadline: 'Pay by {date}',
+    viewInstallments: 'View all installments',
   },
   admin: {
     dashboard: {
@@ -570,6 +576,7 @@ export default {
         auto_withdraw_sweep: 'Auto-withdraw sweep',
         rail_settlement_sweep: 'Rail-settlement sweep',
         installment_generate: 'Installment generation',
+        installment_due_check: 'Installment due-date check',
         installment_overdue_penalty: 'Overdue penalty applied',
         installment_overdue_block: 'Wallet blocked (overdue)',
         purchase_timeout_reverse: 'Purchase timeout reversal',
@@ -1013,6 +1020,7 @@ export default {
       instPENDING: 'Pending',
       instOVERDUE: 'Overdue',
       instPAID: 'Paid',
+      instCANCELED: 'Canceled',
     },
     liveActivity: {
       title: 'Live Activity',
@@ -1042,6 +1050,7 @@ export default {
       statusChangesHeading: 'Status changes',
       kindSettlement: 'Auto-withdraw settlement',
       kindGenerated: 'Installments generated',
+      kindDue: 'Installments due today checked',
       kindOverdue: 'Overdue penalty applied',
       withdrawals: 'withdrawal(s)',
       waiting: 'Waiting for activity…',
