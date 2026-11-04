@@ -57,6 +57,13 @@ export default {
     payDifference: 'Pay {amount} by card to continue',
     chooseDifferent: 'Choose a different wallet',
   },
+  plan: {
+    previewHeading: 'You are paying on credit — your installment plan',
+    settledHeading: 'Your installment plan',
+    hint: 'This purchase is split into {count} installments.',
+    due: 'Due {date}',
+    deadline: 'Pay by {date}',
+  },
   topUpResult: {
     success: 'Payment completed — thanks!',
     failed: 'The top-up could not be verified.',

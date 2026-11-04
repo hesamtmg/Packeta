@@ -7,6 +7,7 @@ import { packetaRequest, PACKETA_API_URL } from '../api/packetaClient';
 import { formatAmount, formatAmountWords, type CurrencyInfo } from '../utils/currency';
 import { cardGradient } from '../utils/cardTheme';
 import { setLocale } from '../i18n';
+import { formatCalendarDate } from '../utils/date';
 
 interface PaymentInfo {
   merchantName: string;
@@ -37,6 +38,17 @@ interface ChargeStatus {
   displayAmountWordsFa: string;
   expiresAt: string | null;
   language: string;
+  // Filled once a credit wallet is attached: the installment plan this
+  // purchase will turn into when it settles (see backend
+  // InstallmentsService.buildSchedule).
+  installmentPlan?: PlanRow[];
+}
+
+interface PlanRow {
+  sequenceNumber: number;
+  dueDate: string;
+  deadlineDate: string;
+  displayAmount: string;
 }
 
 interface EligibleWallet {
@@ -362,8 +374,27 @@ function goToCallbackNow() {
 
 async function enterPayStep() {
   step.value = 'pay';
-  await loadPaymentInfo();
+  await Promise.all([loadPaymentInfo(), refreshChargeInfo()]);
 }
+
+// Re-reads the charge status after a wallet was attached, so the pay step
+// can show the installment plan a credit wallet will be charged on.
+async function refreshChargeInfo() {
+  try {
+    chargeInfo.value = await packetaRequest<ChargeStatus>(
+      `/purchase-gateway/charge/${authority}/status`,
+    );
+  } catch {
+    // Non-critical — the plan preview just stays hidden.
+  }
+}
+
+// The plan actually saved when a credit-shortfall top-up completed the
+// purchase (see resolveTopUpCallback) — takes priority over the preview.
+const settledPlan = ref<PlanRow[]>([]);
+const installmentPlan = computed<PlanRow[]>(() =>
+  settledPlan.value.length ? settledPlan.value : (chargeInfo.value?.installmentPlan ?? []),
+);
 
 async function onRequestOtp() {
   gatewayError.value = '';
@@ -524,9 +555,18 @@ async function resolveTopUpCallback(topUpTransactionId: string) {
       status: string;
       reason?: string;
       redirectUrl?: string;
+      installments?: { sequenceNumber: number; dueDate: string; deadlineDate: string; amount: string }[];
+      installmentCurrency?: CurrencyInfo;
     }>(`/transactions/purchase/${topUpTransactionId}/verify`, { method: 'POST' });
     if (result.status === 'COMPLETED') {
       topUpResult.value = 'success';
+      const currency = result.installmentCurrency;
+      settledPlan.value = (result.installments ?? []).map((i) => ({
+        sequenceNumber: i.sequenceNumber,
+        dueDate: i.dueDate,
+        deadlineDate: i.deadlineDate,
+        displayAmount: currency ? formatAmount(i.amount, currency) : i.amount,
+      }));
     } else {
       topUpResult.value = 'failed';
       topUpResultMessage.value = result.reason ?? '';
@@ -860,6 +900,28 @@ onUnmounted(() => {
 
           <p v-else class="status">{{ t('loading') }}</p>
         </template>
+
+        <div
+          v-if="installmentPlan.length && (step === 'pay' || step === 'topup-result' || step === 'redirecting')"
+          class="plan"
+        >
+          <p class="plan-heading">
+            {{ step === 'pay' ? t('plan.previewHeading') : t('plan.settledHeading') }}
+          </p>
+          <p class="plan-hint">{{ t('plan.hint', { count: installmentPlan.length }) }}</p>
+          <ol class="plan-list">
+            <li v-for="row in installmentPlan" :key="row.sequenceNumber">
+              <span class="plan-seq">#{{ row.sequenceNumber }}</span>
+              <span class="plan-dates">
+                <span>{{ t('plan.due', { date: formatCalendarDate(row.dueDate) }) }}</span>
+                <span v-if="row.deadlineDate !== row.dueDate" class="plan-deadline">
+                  {{ t('plan.deadline', { date: formatCalendarDate(row.deadlineDate) }) }}
+                </span>
+              </span>
+              <span class="plan-amount">{{ row.displayAmount }}</span>
+            </li>
+          </ol>
+        </div>
           </div>
         </section>
       </div>
@@ -1508,6 +1570,61 @@ button.paycard.selected {
   margin: 0;
   color: var(--ink-dim);
   font-size: 0.92rem;
+}
+.plan {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line, #e5e7eb);
+}
+.plan-heading {
+  margin: 0;
+  font-weight: 600;
+  color: var(--ink);
+}
+.plan-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-dim);
+}
+.plan-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.plan-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+.plan-seq {
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+.plan-dates {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.plan-deadline {
+  font-size: 0.78rem;
+  color: var(--ink-dim);
+}
+.plan-amount {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .dev-hint {
   margin: 0;

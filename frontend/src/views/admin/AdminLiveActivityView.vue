@@ -241,9 +241,9 @@ const eventsPerMinute = computed(() => minuteBuckets.value[minuteBuckets.value.l
             <span class="feed-time">{{ ago(activity.at) }}</span>
           </li>
           <li v-for="(activity, i) in installmentActivity" :key="`inst-${i}`" class="feed-item">
-            <span class="type-icon" :class="activity.kind === 'generated' ? 'stat-icon-blue' : 'stat-icon-red'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="16" rx="2" /><path d="M8 3v4M16 3v4M4 10h16" /></svg></span>
+            <span class="type-icon" :class="activity.kind === 'overdue_penalty' ? 'stat-icon-red' : 'stat-icon-blue'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="16" rx="2" /><path d="M8 3v4M16 3v4M4 10h16" /></svg></span>
             <span class="feed-main">
-              <span class="feed-title">{{ t(`admin.liveActivity.kind${activity.kind === 'generated' ? 'Generated' : 'Overdue'}`) }}</span>
+              <span class="feed-title">{{ t(`admin.liveActivity.kind${activity.kind === 'generated' ? 'Generated' : activity.kind === 'due' ? 'Due' : 'Overdue'}`) }}</span>
               <span class="feed-sub">{{ t('admin.liveActivity.installmentsCount', { count: activity.count }) }}</span>
             </span>
             <span class="feed-time">{{ ago(activity.at) }}</span>

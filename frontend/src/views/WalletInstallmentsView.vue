@@ -21,7 +21,7 @@ const expandedMonths = ref<Set<string>>(new Set());
 
 const thisWallet = computed(() => wallet.wallets.find((w) => w.id === walletId.value) ?? null);
 
-const statusRank: Record<Installment['status'], number> = { OVERDUE: 2, PENDING: 1, PAID: 0 };
+const statusRank: Record<Installment['status'], number> = { OVERDUE: 3, PENDING: 2, PAID: 1, CANCELED: 0 };
 
 // Installments due in the same calendar month can come from different
 // billing periods (see backend InstallmentsService.generateDue — each month
@@ -53,8 +53,13 @@ const monthGroups = computed(() => {
 
 function installmentStatusLabel(status: Installment['status']): string {
   if (status === 'PAID') return t('dashboard.installments.statusPaid');
+  if (status === 'CANCELED') return t('dashboard.installments.statusCanceled');
   if (status === 'OVERDUE') return t('dashboard.installments.statusOverdue');
   return t('dashboard.installments.statusPending');
+}
+
+function isPayable(i: Installment): boolean {
+  return i.status === 'PENDING' || i.status === 'OVERDUE';
 }
 
 function toggleExpand(monthKey: string) {
@@ -119,7 +124,7 @@ onMounted(load);
               </td>
               <td class="installment-actions">
                 <button
-                  v-if="group.installments.length === 1 && group.installments[0].status !== 'PAID'"
+                  v-if="group.installments.length === 1 && isPayable(group.installments[0])"
                   type="button"
                   class="admin-btn admin-btn-primary"
                   :disabled="payBusy === group.installments[0].id"
@@ -146,7 +151,7 @@ onMounted(load);
                     <span>{{ thisWallet ? formatAmount(i.amount, thisWallet.walletType.currency) : i.amount }}</span>
                     <span class="admin-badge" :class="`installment-status-${i.status.toLowerCase()}`">{{ installmentStatusLabel(i.status) }}</span>
                     <button
-                      v-if="i.status !== 'PAID'"
+                      v-if="isPayable(i)"
                       type="button"
                       class="admin-btn admin-btn-primary"
                       :disabled="payBusy === i.id"

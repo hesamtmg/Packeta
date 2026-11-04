@@ -57,6 +57,13 @@ export default {
     payDifference: 'برای ادامه، مبلغ {amount} را با کارت پرداخت کنید',
     chooseDifferent: 'انتخاب کیف پول دیگر',
   },
+  plan: {
+    previewHeading: 'پرداخت شما اعتباری است — برنامه اقساط',
+    settledHeading: 'برنامه اقساط شما',
+    hint: 'این خرید در {count} قسط پرداخت می‌شود.',
+    due: 'سررسید {date}',
+    deadline: 'مهلت پرداخت {date}',
+  },
   topUpResult: {
     success: 'پرداخت با موفقیت انجام شد — سپاسگزاریم!',
     failed: 'تأیید پرداخت تکمیلی ممکن نشد.',

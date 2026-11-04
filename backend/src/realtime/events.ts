@@ -65,7 +65,7 @@ export interface SettlementActivityEvent {
 }
 
 export interface InstallmentActivityEvent {
-  kind: 'generated' | 'overdue_penalty';
+  kind: 'generated' | 'due' | 'overdue_penalty';
   count: number;
   installmentIds?: string[];
   at: string;

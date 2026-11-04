@@ -20,7 +20,7 @@ import { lastDayLabels, perDayBuckets as dayBuckets, formatRelative, initials } 
 // interfaces — kept unshared since only the fields this report needs are
 // declared here.
 interface AdminInstallment {
-  status: 'PENDING' | 'OVERDUE' | 'PAID';
+  status: 'PENDING' | 'OVERDUE' | 'PAID' | 'CANCELED';
   amount: string;
   currency: CurrencyInfo;
 }
@@ -167,7 +167,7 @@ const creditLineHealth = computed(() => {
     return fresh;
   };
   for (const i of installments.value) {
-    if (i.status === 'PAID') continue;
+    if (i.status === 'PAID' || i.status === 'CANCELED') continue;
     const row = entry(i.currency);
     row.outstandingCount += 1;
     row.outstandingAmount += BigInt(i.amount);

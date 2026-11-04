@@ -22,7 +22,7 @@ interface AdminInstallment {
   penaltyDaysApplied: number;
   dueDate: string;
   deadlineDate: string;
-  status: 'PENDING' | 'OVERDUE' | 'PAID';
+  status: 'PENDING' | 'OVERDUE' | 'PAID' | 'CANCELED';
   paidAt: string | null;
   ownerEmail: string;
   ownerPhoneNumber: string | null;
@@ -60,7 +60,7 @@ const filteredInstallments = computed(() =>
   statusFilter.value ? installments.value.filter((i) => i.status === statusFilter.value) : installments.value,
 );
 const statusCounts = computed(() => {
-  const counts: Record<string, number> = { PENDING: 0, OVERDUE: 0, PAID: 0 };
+  const counts: Record<string, number> = { PENDING: 0, OVERDUE: 0, PAID: 0, CANCELED: 0 };
   for (const i of installments.value) counts[i.status] += 1;
   return counts;
 });
@@ -75,7 +75,7 @@ function sumByCurrency(rows: { amount: string; currency: CurrencyInfo }[]): stri
   }
   return [...totals.values()].sort((a, b) => (b.total > a.total ? 1 : -1)).map((e) => formatAmount(e.total.toString(), e.currency));
 }
-const outstanding = computed(() => sumByCurrency(installments.value.filter((i) => i.status !== 'PAID')));
+const outstanding = computed(() => sumByCurrency(installments.value.filter((i) => i.status === 'PENDING' || i.status === 'OVERDUE')));
 const overdueOwed = computed(() => sumByCurrency(blockedWallets.value.map((w) => ({ amount: w.totalOwed, currency: w.currency }))));
 
 const DAY = 86_400_000;
@@ -88,6 +88,7 @@ function daysUntil(date: string): number {
   return Math.round((new Date(`${date}T00:00:00Z`).getTime() - todayUtc()) / DAY);
 }
 function deadlineHint(i: AdminInstallment): { text: string; tone: string } {
+  if (i.status === 'CANCELED') return { text: '', tone: '' };
   if (i.status === 'PAID') return { text: i.paidAt ? t('admin.installments.paidOn', { date: formatDate(i.paidAt) }) : '', tone: 'ok' };
   const d = daysUntil(i.deadlineDate);
   if (d < 0) return { text: t('admin.installments.daysLate', { count: -d }), tone: 'bad' };
@@ -520,6 +521,7 @@ onMounted(() => {
 .inst-badge-paid { background: var(--badge-tint-lime); color: var(--accent-lime); }
 .inst-badge-pending { background: var(--badge-tint-orange); color: var(--accent-orange); }
 .inst-badge-overdue { background: var(--badge-tint-red); color: var(--accent-red); }
+.inst-badge-canceled { background: var(--badge-tint); color: var(--text-dim); }
 @media (max-width: 900px) {
   .queue-row {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

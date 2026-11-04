@@ -21,6 +21,10 @@ import {
 } from '../common/format-amount';
 import { displayIdentity } from '../common/synthetic-email';
 import { LedgerService } from '../gl/ledger.service';
+import {
+  InstallmentsService,
+  ScheduledInstallment,
+} from '../installments/installments.service';
 
 // Backs the IPG's "identify yourself" step for merchant-initiated charges:
 // the customer proves who they are with phone + OTP (no Packeta session
@@ -35,6 +39,7 @@ export class PurchaseGatewayService {
     private readonly otpService: OtpService,
     private readonly captchaService: CaptchaService,
     private readonly ledgerService: LedgerService,
+    private readonly installmentsService: InstallmentsService,
     private readonly i18n: I18nService,
     private readonly dataSource: DataSource,
   ) {}
@@ -57,6 +62,9 @@ export class PurchaseGatewayService {
     displayAmountWordsFa: string;
     expiresAt: Date | null;
     language: string;
+    installmentPlan: (ScheduledInstallment & {
+      displayAmount: string;
+    })[];
   }> {
     const transaction =
       await this.transactionsService.findByIpgAuthority(authority);
@@ -70,6 +78,39 @@ export class PurchaseGatewayService {
       transaction.toWalletId!,
     );
     const merchant = await this.usersService.findById(toWallet.userId);
+
+    // Once a repository-backed credit wallet is attached, the customer is
+    // paying on credit: show them the installment plan this purchase will
+    // turn into (see InstallmentsService.buildSchedule — the same split
+    // createForPurchase saves once the purchase settles) before they
+    // confirm. The whole amount is drawn on the line here, since a charge
+    // the credit line can't fully cover goes through the support top-up
+    // path instead (see attachWallet).
+    let installmentPlan: (ScheduledInstallment & { displayAmount: string })[] =
+      [];
+    if (transaction.fromWalletId) {
+      const fromWallet = await this.walletsService.getByIdUnscoped(
+        transaction.fromWalletId,
+      );
+      if (
+        fromWallet.walletType.code === WalletTypeCode.CREDIT &&
+        fromWallet.repositoryWalletId
+      ) {
+        installmentPlan = this.installmentsService
+          .buildSchedule(
+            BigInt(transaction.amount),
+            fromWallet.walletType,
+            new Date(),
+          )
+          .map((row) => ({
+            ...row,
+            displayAmount: formatAmount(
+              row.amount,
+              fromWallet.walletType.currency,
+            ),
+          }));
+      }
+    }
 
     return {
       needsWalletSelection: !transaction.fromWalletId,
@@ -103,6 +144,7 @@ export class PurchaseGatewayService {
       ),
       expiresAt: transaction.expiresAt,
       language: transaction.language ?? 'en',
+      installmentPlan,
     };
   }
 
