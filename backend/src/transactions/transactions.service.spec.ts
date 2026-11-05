@@ -2853,7 +2853,11 @@ describe('TransactionsService offboarding (quit-customer) methods', () => {
 });
 
 describe('TransactionsService.getHistory', () => {
-  function buildHistoryService(wallets: WalletFixture[]) {
+  function buildHistoryService(
+    wallets: WalletFixture[],
+    rows: any[] = [],
+    installmentWalletIds: Map<string, string> = new Map(),
+  ) {
     const walletsService = {
       listForUser: jest.fn(async () => wallets),
       getById: jest.fn(async (_userId: string, walletId: string) => {
@@ -2862,7 +2866,10 @@ describe('TransactionsService.getHistory', () => {
         return wallet;
       }),
     };
-    const transactionsRepository = { find: jest.fn(async () => []) };
+    const installmentsService = {
+      findWalletIdsByInstallment: jest.fn(async () => installmentWalletIds),
+    };
+    const transactionsRepository = { find: jest.fn(async () => rows) };
     const service = new TransactionsService(
       {} as any,
       walletsService as any,
@@ -2873,7 +2880,7 @@ describe('TransactionsService.getHistory', () => {
       {} as any,
       {} as any,
       {} as any,
-      {} as any,
+      installmentsService as any,
       {} as any,
       {} as any,
       transactionsRepository as any,
@@ -2906,6 +2913,7 @@ describe('TransactionsService.getHistory', () => {
         where: [
           { fromWalletId: expect.objectContaining({ _value: ['w-visible'] }) },
           { toWalletId: expect.objectContaining({ _value: ['w-visible'] }) },
+          { settlesWalletId: expect.objectContaining({ _value: ['w-visible'] }) },
         ],
       }),
     );
@@ -2926,9 +2934,42 @@ describe('TransactionsService.getHistory', () => {
         where: [
           { fromWalletId: expect.objectContaining({ _value: ['w-hidden'] }) },
           { toWalletId: expect.objectContaining({ _value: ['w-hidden'] }) },
+          { settlesWalletId: expect.objectContaining({ _value: ['w-hidden'] }) },
         ],
       }),
     );
+  });
+  it("includes installment repayments paid into the lender's repository, shown against the customer's credit wallet", async () => {
+    const credit: WalletFixture = {
+      id: 'credit-1',
+      balance: '0',
+      walletType: walletType({ hiddenFromCustomer: false } as any),
+    };
+    const repayment = {
+      id: 'tx-repay',
+      fromWalletId: null,
+      toWalletId: 'repo-of-lender',
+      installmentId: 'inst-1',
+      settlesWalletId: null,
+    };
+    const { service, transactionsRepository } = buildHistoryService(
+      [credit],
+      [repayment],
+      new Map([['inst-1', 'credit-1']]),
+    );
+
+    const result = await service.getHistory('user-1');
+
+    expect(transactionsRepository.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.arrayContaining([
+          { installmentId: expect.objectContaining({ _value: ['inst-1'] }) },
+        ]),
+      }),
+    );
+    expect(result).toEqual([
+      expect.objectContaining({ id: 'tx-repay', toWalletId: 'credit-1' }),
+    ]);
   });
 });
 
@@ -3400,5 +3441,90 @@ describe('TransactionsService instant-rail settlement after purchase verify', ()
     expect(loggingService.log).toHaveBeenCalledWith(
       expect.objectContaining({ success: false }),
     );
+  });
+});
+
+describe('TransactionsService.getById (installment repayments)', () => {
+  function buildGetByIdService(transaction: any, wallets: Record<string, any>) {
+    const walletsService = {
+      getByIdUnscoped: jest.fn(async (id: string) => {
+        const w = wallets[id];
+        if (!w) throw new NotFoundException('Wallet not found');
+        return w;
+      }),
+    };
+    const installmentsService = {
+      findWalletIdForInstallment: jest.fn(async (id: string) =>
+        id === 'inst-1' ? 'credit-1' : null,
+      ),
+    };
+    const ledgerService = {
+      getWalletBalances: jest.fn(async () => new Map()),
+    };
+    const transactionsRepository = {
+      findOne: jest.fn(async () => transaction),
+    };
+    return new TransactionsService(
+      { manager: {} } as any,
+      walletsService as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      installmentsService as any,
+      {} as any,
+      ledgerService as any,
+      transactionsRepository as any,
+      i18nStub as any,
+      { emit: () => undefined } as any,
+    );
+  }
+
+  const currency = { code: 'IRR', decimals: 0 };
+  const repository = {
+    id: 'repo-1',
+    userId: 'lender-1',
+    walletType: { code: 'REPOSITORY', currency },
+  };
+  const credit = {
+    id: 'credit-1',
+    userId: 'customer-1',
+    walletType: { code: 'CREDIT', currency },
+  };
+  const repayment = {
+    id: 'tx-repay',
+    type: 'DEPOSIT',
+    fromWalletId: null,
+    toWalletId: 'repo-1',
+    installmentId: 'inst-1',
+    settlesWalletId: null,
+    amount: '1000',
+  };
+
+  it("lets the credit wallet's owner see their own installment repayment, without exposing the lender's repository", async () => {
+    const service = buildGetByIdService(repayment, {
+      'repo-1': repository,
+      'credit-1': credit,
+    });
+
+    const result = await service.getById('customer-1', 'tx-repay');
+
+    expect(result.toWallet?.id).toBe('credit-1');
+    expect(result.fromWallet).toBeNull();
+    expect(result.direction).toBe('IN');
+  });
+
+  it('still rejects someone who owns neither side nor the repaid credit wallet', async () => {
+    const service = buildGetByIdService(repayment, {
+      'repo-1': repository,
+      'credit-1': credit,
+    });
+
+    await expect(
+      service.getById('stranger-1', 'tx-repay'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

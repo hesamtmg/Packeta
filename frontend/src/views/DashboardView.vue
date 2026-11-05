@@ -12,6 +12,7 @@ import { walletDisplayName } from '../utils/wallet-name';
 import { useListControls } from '../composables/useListControls';
 import { groupTransactionClusters } from '../utils/txCluster';
 import AppLayout from '../components/AppLayout.vue';
+import CreditInstallmentsCard from '../components/CreditInstallmentsCard.vue';
 import ActivityChart from '../components/ActivityChart.vue';
 
 const wallet = useWalletStore();
@@ -938,6 +939,8 @@ async function onGrantCredit() {
                 <span class="mono-id">{{ sw.id }}</span>
               </div>
             </div>
+
+            <CreditInstallmentsCard v-if="sw.walletType.code === 'CREDIT'" :wallet="sw" />
 
             <div v-if="availableActions(sw).length" class="action-tiles">
               <button
