@@ -464,3 +464,186 @@ describe('WalletTypesService.delete', () => {
     expect(walletTypesRepository.delete).toHaveBeenCalledWith('type-1');
   });
 });
+
+describe('WalletTypesService — merchant withdrawal methods', () => {
+  function build(feeRepositoryWallet: Record<string, unknown> | null) {
+    const walletTypesRepository = {
+      findOne: jest.fn(async () => null),
+      create: jest.fn((data: Record<string, unknown>) => data),
+      save: jest.fn(async (data: Record<string, unknown>) => data),
+    };
+    const walletsRepository = {
+      findOne: jest.fn(async () => feeRepositoryWallet),
+    };
+    const currenciesService = {
+      findByCode: jest.fn(async () => ({ id: 'currency-1', code: 'IRR' })),
+    };
+    const service = new WalletTypesService(
+      walletTypesRepository as any,
+      walletsRepository as any,
+      currenciesService as any,
+    );
+    return { service, walletTypesRepository };
+  }
+  const merchantRepo = {
+    walletType: { code: 'MERCHANT_REPOSITORY', currencyId: 'currency-1' },
+  };
+  const baseDto = {
+    code: 'MERCHANT',
+    name: 'Merchant',
+    currencyCode: 'IRR',
+    allowNegativeBalance: false,
+    allowWithdraw: false,
+    allowP2pOut: false,
+    allowP2pIn: false,
+    supportsAutoWithdraw: true,
+  };
+
+  it('stores each rail with its own fee and fee repository', async () => {
+    const { service } = build(merchantRepo);
+
+    const created = await service.create({
+      ...baseDto,
+      withdrawalMethods: [
+        {
+          railType: 'PAYA',
+          enabled: true,
+          feePercent: 0.5,
+          fixedFee: 0,
+          feeRepositoryWalletId: 'repo-1',
+        },
+        {
+          railType: 'SATNA',
+          enabled: true,
+          fixedFee: 25000,
+          feeRepositoryWalletId: 'repo-2',
+        },
+        { railType: 'POL_PAY', enabled: false },
+      ],
+    } as any);
+
+    expect(created.withdrawalMethods).toEqual([
+      {
+        railType: 'PAYA',
+        enabled: true,
+        feePercent: '0.5',
+        fixedFee: '0',
+        feeRepositoryWalletId: 'repo-1',
+      },
+      {
+        railType: 'SATNA',
+        enabled: true,
+        feePercent: '0',
+        fixedFee: '25000',
+        feeRepositoryWalletId: 'repo-2',
+      },
+      {
+        railType: 'POL_PAY',
+        enabled: false,
+        feePercent: '0',
+        fixedFee: '0',
+        feeRepositoryWalletId: null,
+      },
+    ]);
+  });
+
+  it('rejects a rail that charges a fee without a fee repository', async () => {
+    const { service } = build(merchantRepo);
+    await expect(
+      service.create({
+        ...baseDto,
+        withdrawalMethods: [{ railType: 'PAYA', enabled: true, feePercent: 1 }],
+      } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects a fee repository that is not a MERCHANT_REPOSITORY wallet', async () => {
+    const { service } = build({
+      walletType: { code: 'MERCHANT', currencyId: 'currency-1' },
+    });
+    await expect(
+      service.create({
+        ...baseDto,
+        withdrawalMethods: [
+          {
+            railType: 'PAYA',
+            enabled: true,
+            fixedFee: 10,
+            feeRepositoryWalletId: 'w-1',
+          },
+        ],
+      } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects the same rail listed twice', async () => {
+    const { service } = build(merchantRepo);
+    await expect(
+      service.create({
+        ...baseDto,
+        withdrawalMethods: [
+          { railType: 'PAYA', enabled: true },
+          { railType: 'PAYA', enabled: false },
+        ],
+      } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects withdrawal methods on a type without supportsAutoWithdraw', async () => {
+    const { service } = build(merchantRepo);
+    await expect(
+      service.create({
+        ...baseDto,
+        supportsAutoWithdraw: false,
+        withdrawalMethods: [{ railType: 'PAYA', enabled: true }],
+      } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects a config where every method is disabled', async () => {
+    const { service } = build(merchantRepo);
+    await expect(
+      service.create({
+        ...baseDto,
+        withdrawalMethods: [{ railType: 'PAYA', enabled: false }],
+      } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('clears the config on update with an empty list', async () => {
+    const { service } = buildServiceForAutoWithdraw({
+      id: 'type-1',
+      code: 'MERCHANT',
+      currencyId: 'currency-1',
+      supportsAutoWithdraw: true,
+      withdrawalMethods: [{ railType: 'PAYA', enabled: true }],
+    });
+    const updated = await service.update('type-1', {
+      withdrawalMethods: [],
+    } as any);
+    expect(updated.withdrawalMethods).toBeNull();
+  });
+});
+
+describe('WalletTypesService.update — clearing credit fee repositories', () => {
+  it('clears a fee/penalty/unblock repository back to null when given an empty string', async () => {
+    const { service } = buildServiceForAutoWithdraw({
+      id: 'type-1',
+      code: 'CREDIT',
+      currencyId: 'currency-1',
+      allowNegativeBalance: false,
+      supportsAutoWithdraw: false,
+      feeRepositoryWalletId: 'repo-1',
+      penaltyRepositoryWalletId: 'repo-2',
+      unblockFeeRepositoryWalletId: 'repo-3',
+    });
+    const updated = await service.update('type-1', {
+      feeRepositoryWalletId: '',
+      penaltyRepositoryWalletId: '',
+      unblockFeeRepositoryWalletId: '',
+    } as any);
+    expect(updated.feeRepositoryWalletId).toBeNull();
+    expect(updated.penaltyRepositoryWalletId).toBeNull();
+    expect(updated.unblockFeeRepositoryWalletId).toBeNull();
+  });
+});

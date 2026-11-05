@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useWalletStore, type Wallet, type WalletOptionsInput, type SettlementRailType } from '../stores/wallet';
+import { useWalletStore, type Wallet, type WalletType, type WalletOptionsInput, type SettlementRailType } from '../stores/wallet';
+import { availableRails, feeSummary } from '../utils/withdrawalMethods';
 import { useAuthStore } from '../stores/auth';
 import { apiRequest, ApiError, API_URL } from '../api/client';
 import { amountStep, formatAmount, formatAmountWords, toMinorUnits, type CurrencyInfo } from '../utils/currency';
@@ -93,6 +94,14 @@ const grantSuccess = ref('');
 // Merchant-style (supportsAutoWithdraw) wallets never withdraw manually —
 // their balance only leaves on the auto-withdraw sweep schedule — so they're
 // excluded here even if allowWithdraw happens to also be true.
+// Rail <option> text: the rail name, plus its withdrawal-method fee when the
+// super admin set one on this wallet type.
+function railOptionLabel(walletType: WalletType | null | undefined, rail: SettlementRailType): string {
+  const name = t(`dashboard.settlement.rail.${rail}`);
+  const fee = walletType ? feeSummary(walletType, rail) : null;
+  return fee ? `${name} — ${t('dashboard.settlement.railFee', { fee })}` : name;
+}
+
 const withdrawableWallets = computed(() =>
   wallet.wallets.filter((w) => w.walletType.allowWithdraw && !w.walletType.supportsAutoWithdraw),
 );
@@ -1072,10 +1081,7 @@ async function onGrantCredit() {
                     {{ t('dashboard.settlement.railLabel') }}
                     <select v-model="editRailType" class="admin-input">
                       <option value="">{{ t('dashboard.settlement.railPlaceholder') }}</option>
-                      <option value="POL_PAY">{{ t('dashboard.settlement.rail.POL_PAY') }}</option>
-                      <option value="PAYA">{{ t('dashboard.settlement.rail.PAYA') }}</option>
-                      <option value="SATNA">{{ t('dashboard.settlement.rail.SATNA') }}</option>
-                      <option value="BANK_TRANSFER">{{ t('dashboard.settlement.rail.BANK_TRANSFER') }}</option>
+                      <option v-for="rail in availableRails(sw.walletType)" :key="rail" :value="rail">{{ railOptionLabel(sw.walletType, rail) }}</option>
                     </select>
                   </label>
                   <label v-if="editRailType === 'PAYA' || editRailType === 'SATNA'" class="field">
@@ -1506,10 +1512,7 @@ async function onGrantCredit() {
                     {{ t('dashboard.settlement.railLabel') }}
                     <select v-model="newWalletRailType" class="admin-input">
                       <option value="">{{ t('dashboard.settlement.railPlaceholder') }}</option>
-                      <option value="POL_PAY">{{ t('dashboard.settlement.rail.POL_PAY') }}</option>
-                      <option value="PAYA">{{ t('dashboard.settlement.rail.PAYA') }}</option>
-                      <option value="SATNA">{{ t('dashboard.settlement.rail.SATNA') }}</option>
-                      <option value="BANK_TRANSFER">{{ t('dashboard.settlement.rail.BANK_TRANSFER') }}</option>
+                      <option v-for="rail in availableRails(selectedNewWalletType)" :key="rail" :value="rail">{{ railOptionLabel(selectedNewWalletType, rail) }}</option>
                     </select>
                   </label>
                   <label v-if="newWalletRailType === 'PAYA' || newWalletRailType === 'SATNA'" class="field">

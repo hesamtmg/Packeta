@@ -58,6 +58,11 @@ import {
   SettlementRailType,
 } from '../rail-settlements/entities/rail-settlement.entity';
 import { LedgerService, WalletLegInput } from '../gl/ledger.service';
+import {
+  computeWithdrawalFee,
+  findWithdrawalMethod,
+  hasAnyFee,
+} from '../wallet-types/withdrawal-methods';
 import { GlAccountCode } from '../gl/entities/gl-account.entity';
 import {
   RealtimeEvent,
@@ -2826,6 +2831,8 @@ export class TransactionsService {
           amount: string,
           destinationIban: string | null,
           label: string | null,
+          feeAmount: bigint,
+          feeTransactionId: string | null,
         ): Promise<
           GlAccountCode.BANK_CASH | GlAccountCode.SETTLEMENT_CLEARING
         > => {
@@ -2840,6 +2847,8 @@ export class TransactionsService {
               label,
               transactionId: transaction.id,
               scheduledFor: now,
+              feeAmount: feeAmount.toString(),
+              feeTransactionId,
             },
           );
           await manager.update(Transaction, transaction.id, {
@@ -2848,6 +2857,105 @@ export class TransactionsService {
           return settlement.status === RailSettlementStatus.COMPLETED
             ? GlAccountCode.BANK_CASH
             : GlAccountCode.SETTLEMENT_CLEARING;
+        };
+
+        // The super-admin-configured fee for this wallet's rail (see
+        // WalletType.withdrawalMethods). Charged per payout — each generated
+        // WITHDRAW slice is its own bank transfer — and moved into the
+        // rail's MERCHANT_REPOSITORY fee wallet as a TRANSFER, so the bank
+        // only receives the net amount. A fee repository that has since
+        // been closed is skipped (no fee) rather than routing money into a
+        // closed wallet.
+        const withdrawalMethod = findWithdrawalMethod(
+          walletRef.walletType.withdrawalMethods,
+          wallet.railType,
+        );
+        let feeRepositoryRef: Wallet | null = null;
+        if (
+          withdrawalMethod?.feeRepositoryWalletId &&
+          hasAnyFee(withdrawalMethod)
+        ) {
+          const feeRepository = await this.walletsService.lockById(
+            manager,
+            withdrawalMethod.feeRepositoryWalletId,
+          );
+          if (!feeRepository.closedAt) {
+            feeRepositoryRef = await this.walletsService.getByIdUnscoped(
+              feeRepository.id,
+            );
+          }
+        }
+
+        // One payout of `amount` out of this wallet: the fee (if any) to the
+        // fee repository, the rest out over the rail as a WITHDRAW. A fee
+        // that swallows the whole amount produces no WITHDRAW at all.
+        const payOut = async (input: {
+          amount: bigint;
+          idempotencyKey: string;
+          description: string;
+          destinationIban: string | null;
+          label: string | null;
+          relatedTransactionId: string | null;
+        }): Promise<void> => {
+          const fee = feeRepositoryRef
+            ? computeWithdrawalFee(withdrawalMethod, input.amount)
+            : 0n;
+          let feeTransaction: Transaction | null = null;
+          if (fee > 0n && feeRepositoryRef) {
+            const feeNote = `${wallet.railType} withdrawal fee`;
+            feeTransaction = manager.create(Transaction, {
+              type: TransactionType.TRANSFER,
+              fromWalletId: wallet.id,
+              toWalletId: feeRepositoryRef.id,
+              amount: fee.toString(),
+              idempotencyKey: `${input.idempotencyKey}:fee`,
+              relatedTransactionId: input.relatedTransactionId,
+              note: feeNote,
+            });
+            await manager.save(feeTransaction);
+            await this.ledgerService.postWalletToWallet(
+              manager,
+              feeTransaction.id,
+              feeNote,
+              { id: walletRef.id, walletType: walletRef.walletType },
+              {
+                id: feeRepositoryRef.id,
+                walletType: feeRepositoryRef.walletType,
+              },
+              fee,
+            );
+          }
+
+          const net = input.amount - fee;
+          if (net <= 0n) return;
+          const withdrawal = manager.create(Transaction, {
+            type: TransactionType.WITHDRAW,
+            fromWalletId: wallet.id,
+            toWalletId: null,
+            amount: net.toString(),
+            idempotencyKey: input.idempotencyKey,
+            relatedTransactionId: input.relatedTransactionId,
+            destinationIban: input.destinationIban,
+            note: input.label,
+          });
+          await manager.save(withdrawal);
+          const cashAccount = await recordRailSettlement(
+            withdrawal,
+            net.toString(),
+            input.destinationIban,
+            input.label,
+            fee,
+            feeTransaction?.id ?? null,
+          );
+          await this.ledgerService.postCashMovement(
+            manager,
+            withdrawal.id,
+            input.description,
+            { id: walletRef.id, walletType: walletRef.walletType },
+            -net,
+            cashAccount,
+          );
+          created.push(withdrawal);
         };
 
         const unsettledPurchases = await manager
@@ -2870,29 +2978,14 @@ export class TransactionsService {
           walletDefaults.length > 0 || overridesByPurchase.size > 0;
 
         if (!splitModeActive) {
-          const transaction = manager.create(Transaction, {
-            type: TransactionType.WITHDRAW,
-            fromWalletId: wallet.id,
-            toWalletId: null,
-            amount: balance.toString(),
+          await payOut({
+            amount: balance,
             idempotencyKey: `${keyPrefix}:${wallet.id}:${minuteKey}`,
+            description: 'Auto-withdraw sweep',
+            destinationIban: null,
+            label: null,
+            relatedTransactionId: null,
           });
-          await manager.save(transaction);
-          const cashAccount = await recordRailSettlement(
-            transaction,
-            balance.toString(),
-            null,
-            null,
-          );
-          await this.ledgerService.postCashMovement(
-            manager,
-            transaction.id,
-            'Auto-withdraw sweep',
-            { id: walletRef.id, walletType: walletRef.walletType },
-            -balance,
-            cashAccount,
-          );
-          created.push(transaction);
           return created;
         }
 
@@ -2915,32 +3008,14 @@ export class TransactionsService {
           remainingBalance -= total;
 
           for (const [index, item] of amounts.entries()) {
-            const withdrawal = manager.create(Transaction, {
-              type: TransactionType.WITHDRAW,
-              fromWalletId: wallet.id,
-              toWalletId: null,
-              amount: item.amount.toString(),
+            await payOut({
+              amount: item.amount,
               idempotencyKey: `${keyPrefix}:${wallet.id}:${purchase.id}:${index}:${minuteKey}`,
-              relatedTransactionId: purchase.id,
+              description: 'Auto-withdraw settlement',
               destinationIban: item.iban,
-              note: item.label,
+              label: item.label,
+              relatedTransactionId: purchase.id,
             });
-            await manager.save(withdrawal);
-            const cashAccount = await recordRailSettlement(
-              withdrawal,
-              item.amount.toString(),
-              item.iban,
-              item.label,
-            );
-            await this.ledgerService.postCashMovement(
-              manager,
-              withdrawal.id,
-              'Auto-withdraw settlement',
-              { id: walletRef.id, walletType: walletRef.walletType },
-              -item.amount,
-              cashAccount,
-            );
-            created.push(withdrawal);
           }
 
           purchase.settledAt = new Date();

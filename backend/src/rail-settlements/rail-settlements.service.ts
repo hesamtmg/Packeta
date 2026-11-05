@@ -53,6 +53,8 @@ export class RailSettlementsService {
       label: string | null;
       transactionId: string;
       scheduledFor: Date;
+      feeAmount?: string;
+      feeTransactionId?: string | null;
     },
   ): Promise<RailSettlement> {
     const settlement = manager.create(RailSettlement, {
@@ -65,6 +67,8 @@ export class RailSettlementsService {
       scheduledFor: input.scheduledFor,
       processedAt: null,
       transactionId: input.transactionId,
+      feeAmount: input.feeAmount ?? '0',
+      feeTransactionId: input.feeTransactionId ?? null,
     });
     await manager.save(settlement);
 

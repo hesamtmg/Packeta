@@ -9,6 +9,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Currency } from '../../currencies/entities/currency.entity';
+import type { WithdrawalMethodConfig } from '../withdrawal-methods';
 
 // The seeded set of built-in codes. The table itself is the source of truth
 // (new codes can be added by inserting a row) — this is only used to seed
@@ -183,6 +184,15 @@ export class WalletType {
 
   @Column({ type: 'uuid', nullable: true })
   unblockFeeRepositoryWalletId: string | null;
+
+  // Merchant-style (supportsAutoWithdraw) types only: the payout methods
+  // (interbank rails) a merchant wallet of this type may settle over, each
+  // with its own fee and the MERCHANT_REPOSITORY wallet that fee is
+  // transferred into — configured by the super admin. Null/empty keeps the
+  // original "every rail, no fee" behavior. See withdrawal-methods.ts and
+  // TransactionsService.sweepAutoWithdraw.
+  @Column({ type: 'jsonb', nullable: true })
+  withdrawalMethods: WithdrawalMethodConfig[] | null;
 
   // Whether every new signup gets a starter wallet of this type (in the
   // default currency). Only the four original built-ins are starter types;

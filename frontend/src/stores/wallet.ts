@@ -36,6 +36,19 @@ export interface WalletType {
   penaltyPercentPerDay: string | null;
   unblockFee: string | null;
   installmentCount: number | null;
+  // Merchant types: the payout rails the super admin allows and the fee each
+  // charges per payout (see utils/withdrawalMethods.ts). Null = every rail,
+  // no fee.
+  withdrawalMethods?: WithdrawalMethod[] | null;
+}
+
+export interface WithdrawalMethod {
+  railType: SettlementRailType;
+  enabled: boolean;
+  // Percent of each payout, as a numeric string.
+  feePercent: string;
+  // Flat fee per payout, minor units.
+  fixedFee: string;
 }
 
 export interface SettlementAccount {
@@ -54,6 +67,8 @@ export interface RailSettlement {
   walletId: string;
   railType: SettlementRailType;
   amount: string;
+  // Fee withheld from this payout by its withdrawal method; `amount` is net.
+  feeAmount?: string;
   destinationIban: string | null;
   label: string | null;
   status: 'PENDING' | 'COMPLETED' | 'FAILED';

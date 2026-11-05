@@ -10,7 +10,11 @@ import {
   Max,
   Min,
   ValidateIf,
+  IsArray,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+import { WithdrawalMethodDto } from './withdrawal-method.dto';
 import { CARD_COLOR_PRESETS } from '../entities/wallet-type.entity';
 
 // Same "empty clears" convention as UpdateWalletDto: send an explicit empty
@@ -147,15 +151,31 @@ export class UpdateWalletTypeDto {
   // routed instead of the credit wallet's own backing repository — each
   // must be an existing MERCHANT_REPOSITORY-type wallet in this type's
   // currency (see WalletTypesService.validateSubRepository).
+  // An empty string clears it back to the main repository.
   @IsOptional()
+  @ValidateIf((o) => !!o.feeRepositoryWalletId)
   @IsUUID()
   feeRepositoryWalletId?: string;
 
+  // An empty string clears it back to the main repository.
   @IsOptional()
+  @ValidateIf((o) => !!o.penaltyRepositoryWalletId)
   @IsUUID()
   penaltyRepositoryWalletId?: string;
 
+  // An empty string clears it back to the main repository.
   @IsOptional()
+  @ValidateIf((o) => !!o.unblockFeeRepositoryWalletId)
   @IsUUID()
   unblockFeeRepositoryWalletId?: string;
+
+  // Merchant-style (supportsAutoWithdraw) types only: one entry per payout
+  // rail, each with its own fee and fee repository (see
+  // WalletType.withdrawalMethods). Replaces the whole list; an empty
+  // array clears it back to "every rail, no fee".
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => WithdrawalMethodDto)
+  withdrawalMethods?: WithdrawalMethodDto[];
 }

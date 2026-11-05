@@ -50,6 +50,17 @@ export class RailSettlement {
   @Column({ type: 'bigint' })
   amount: string;
 
+  // The payout method's fee withheld from this payout (see
+  // WalletType.withdrawalMethods) — `amount` above is what actually went to
+  // the bank, already net of it. 0 when the rail charges no fee.
+  @Column({ type: 'bigint', default: '0' })
+  feeAmount: string;
+
+  // The TRANSFER that moved feeAmount into the rail's fee repository
+  // (a MERCHANT_REPOSITORY wallet), when there was a fee.
+  @Column({ type: 'uuid', nullable: true })
+  feeTransactionId: string | null;
+
   @Column({ type: 'varchar', length: 34, nullable: true })
   destinationIban: string | null;
 
