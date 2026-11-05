@@ -1055,7 +1055,7 @@ export class TransactionsService {
   // installment, callback to Packeta's own app), the customer very likely
   // has no active Packeta session when they open a link an admin hands
   // them out of band — so the callback lands on the IPG's own pay page
-  // instead, reusing the same topupTxnId query-param mechanism as
+  // instead, reusing the same /pay/:authority/topup/:id callback as
   // initiateSupportTopUp. verifyPurchase's settlesWalletId branch marks
   // every outstanding installment paid and clears the block once this
   // verifies.
@@ -1091,7 +1091,7 @@ export class TransactionsService {
         // No pre-existing authority to route through (unlike
         // initiateSupportTopUp, which reuses the purchase it's completing)
         // — the transaction's own id works fine as the path segment, since
-        // the topupTxnId query param is what actually drives the pay page
+        // the /topup/:id path segment is what actually drives the pay page
         // when present; the route's own :authority is only used for a
         // best-effort, non-critical header fetch there.
         const ipgFrontendUrl = this.configService.get<string>('ipgFrontendUrl');
@@ -1103,7 +1103,7 @@ export class TransactionsService {
               totalOwed.toString(),
               repository.walletType.currency,
             ),
-            callbackUrl: `${ipgFrontendUrl}/pay/${transaction.id}?topupTxnId=${transaction.id}`,
+            callbackUrl: `${ipgFrontendUrl}/pay/${transaction.id}/topup/${transaction.id}`,
             timeoutSeconds,
           });
 
@@ -1294,7 +1294,7 @@ export class TransactionsService {
               totalOwed.toString(),
               repository.walletType.currency,
             ),
-            callbackUrl: `${ipgFrontendUrl}/pay/${transaction.id}?topupTxnId=${transaction.id}`,
+            callbackUrl: `${ipgFrontendUrl}/pay/${transaction.id}/topup/${transaction.id}`,
             timeoutSeconds,
           });
 
@@ -1716,13 +1716,22 @@ export class TransactionsService {
       );
       const ipgFrontendUrl = this.configService.get<string>('ipgFrontendUrl');
 
+      // One key per attempt, not per purchase: a customer who cancels or
+      // fails at ZarinPal (that attempt ends up REVERSED) must be able to
+      // try again, and idempotencyKey is unique across all transactions.
+      const previousAttempts = await manager.count(Transaction, {
+        where: { completesPurchaseId: purchase.id },
+      });
       const topUp = manager.create(Transaction, {
         type: TransactionType.DEPOSIT,
         status: TransactionStatus.PENDING,
         fromWalletId: null,
         toWalletId: null,
         amount: shortfall.toString(),
-        idempotencyKey: `support-topup:${purchase.id}`,
+        idempotencyKey:
+          previousAttempts === 0
+            ? `support-topup:${purchase.id}`
+            : `support-topup:${purchase.id}:${previousAttempts + 1}`,
         completesPurchaseId: purchase.id,
         expiresAt,
       });
@@ -1730,7 +1739,11 @@ export class TransactionsService {
 
       // Callback lands back on the IPG's own pay page (not Packeta's app —
       // this customer never had a Packeta session) for the same authority,
-      // carrying the top-up's own id so it knows to verify it on mount.
+      // carrying the top-up's own id so it knows to verify it on mount. The
+      // id goes in the path, never the query string: ZarinPal tacks
+      // `?Authority=...&Status=...` onto the callback URL as-is, so a
+      // callback that already had a `?topupTxnId=` came back as
+      // `?topupTxnId=<id>?Authority=...` and the id no longer parsed.
       const { authority, paymentUrl } =
         await this.zarinpalClientService.createPayment({
           merchantName: 'Credit top-up',
@@ -1739,7 +1752,7 @@ export class TransactionsService {
             topUp.amount,
             creditWallet.walletType.currency,
           ),
-          callbackUrl: `${ipgFrontendUrl}/pay/${purchase.ipgAuthority}?topupTxnId=${topUp.id}`,
+          callbackUrl: `${ipgFrontendUrl}/pay/${purchase.ipgAuthority}/topup/${topUp.id}`,
           timeoutSeconds: DEFAULT_PURCHASE_TIMEOUT_SECONDS,
         });
 

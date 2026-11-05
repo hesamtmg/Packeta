@@ -67,6 +67,7 @@ export default {
   topUpResult: {
     success: 'Payment completed — thanks!',
     failed: 'The top-up could not be verified.',
+    canceled: 'The top-up payment was canceled. You can go back to the merchant and try again.',
   },
   redirecting: {
     message: 'Redirecting you back to the merchant in {seconds}s…',

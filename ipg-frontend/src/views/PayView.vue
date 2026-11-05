@@ -513,7 +513,7 @@ async function onContinueWithWallet() {
 // Customer agreed to pay the gap — kicks off a real ZarinPal payment for
 // exactly the shortfall and leaves the app entirely (real gateway, not the
 // in-house sandbox IPG). ZarinPal's own callback lands back on this same
-// /pay/:authority URL with a topupTxnId query param, picked up on mount.
+// /pay/:authority/topup/:topupTxnId URL, picked up on mount.
 async function onConfirmTopUp() {
   gatewayError.value = '';
   gatewayBusy.value = true;
@@ -551,6 +551,20 @@ async function goToPhoneStep() {
 async function resolveTopUpCallback(topUpTransactionId: string) {
   let redirectUrlFromServer = '';
   try {
+    // ZarinPal's own cancel/failure signal — same check WidgetCallbackView
+    // and the customer app's PurchaseCallbackView use. Cancelling the
+    // still-PENDING top-up (never the purchase itself) frees the customer
+    // to start a fresh top-up instead of being handed the dead one again.
+    if (route.query.Status === 'NOK') {
+      await packetaRequest(`/transactions/purchase/${topUpTransactionId}/cancel`, {
+        method: 'POST',
+      }).catch(() => undefined);
+      topUpResult.value = 'failed';
+      topUpResultMessage.value = t('topUpResult.canceled');
+      step.value = 'topup-result';
+      await loadChargeHeader();
+      return;
+    }
     const result = await packetaRequest<{
       status: string;
       reason?: string;
@@ -588,6 +602,10 @@ async function resolveTopUpCallback(topUpTransactionId: string) {
     step.value = 'topup-result';
   }
 
+  await loadChargeHeader();
+}
+
+async function loadChargeHeader() {
   try {
     const status = await packetaRequest<ChargeStatus>(
       `/purchase-gateway/charge/${authority}/status`,
@@ -599,8 +617,21 @@ async function resolveTopUpCallback(topUpTransactionId: string) {
   }
 }
 
+// The top-up's transaction id: from the /pay/:authority/topup/:id path
+// (current callbacks), or the legacy ?topupTxnId= query a payment started
+// before that change still returns with. ZarinPal appends
+// `?Authority=...` to that old URL verbatim, which glues onto the id
+// (`<id>?Authority=...`), so anything after a `?` is dropped.
+function topUpTransactionIdFromRoute(): string | undefined {
+  const fromPath = route.params.topupTxnId as string | undefined;
+  if (fromPath) return fromPath;
+  const raw = route.query.topupTxnId;
+  const fromQuery = Array.isArray(raw) ? raw[0] : raw;
+  return fromQuery ? fromQuery.split('?')[0] : undefined;
+}
+
 onMounted(async () => {
-  const topUpTransactionId = route.query.topupTxnId as string | undefined;
+  const topUpTransactionId = topUpTransactionIdFromRoute();
   if (topUpTransactionId) {
     await resolveTopUpCallback(topUpTransactionId);
     clock = setInterval(() => (now.value = Date.now()), 1000);
