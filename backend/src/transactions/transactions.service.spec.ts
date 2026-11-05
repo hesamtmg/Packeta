@@ -2055,7 +2055,7 @@ describe('TransactionsService.verifyPurchase support top-up completion', () => {
     });
   }
 
-  it('credits the support wallet, completes the purchase, and redirects to the merchant callback', async () => {
+  it('credits the support wallet, completes the purchase, and redirects to the customer panel purchase result page', async () => {
     const { service, manager, ledgerService } = buildService({
       senderWallet: creditWallet,
       recipientWallet: merchantWallet,
@@ -2074,7 +2074,7 @@ describe('TransactionsService.verifyPurchase support top-up completion', () => {
       transactionId: purchase.id,
       status: 'COMPLETED',
       redirectUrl:
-        'https://merchant.example.com/return?transactionId=purchase-tx-1&status=COMPLETED',
+        'http://localhost:5173/purchase/purchase-tx-1/callback',
     });
     // The ZarinPal top-up landing in the support wallet is its own cash-in
     // event, separate from the purchase it goes on to fund.
@@ -2156,7 +2156,7 @@ describe('TransactionsService.verifyPurchase support top-up completion', () => {
 
     expect(result.status).toBe('COMPLETED');
     expect(result.redirectUrl).toBe(
-      'https://merchant.example.com/return?transactionId=purchase-tx-1&status=COMPLETED',
+      'http://localhost:5173/purchase/purchase-tx-1/callback',
     );
     expect(manager.update).not.toHaveBeenCalledWith(
       expect.anything(),
