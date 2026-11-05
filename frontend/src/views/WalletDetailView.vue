@@ -8,6 +8,7 @@ import { formatDateTime } from '../utils/date';
 import { walletDisplayName } from '../utils/wallet-name';
 import type { Wallet } from '../stores/wallet';
 import AppLayout from '../components/AppLayout.vue';
+import CreditInstallmentsCard from '../components/CreditInstallmentsCard.vue';
 import MerchantIntegrationCard from '../components/MerchantIntegrationCard.vue';
 import MerchantSettlementCard from '../components/MerchantSettlementCard.vue';
 
@@ -79,6 +80,8 @@ onMounted(load);
         <span v-if="wallet.blockedAt" class="status-badge reversed">{{ t('walletDetail.blocked') }}</span>
         <span v-if="!wallet.closedAt && !wallet.blockedAt" class="status-badge completed">{{ t('walletDetail.active') }}</span>
       </div>
+
+      <CreditInstallmentsCard v-if="wallet.walletType.code === 'CREDIT'" :wallet="wallet" :preview-count="5" />
 
       <dl>
         <dt>{{ t('walletDetail.id') }}</dt>
@@ -182,14 +185,6 @@ onMounted(load);
         <dt>{{ t('walletDetail.createdAt') }}</dt>
         <dd>{{ formatDateTime(wallet.createdAt) }}</dd>
       </dl>
-
-      <router-link
-        v-if="wallet.walletType.code === 'CREDIT'"
-        :to="{ name: 'wallet-installments', params: { walletId: wallet.id } }"
-        class="admin-btn admin-btn-ghost"
-      >
-        {{ t('dashboard.installments.viewLink') }}
-      </router-link>
 
       <MerchantIntegrationCard v-if="isMerchant" :wallet="wallet" />
 

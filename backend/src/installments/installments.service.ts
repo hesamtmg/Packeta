@@ -515,6 +515,33 @@ export class InstallmentsService {
       .getMany();
   }
 
+  // The credit wallet an installment belongs to, or null if the id is
+  // unknown — no ownership check (callers do their own).
+  async findWalletIdForInstallment(
+    installmentId: string,
+  ): Promise<string | null> {
+    const installment = await this.installmentsRepository.findOne({
+      where: { id: installmentId },
+      select: { id: true, walletId: true },
+    });
+    return installment?.walletId ?? null;
+  }
+
+  // Every installment id on the given credit wallets — used to surface
+  // installment repayments (which land on the lender's repository wallet,
+  // not the customer's) in the customer's own transaction history.
+  // Returns installment id -> credit wallet id.
+  async findWalletIdsByInstallment(
+    walletIds: string[],
+  ): Promise<Map<string, string>> {
+    if (!walletIds.length) return new Map();
+    const rows = await this.installmentsRepository.find({
+      where: { walletId: In(walletIds) },
+      select: { id: true, walletId: true },
+    });
+    return new Map(rows.map((r) => [r.id, r.walletId]));
+  }
+
   async getByIdForUser(
     userId: string,
     installmentId: string,

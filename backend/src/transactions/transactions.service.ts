@@ -11,7 +11,14 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { I18nService } from 'nestjs-i18n';
-import { DataSource, EntityManager, In, LessThan, Repository } from 'typeorm';
+import {
+  DataSource,
+  EntityManager,
+  FindOptionsWhere,
+  In,
+  LessThan,
+  Repository,
+} from 'typeorm';
 import { Wallet } from '../wallets/entities/wallet.entity';
 import {
   WalletType,
@@ -3112,10 +3119,53 @@ export class TransactionsService {
     if (walletIds.length === 0) {
       return [];
     }
-    return this.transactionsRepository.find({
-      where: [{ fromWalletId: In(walletIds) }, { toWalletId: In(walletIds) }],
+    // Installment repayments (payInstallment) and overdue/offboarding
+    // settlements land on the LENDER's repository wallet, not on any wallet
+    // the customer owns — so they're matched by installmentId /
+    // settlesWalletId instead, and their toWalletId is presented as the
+    // customer's own credit wallet being repaid (the repository is someone
+    // else's wallet and stays hidden).
+    const installmentWalletIds =
+      await this.installmentsService.findWalletIdsByInstallment(walletIds);
+    const installmentIds = [...installmentWalletIds.keys()];
+    const where: FindOptionsWhere<Transaction>[] = [
+      { fromWalletId: In(walletIds) },
+      { toWalletId: In(walletIds) },
+      { settlesWalletId: In(walletIds) },
+    ];
+    if (installmentIds.length) {
+      where.push({ installmentId: In(installmentIds) });
+    }
+    const owned = new Set(walletIds);
+    const rows = await this.transactionsRepository.find({
+      where,
       order: { createdAt: 'DESC' },
     });
+    return rows.map((row) => {
+      const touchesOwn =
+        (row.fromWalletId && owned.has(row.fromWalletId)) ||
+        (row.toWalletId && owned.has(row.toWalletId));
+      if (touchesOwn) return row;
+      const creditWalletId =
+        (row.installmentId && installmentWalletIds.get(row.installmentId)) ||
+        row.settlesWalletId;
+      return creditWalletId ? { ...row, toWalletId: creditWalletId } : row;
+    });
+  }
+
+  // The customer's own credit wallet a repayment transaction pays down —
+  // via its installment (payInstallment) or settlesWalletId (overdue /
+  // offboarding collection) — or null for any other transaction.
+  private async resolveRepaidCreditWalletId(
+    transaction: Transaction,
+  ): Promise<string | null> {
+    if (transaction.installmentId) {
+      const walletId = await this.installmentsService.findWalletIdForInstallment(
+        transaction.installmentId,
+      );
+      if (walletId) return walletId;
+    }
+    return transaction.settlesWalletId ?? null;
   }
 
   // Admin use only: every transaction in the system, most recent first.
@@ -3159,7 +3209,7 @@ export class TransactionsService {
       );
     }
 
-    const [fromWallet, toWallet] = await Promise.all([
+    let [fromWallet, toWallet] = await Promise.all([
       transaction.fromWalletId
         ? this.walletsService.getByIdUnscoped(transaction.fromWalletId)
         : null,
@@ -3168,12 +3218,31 @@ export class TransactionsService {
         : null,
     ]);
 
-    const ownsFrom = fromWallet?.userId === userId;
-    const ownsTo = toWallet?.userId === userId;
+    let ownsFrom = fromWallet?.userId === userId;
+    let ownsTo = toWallet?.userId === userId;
     if (!ownsFrom && !ownsTo) {
-      throw new ForbiddenException(
-        this.i18n.t('transactions.TRANSACTION_NOT_YOURS'),
+      // An installment repayment / overdue settlement pays into the
+      // lender's repository wallet, which the customer doesn't own — but
+      // it's still the customer's own transaction if it repays their own
+      // credit wallet. Show that credit wallet as the destination instead
+      // of the (someone else's) repository.
+      const creditWalletId = await this.resolveRepaidCreditWalletId(
+        transaction,
       );
+      const creditWallet = creditWalletId
+        ? await this.walletsService
+            .getByIdUnscoped(creditWalletId)
+            .catch(() => null)
+        : null;
+      if (!creditWallet || creditWallet.userId !== userId) {
+        throw new ForbiddenException(
+          this.i18n.t('transactions.TRANSACTION_NOT_YOURS'),
+        );
+      }
+      fromWallet = null;
+      toWallet = creditWallet;
+      ownsFrom = false;
+      ownsTo = true;
     }
 
     const balances = await this.ledgerService.getWalletBalances(
