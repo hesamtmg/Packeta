@@ -1,5 +1,6 @@
 import {
   effectiveRailScheduleTimes,
+  isInstantRail,
   RAIL_DEFAULT_SCHEDULE_TIMES,
 } from './rail-schedule';
 import { SettlementRailType } from './entities/rail-settlement.entity';
@@ -26,13 +27,21 @@ describe('effectiveRailScheduleTimes', () => {
     );
   });
 
-  it('BANK_TRANSFER has no built-in default — resolves to null with no override', () => {
-    expect(
-      effectiveRailScheduleTimes(SettlementRailType.BANK_TRANSFER, null),
-    ).toBeNull();
-    expect(
-      effectiveRailScheduleTimes(SettlementRailType.BANK_TRANSFER, ['11:15']),
-    ).toEqual(['11:15']);
+  it('instant rails (POL_PAY, BANK_TRANSFER) never resolve to a schedule, even with an override', () => {
+    for (const rail of [
+      SettlementRailType.POL_PAY,
+      SettlementRailType.BANK_TRANSFER,
+    ]) {
+      expect(isInstantRail(rail)).toBe(true);
+      expect(effectiveRailScheduleTimes(rail, null)).toBeNull();
+      expect(effectiveRailScheduleTimes(rail, ['11:15'])).toBeNull();
+    }
+  });
+
+  it('PAYA and SATNA are scheduled rails', () => {
+    expect(isInstantRail(SettlementRailType.PAYA)).toBe(false);
+    expect(isInstantRail(SettlementRailType.SATNA)).toBe(false);
+    expect(isInstantRail(null)).toBe(false);
   });
 
   it('every rail default entry is a valid "HH:MM" string', () => {

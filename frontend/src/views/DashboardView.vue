@@ -1075,7 +1075,7 @@ async function onGrantCredit() {
                       <option value="BANK_TRANSFER">{{ t('dashboard.settlement.rail.BANK_TRANSFER') }}</option>
                     </select>
                   </label>
-                  <label v-if="editRailType" class="field">
+                  <label v-if="editRailType === 'PAYA' || editRailType === 'SATNA'" class="field">
                     {{ t('dashboard.settlement.railScheduleLabel') }}
                     <input
                       v-model="editRailScheduleTimes"
@@ -1084,7 +1084,7 @@ async function onGrantCredit() {
                       class="admin-input"
                     />
                     <span class="hint">
-                      {{ editRailType === 'BANK_TRANSFER' ? t('dashboard.settlement.railScheduleRequiredHint') : t('dashboard.settlement.railScheduleHint') }}
+                      {{ t('dashboard.settlement.railScheduleHint') }}
                     </span>
                   </label>
                 </template>
@@ -1509,7 +1509,7 @@ async function onGrantCredit() {
                       <option value="BANK_TRANSFER">{{ t('dashboard.settlement.rail.BANK_TRANSFER') }}</option>
                     </select>
                   </label>
-                  <label v-if="newWalletRailType" class="field">
+                  <label v-if="newWalletRailType === 'PAYA' || newWalletRailType === 'SATNA'" class="field">
                     {{ t('dashboard.settlement.railScheduleLabel') }}
                     <input
                       v-model="newWalletRailScheduleTimes"
@@ -1518,7 +1518,7 @@ async function onGrantCredit() {
                       class="admin-input"
                     />
                     <span class="hint">
-                      {{ newWalletRailType === 'BANK_TRANSFER' ? t('dashboard.settlement.railScheduleRequiredHint') : t('dashboard.settlement.railScheduleHint') }}
+                      {{ t('dashboard.settlement.railScheduleHint') }}
                     </span>
                   </label>
                 </template>

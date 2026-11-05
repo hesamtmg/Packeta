@@ -3304,3 +3304,98 @@ describe('TransactionsService.reverseTransaction', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 });
+
+describe('TransactionsService instant-rail settlement after purchase verify', () => {
+  function build(options: {
+    railType: SettlementRailType | null;
+    txType?: TransactionType;
+    settledAt?: Date | null;
+  }) {
+    const purchase = {
+      id: 'purchase-1',
+      type: options.txType ?? TransactionType.PURCHASE,
+      toWalletId: 'merchant-1',
+      settledAt: options.settledAt ?? null,
+    };
+    const dataSource = {
+      manager: { findOne: jest.fn(async () => purchase) },
+    };
+    const walletsService = {
+      getByIdUnscoped: jest.fn(async () => ({
+        id: 'merchant-1',
+        railType: options.railType,
+        closedAt: null,
+        walletType: { supportsAutoWithdraw: true },
+      })),
+    };
+    const loggingService = { log: jest.fn(async () => undefined) };
+    const service = new TransactionsService(
+      dataSource as any,
+      walletsService as any,
+      {} as any,
+      loggingService as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      i18nStub as any,
+      { emit: () => undefined } as any,
+    );
+    const sweep = jest
+      .spyOn(service, 'sweepAutoWithdraw')
+      .mockResolvedValue([] as any);
+    return { service, sweep, loggingService };
+  }
+
+  it.each([SettlementRailType.POL_PAY, SettlementRailType.BANK_TRANSFER])(
+    'pays a %s merchant out immediately',
+    async (railType) => {
+      const { service, sweep } = build({ railType });
+      await (service as any).settleInstantRailIfConfigured('purchase-1');
+      expect(sweep).toHaveBeenCalledWith('merchant-1');
+    },
+  );
+
+  it.each([SettlementRailType.PAYA, SettlementRailType.SATNA, null])(
+    'leaves a %s merchant to the scheduler',
+    async (railType) => {
+      const { service, sweep } = build({ railType });
+      await (service as any).settleInstantRailIfConfigured('purchase-1');
+      expect(sweep).not.toHaveBeenCalled();
+    },
+  );
+
+  it('ignores deposits and already-settled purchases', async () => {
+    const deposit = build({
+      railType: SettlementRailType.POL_PAY,
+      txType: TransactionType.DEPOSIT,
+    });
+    await (deposit.service as any).settleInstantRailIfConfigured('purchase-1');
+    expect(deposit.sweep).not.toHaveBeenCalled();
+
+    const settled = build({
+      railType: SettlementRailType.POL_PAY,
+      settledAt: new Date(),
+    });
+    await (settled.service as any).settleInstantRailIfConfigured('purchase-1');
+    expect(settled.sweep).not.toHaveBeenCalled();
+  });
+
+  it('never throws when the payout fails — logs it instead', async () => {
+    const { service, sweep, loggingService } = build({
+      railType: SettlementRailType.POL_PAY,
+    });
+    sweep.mockRejectedValueOnce(new Error('rail down'));
+    await expect(
+      (service as any).settleInstantRailIfConfigured('purchase-1'),
+    ).resolves.toBeUndefined();
+    expect(loggingService.log).toHaveBeenCalledWith(
+      expect.objectContaining({ success: false }),
+    );
+  });
+});

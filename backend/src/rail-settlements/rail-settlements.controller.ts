@@ -1,4 +1,10 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  ParseUUIDPipe,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import {
   CurrentUser,
@@ -15,9 +21,16 @@ export class RailSettlementsController {
   ) {}
 
   @Get()
-  async listMine(@CurrentUser() user: AuthenticatedUser) {
+  async listMine(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('walletId', new ParseUUIDPipe({ optional: true })) walletId?: string,
+  ) {
+    // Optional walletId narrows to one of the caller's own wallets (used by
+    // the merchant settlement card on the wallet page) — still scoped to the
+    // caller, so another user's wallet id just yields an empty list.
     const settlements = await this.railSettlementsService.findAllForUser(
       user.userId,
+      walletId,
     );
     return settlements.map(serializeRailSettlement);
   }
