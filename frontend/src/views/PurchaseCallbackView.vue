@@ -114,7 +114,7 @@ function goToTransaction() {
           </ol>
           <router-link
             :to="{ name: 'wallet-installments', params: { walletId: installments[0].walletId } }"
-            class="admin-btn"
+            class="plan-link"
           >
             {{ t('callback.viewInstallments') }}
           </router-link>
@@ -205,9 +205,15 @@ function goToTransaction() {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.plan .admin-btn {
+.plan-link {
   align-self: center;
+  color: var(--accent-blue);
+  font-weight: 600;
+  font-size: 0.9rem;
   text-decoration: none;
+}
+.plan-link:hover {
+  text-decoration: underline;
 }
 .icon {
   font-size: 2.5rem;
