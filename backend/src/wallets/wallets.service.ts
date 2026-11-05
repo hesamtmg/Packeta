@@ -414,7 +414,8 @@ export class WalletsService {
   // top-up completion) once a customer has agreed to pay a real-money
   // shortfall on a CREDIT purchase — finds this customer's existing SUPPORT
   // wallet in the given currency, or provisions one on the spot against
-  // whatever SUPPORT wallet type an admin has configured for that currency.
+  // the currency's SUPPORT wallet type (created if missing, see
+  // findOrCreateSupportWalletType).
   // Never created any other way (see the CREDIT-style guards in
   // WalletsController/AdminController) — this is the only path that mints
   // one.
@@ -435,21 +436,61 @@ export class WalletsService {
       return existing;
     }
 
-    const walletType = await this.walletTypesService.findByCodeAndCurrency(
-      WalletTypeCode.SUPPORT,
+    const walletType = await this.findOrCreateSupportWalletType(
+      manager,
       currencyId,
     );
-    if (!walletType) {
-      throw new UnprocessableEntityException(
-        'No support wallet type is configured for this currency — an admin must create one before a credit shortfall can be topped up',
-      );
-    }
 
     const wallet = await this.createForUser(manager, userId, walletType.id);
     return (await manager.findOne(Wallet, {
       where: { id: wallet.id },
       relations: WALLET_RELATIONS,
     }))!;
+  }
+
+  // The SUPPORT wallet type for a currency, created on first use when no
+  // admin has configured one. Nothing seeds it, and this runs only after the
+  // customer has already paid at ZarinPal, so failing here would leave real
+  // money paid but never credited. A support wallet only holds the top-up
+  // for the moment it takes to spend it on the purchase, so the type allows
+  // nothing on its own: no deposit, withdraw, P2P or purchase, and it's
+  // hidden from the customer. An admin can still adjust it afterwards.
+  private async findOrCreateSupportWalletType(
+    manager: EntityManager,
+    currencyId: string,
+  ): Promise<WalletType> {
+    const existing = await manager.findOne(WalletType, {
+      where: { code: WalletTypeCode.SUPPORT, currencyId },
+    });
+    if (existing) {
+      return existing;
+    }
+
+    await manager
+      .createQueryBuilder()
+      .insert()
+      .into(WalletType)
+      .values({
+        code: WalletTypeCode.SUPPORT,
+        name: 'Support',
+        currencyId,
+        allowNegativeBalance: false,
+        allowWithdraw: false,
+        allowP2pOut: false,
+        allowP2pIn: false,
+        allowPurchaseOut: false,
+        allowPurchaseIn: false,
+        depositable: false,
+        hiddenFromCustomer: true,
+      })
+      // A concurrent first top-up in the same currency may have just
+      // created it — the (code, currencyId) unique index decides.
+      .orIgnore()
+      .execute();
+
+    return manager.findOneOrFail(WalletType, {
+      where: { code: WalletTypeCode.SUPPORT, currencyId },
+    });
   }
 
   // Soft-close: a wallet with any transaction history can't be hard-deleted
