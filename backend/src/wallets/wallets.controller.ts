@@ -18,7 +18,12 @@ import {
 } from '../common/decorators/current-user.decorator';
 import { WalletsService } from './wallets.service';
 import { WalletTypesService } from '../wallet-types/wallet-types.service';
-import { WalletTypeCode } from '../wallet-types/entities/wallet-type.entity';
+import {
+  WalletType,
+  WalletTypeCode,
+} from '../wallet-types/entities/wallet-type.entity';
+import { isRailEnabled } from '../wallet-types/withdrawal-methods';
+import { SettlementRailType } from '../rail-settlements/entities/rail-settlement.entity';
 import { CreateWalletDto } from './dto/create-wallet.dto';
 import { UpdateWalletDto } from './dto/update-wallet.dto';
 import { GrantCreditDto } from './dto/grant-credit.dto';
@@ -109,6 +114,7 @@ export class WalletsController {
       walletType,
       'a withdrawal rail schedule',
     );
+    this.assertRailEnabled(dto.railType, walletType);
     this.assertPurchaseInCapable(dto.terminalId, walletType, 'a terminal id');
     this.assertPurchaseInCapable(
       dto.acceptorCode,
@@ -204,6 +210,7 @@ export class WalletsController {
       walletType,
       'a withdrawal rail schedule',
     );
+    this.assertRailEnabled(dto.railType, walletType);
     this.assertPurchaseInCapable(dto.terminalId, walletType, 'a terminal id');
     this.assertPurchaseInCapable(
       dto.acceptorCode,
@@ -251,6 +258,20 @@ export class WalletsController {
   async close(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     const wallet = await this.walletsService.closeForUser(user.userId, id);
     return serializeWallet(wallet, '0');
+  }
+
+  // A wallet type the super admin configured payout methods for (see
+  // WalletType.withdrawalMethods) only lets its wallets pick the rails it
+  // enabled.
+  private assertRailEnabled(
+    railType: SettlementRailType | undefined,
+    walletType: Pick<WalletType, 'withdrawalMethods'>,
+  ): void {
+    if (railType && !isRailEnabled(walletType.withdrawalMethods, railType)) {
+      throw new BadRequestException(
+        `The ${railType} withdrawal method is not enabled for this wallet type`,
+      );
+    }
   }
 
   private assertAutoWithdrawCapable(

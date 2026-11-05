@@ -11,6 +11,8 @@ import { Wallet } from '../wallets/entities/wallet.entity';
 import { CurrenciesService } from '../currencies/currencies.service';
 import { CreateWalletTypeDto } from './dto/create-wallet-type.dto';
 import { UpdateWalletTypeDto } from './dto/update-wallet-type.dto';
+import { WithdrawalMethodDto } from './dto/withdrawal-method.dto';
+import { hasAnyFee, WithdrawalMethodConfig } from './withdrawal-methods';
 
 @Injectable()
 export class WalletTypesService {
@@ -115,6 +117,11 @@ export class WalletTypesService {
       dto.unblockFeeRepositoryWalletId,
       currency.id,
     );
+    const withdrawalMethods = await this.validateWithdrawalMethods(
+      dto.withdrawalMethods,
+      dto.supportsAutoWithdraw ?? false,
+      currency.id,
+    );
 
     const type = this.walletTypesRepository.create({
       code: dto.code,
@@ -151,6 +158,7 @@ export class WalletTypesService {
       feeRepositoryWalletId: dto.feeRepositoryWalletId ?? null,
       penaltyRepositoryWalletId: dto.penaltyRepositoryWalletId ?? null,
       unblockFeeRepositoryWalletId: dto.unblockFeeRepositoryWalletId ?? null,
+      withdrawalMethods,
     });
     const saved = await this.walletTypesRepository.save(type);
     saved.currency = currency;
@@ -232,6 +240,17 @@ export class WalletTypesService {
       dto.unblockFeeRepositoryWalletId,
       type.currencyId,
     );
+    if (dto.withdrawalMethods !== undefined) {
+      type.withdrawalMethods = await this.validateWithdrawalMethods(
+        dto.withdrawalMethods,
+        supportsAutoWithdraw,
+        type.currencyId,
+      );
+    } else if (!supportsAutoWithdraw) {
+      // Same reasoning as autoWithdrawTimes above: a type that can no longer
+      // pay out on rails shouldn't keep a stale payout-method config.
+      type.withdrawalMethods = null;
+    }
 
     if (dto.name !== undefined) type.name = dto.name;
     if (dto.cardColor !== undefined) type.cardColor = dto.cardColor || null;
@@ -378,5 +397,57 @@ export class WalletTypesService {
         `${fieldLabel}'s wallet currency must match this wallet type's currency`,
       );
     }
+  }
+
+  // A merchant type's payout methods (see WalletType.withdrawalMethods):
+  // only on supportsAutoWithdraw types, at most one entry per rail, and any
+  // rail that charges a fee must name the MERCHANT_REPOSITORY wallet (same
+  // currency) the fee goes to. Returns the normalized config to store —
+  // null for an empty list, which means "every rail, no fee".
+  private async validateWithdrawalMethods(
+    methods: WithdrawalMethodDto[] | undefined,
+    supportsAutoWithdraw: boolean,
+    currencyId: string,
+  ): Promise<WithdrawalMethodConfig[] | null> {
+    if (!methods?.length) return null;
+    if (!supportsAutoWithdraw) {
+      throw new BadRequestException(
+        'supportsAutoWithdraw must be true to configure withdrawal methods',
+      );
+    }
+    const seen = new Set<string>();
+    const normalized: WithdrawalMethodConfig[] = [];
+    for (const method of methods) {
+      if (seen.has(method.railType)) {
+        throw new BadRequestException(
+          `withdrawalMethods: ${method.railType} is listed more than once`,
+        );
+      }
+      seen.add(method.railType);
+      const feeRepositoryWalletId = method.feeRepositoryWalletId || null;
+      if (hasAnyFee(method) && !feeRepositoryWalletId) {
+        throw new BadRequestException(
+          `withdrawalMethods: ${method.railType} charges a fee, so it needs a fee repository (a Merchant Repository-type wallet)`,
+        );
+      }
+      await this.validateSubRepository(
+        `withdrawalMethods.${method.railType}.feeRepositoryWalletId`,
+        feeRepositoryWalletId ?? undefined,
+        currencyId,
+      );
+      normalized.push({
+        railType: method.railType,
+        enabled: method.enabled,
+        feePercent: String(method.feePercent ?? 0),
+        fixedFee: String(method.fixedFee ?? 0),
+        feeRepositoryWalletId,
+      });
+    }
+    if (!normalized.some((method) => method.enabled)) {
+      throw new BadRequestException(
+        'withdrawalMethods: enable at least one withdrawal method, or send an empty list to allow every rail',
+      );
+    }
+    return normalized;
   }
 }

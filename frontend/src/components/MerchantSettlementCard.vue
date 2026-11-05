@@ -5,6 +5,7 @@ import { apiRequest, ApiError } from '../api/client';
 import { formatAmount } from '../utils/currency';
 import { formatDateTime } from '../utils/date';
 import type { RailSettlement, SettlementRailType, Wallet } from '../stores/wallet';
+import { availableRails, feeSummary } from '../utils/withdrawalMethods';
 
 // Lets a merchant manage how their wallet is paid out:
 //   - Instant rails (Pol Pay, direct bank transfer) settle synchronously,
@@ -12,13 +13,21 @@ import type { RailSettlement, SettlementRailType, Wallet } from '../stores/walle
 //   - Scheduled rails (Paya, Satna) are swept by the backend scheduler at the
 //     merchant's own times (Tehran time), else the rail's built-in default.
 //   - The IBAN split decides where each payout goes (percentages = 100).
+//   - Only the rails the super admin enabled on this wallet type are offered,
+//     each labeled with its per-payout fee (see utils/withdrawalMethods.ts).
 // Mirrors backend/src/rail-settlements/rail-schedule.ts.
 const props = defineProps<{ wallet: Wallet }>();
 const emit = defineEmits<{ updated: [wallet: Wallet] }>();
 const { t } = useI18n();
 
-const INSTANT_RAILS: SettlementRailType[] = ['POL_PAY', 'BANK_TRANSFER'];
-const SCHEDULED_RAILS: SettlementRailType[] = ['PAYA', 'SATNA'];
+const ALL_INSTANT_RAILS: SettlementRailType[] = ['POL_PAY', 'BANK_TRANSFER'];
+const ALL_SCHEDULED_RAILS: SettlementRailType[] = ['PAYA', 'SATNA'];
+const enabledRails = computed(() => availableRails(props.wallet.walletType));
+const INSTANT_RAILS = computed(() => ALL_INSTANT_RAILS.filter((r) => enabledRails.value.includes(r)));
+const SCHEDULED_RAILS = computed(() => ALL_SCHEDULED_RAILS.filter((r) => enabledRails.value.includes(r)));
+function railFee(rail: SettlementRailType): string | null {
+  return feeSummary(props.wallet.walletType, rail);
+}
 const DEFAULT_TIMES: Partial<Record<SettlementRailType, string[]>> = {
   PAYA: ['09:00', '11:00', '13:00', '15:00'],
   SATNA: ['08:30', '10:30', '12:30', '14:30'],
@@ -49,8 +58,8 @@ function resetFromWallet(w: Wallet) {
 }
 watch(() => props.wallet, resetFromWallet, { immediate: true });
 
-const isScheduled = computed(() => !!railType.value && SCHEDULED_RAILS.includes(railType.value));
-const isInstant = computed(() => !!railType.value && INSTANT_RAILS.includes(railType.value));
+const isScheduled = computed(() => !!railType.value && ALL_SCHEDULED_RAILS.includes(railType.value));
+const isInstant = computed(() => !!railType.value && ALL_INSTANT_RAILS.includes(railType.value));
 const defaultTimes = computed(() => (railType.value ? DEFAULT_TIMES[railType.value] ?? [] : []));
 const effectiveTimes = computed(() => {
   const own = times.value.filter(Boolean);
@@ -174,24 +183,27 @@ onMounted(loadHistory);
 
     <fieldset class="group">
       <legend>{{ t('walletDetail.settlement.railHeading') }}</legend>
-      <div class="rail-columns">
-        <div class="rail-column">
+      <p v-if="!enabledRails.length" class="admin-error">{{ t('walletDetail.settlement.noRailsAvailable') }}</p>
+      <div v-else class="rail-columns">
+        <div v-if="INSTANT_RAILS.length" class="rail-column">
           <span class="rail-mode">{{ t('walletDetail.settlement.instantMode') }}</span>
           <label v-for="rail in INSTANT_RAILS" :key="rail" class="rail-option" :class="{ selected: railType === rail }">
             <input v-model="railType" type="radio" name="rail" :value="rail" />
             <span>
               <strong>{{ t(`dashboard.settlement.rail.${rail}`) }}</strong>
               <small>{{ t('walletDetail.settlement.instantDesc') }}</small>
+              <small class="rail-fee">{{ railFee(rail) ? t('walletDetail.settlement.feeLabel', { fee: railFee(rail) }) : t('walletDetail.settlement.noFee') }}</small>
             </span>
           </label>
         </div>
-        <div class="rail-column">
+        <div v-if="SCHEDULED_RAILS.length" class="rail-column">
           <span class="rail-mode">{{ t('walletDetail.settlement.scheduledMode') }}</span>
           <label v-for="rail in SCHEDULED_RAILS" :key="rail" class="rail-option" :class="{ selected: railType === rail }">
             <input v-model="railType" type="radio" name="rail" :value="rail" />
             <span>
               <strong>{{ t(`dashboard.settlement.rail.${rail}`) }}</strong>
               <small>{{ t('walletDetail.settlement.scheduledDesc') }}</small>
+              <small class="rail-fee">{{ railFee(rail) ? t('walletDetail.settlement.feeLabel', { fee: railFee(rail) }) : t('walletDetail.settlement.noFee') }}</small>
             </span>
           </label>
         </div>
@@ -284,6 +296,9 @@ onMounted(loadHistory);
           </span>
           <span class="history-meta">
             {{ t(`dashboard.settlement.rail.${item.railType}`) }} · {{ formatDateTime(item.processedAt ?? item.scheduledFor) }}
+            <template v-if="Number(item.feeAmount ?? 0) > 0">
+              · {{ t('walletDetail.settlement.historyFee', { amount: formatAmount(item.feeAmount!, wallet.walletType.currency) }) }}
+            </template>
           </span>
           <span class="status" :class="item.status.toLowerCase()">{{ t(`walletDetail.settlement.status.${item.status}`) }}</span>
         </li>
@@ -489,5 +504,8 @@ legend {
   .account-row .iban {
     grid-column: 1 / -1;
   }
+}
+.rail-fee {
+  font-weight: 600;
 }
 </style>

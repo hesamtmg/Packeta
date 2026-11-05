@@ -52,6 +52,15 @@ export function serializeWallet(
       allowP2pIn: wallet.walletType.allowP2pIn,
       supportsAutoWithdraw: wallet.walletType.supportsAutoWithdraw,
       autoWithdrawTimes: wallet.walletType.autoWithdrawTimes,
+      // The fee repository wallet ids stay admin-only — the merchant only
+      // needs which rails it may pick and what each costs.
+      withdrawalMethods:
+        wallet.walletType.withdrawalMethods?.map((method) => ({
+          railType: method.railType,
+          enabled: method.enabled,
+          feePercent: method.feePercent,
+          fixedFee: method.fixedFee,
+        })) ?? null,
       allowPurchaseOut: wallet.walletType.allowPurchaseOut,
       allowPurchaseIn: wallet.walletType.allowPurchaseIn,
       depositable: wallet.walletType.depositable,

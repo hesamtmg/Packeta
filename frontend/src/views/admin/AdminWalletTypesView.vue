@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError, API_URL, postMultipart } from '../../api/client';
 import { amountStep, toMinorUnits, type CurrencyInfo } from '../../utils/currency';
+import type { SettlementRailType } from '../../stores/wallet';
 import { CARD_THEME_OPTIONS, cardGradient } from '../../utils/cardTheme';
 import { useAuthStore } from '../../stores/auth';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
@@ -60,6 +61,40 @@ interface WalletType {
   feeRepositoryWalletId: string | null;
   penaltyRepositoryWalletId: string | null;
   unblockFeeRepositoryWalletId: string | null;
+  // Merchant (supportsAutoWithdraw) types only: which payout rails a merchant
+  // may pick, and what each payout over that rail costs — feePercent of the
+  // payout plus fixedFee (minor units), moved into feeRepositoryWalletId (a
+  // MERCHANT_REPOSITORY wallet in this currency). Null = every rail, no fee.
+  withdrawalMethods: WithdrawalMethod[] | null;
+}
+
+interface WithdrawalMethod {
+  railType: SettlementRailType;
+  enabled: boolean;
+  feePercent: string;
+  fixedFee: string;
+  feeRepositoryWalletId: string | null;
+}
+
+// Draft row: fixedFee is in major units, like every other money field here.
+interface WithdrawalMethodDraft {
+  railType: SettlementRailType;
+  enabled: boolean;
+  feePercent: string;
+  fixedFee: string;
+  feeRepositoryWalletId: string;
+}
+
+const WITHDRAWAL_RAILS: SettlementRailType[] = ['POL_PAY', 'PAYA', 'SATNA', 'BANK_TRANSFER'];
+
+function defaultWithdrawalMethods(): WithdrawalMethodDraft[] {
+  return WITHDRAWAL_RAILS.map((railType) => ({
+    railType,
+    enabled: true,
+    feePercent: '',
+    fixedFee: '',
+    feeRepositoryWalletId: '',
+  }));
 }
 
 type BoolKey =
@@ -98,6 +133,9 @@ interface Draft extends Record<BoolKey, boolean> {
   feeRepositoryWalletId: string;
   penaltyRepositoryWalletId: string;
   unblockFeeRepositoryWalletId: string;
+  // Off = every rail allowed with no fee (sends an empty list).
+  manageWithdrawalMethods: boolean;
+  withdrawalMethods: WithdrawalMethodDraft[];
 }
 
 // The seeded built-in codes (see backend WalletTypeCode) — offered as
@@ -145,6 +183,8 @@ function emptyDraft(): Draft {
     feeRepositoryWalletId: '',
     penaltyRepositoryWalletId: '',
     unblockFeeRepositoryWalletId: '',
+    manageWithdrawalMethods: false,
+    withdrawalMethods: defaultWithdrawalMethods(),
   };
 }
 
@@ -203,6 +243,27 @@ function draftFromType(type: WalletType): Draft {
     feeRepositoryWalletId: type.feeRepositoryWalletId ?? '',
     penaltyRepositoryWalletId: type.penaltyRepositoryWalletId ?? '',
     unblockFeeRepositoryWalletId: type.unblockFeeRepositoryWalletId ?? '',
+    manageWithdrawalMethods: !!type.withdrawalMethods?.length,
+    withdrawalMethods: WITHDRAWAL_RAILS.map((railType) => {
+      const saved = type.withdrawalMethods?.find((m) => m.railType === railType);
+      if (!saved) {
+        // A rail missing from a saved config is not selectable.
+        return {
+          railType,
+          enabled: !type.withdrawalMethods?.length,
+          feePercent: '',
+          fixedFee: '',
+          feeRepositoryWalletId: '',
+        };
+      }
+      return {
+        railType,
+        enabled: saved.enabled,
+        feePercent: Number(saved.feePercent) ? String(Number(saved.feePercent)) : '',
+        fixedFee: Number(saved.fixedFee) ? minorToMajor(saved.fixedFee, type.currency) : '',
+        feeRepositoryWalletId: saved.feeRepositoryWalletId ?? '',
+      };
+    }),
   };
 }
 
@@ -245,6 +306,19 @@ function toPayload(d: Draft, currency: CurrencyInfo | null, isCreate: boolean) {
     penaltyRepositoryWalletId: id(d.penaltyRepositoryWalletId),
     unblockFeeRepositoryWalletId: id(d.unblockFeeRepositoryWalletId),
   };
+  // Only sent for merchant-style types; turning supportsAutoWithdraw off
+  // clears the config server-side.
+  if (d.supportsAutoWithdraw) {
+    body.withdrawalMethods = d.manageWithdrawalMethods
+      ? d.withdrawalMethods.map((m) => ({
+          railType: m.railType,
+          enabled: m.enabled,
+          feePercent: m.feePercent !== '' ? Number(m.feePercent) : 0,
+          fixedFee: m.fixedFee !== '' && currency ? toMinorUnits(m.fixedFee, currency) : 0,
+          feeRepositoryWalletId: m.feeRepositoryWalletId || undefined,
+        }))
+      : [];
+  }
   if (isCreate) {
     body.code = d.code.trim().toUpperCase();
     body.currencyCode = d.currencyCode;
@@ -342,6 +416,13 @@ function capabilityChips(type: WalletType): { label: string; tone?: string }[] {
   if (type.depositable) chips.push({ label: t('admin.walletTypes.chipDeposit') });
   if (type.allowWithdraw) chips.push({ label: t('admin.walletTypes.chipWithdraw') });
   if (type.supportsAutoWithdraw) chips.push({ label: t('admin.walletTypes.chipAuto') });
+  if (type.withdrawalMethods?.length) {
+    chips.push({
+      label: t('admin.walletTypes.chipWithdrawalMethods', {
+        count: type.withdrawalMethods.filter((m) => m.enabled).length,
+      }),
+    });
+  }
   if (type.allowP2pOut) chips.push({ label: t('admin.walletTypes.chipSend') });
   if (type.allowP2pIn) chips.push({ label: t('admin.walletTypes.chipReceive') });
   if (type.allowPurchaseOut) chips.push({ label: t('admin.walletTypes.chipPurchase') });
@@ -393,7 +474,41 @@ function openEdit(type: WalletType) {
   openEditor();
 }
 
+// MERCHANT_REPOSITORY wallets a rail's fee can be routed into — only the
+// super admin edits types, and their /admin/wallets listing is unscoped.
+interface RepositoryOption {
+  id: string;
+  name: string | null;
+  ownerEmail: string;
+  closedAt: string | null;
+  walletType: { code: string; currency: { code: string } };
+}
+const repositoryWallets = ref<RepositoryOption[]>([]);
+let repositoryWalletsLoaded = false;
+async function loadRepositoryWallets() {
+  if (repositoryWalletsLoaded || !auth.isSuperAdmin) return;
+  try {
+    const wallets = await apiRequest<RepositoryOption[]>('/admin/wallets');
+    repositoryWallets.value = wallets.filter(
+      (w) => w.walletType.code === 'MERCHANT_REPOSITORY' && !w.closedAt,
+    );
+    repositoryWalletsLoaded = true;
+  } catch {
+    // Non-fatal: the picker just shows no options; the backend still validates.
+  }
+}
+const feeRepositoryOptions = computed(() =>
+  repositoryWallets.value.filter((w) => w.walletType.currency.code === draftCurrency.value?.code),
+);
+function repositoryLabel(w: RepositoryOption): string {
+  return `${w.name || w.ownerEmail} · ${w.id.slice(0, 8)}`;
+}
+function methodHasFee(m: WithdrawalMethodDraft): boolean {
+  return Number(m.feePercent) > 0 || Number(m.fixedFee) > 0;
+}
+
 function openEditor() {
+  loadRepositoryWallets();
   confirmingDelete.value = false;
   editorError.value = '';
   logoFile.value = undefined;
@@ -673,6 +788,53 @@ loadTypes();
                       <div class="time-row">
                         <input v-for="i in 3" :key="i" v-model="draft.autoWithdrawTimes[i - 1]" type="time" class="admin-input" />
                       </div>
+                    </div>
+                    <div v-if="item.key === 'supportsAutoWithdraw' && draft.supportsAutoWithdraw" class="nested withdrawal-methods">
+                      <label class="toggle-row nested-toggle">
+                        <span class="toggle-text">
+                          <span class="toggle-title">{{ t('admin.walletTypes.withdrawalMethodsTitle') }}</span>
+                          <span class="toggle-hint">{{ t('admin.walletTypes.withdrawalMethodsHint') }}</span>
+                        </span>
+                        <input v-model="draft.manageWithdrawalMethods" type="checkbox" class="switch" />
+                      </label>
+                      <template v-if="draft.manageWithdrawalMethods">
+                        <div v-for="m in draft.withdrawalMethods" :key="m.railType" class="method-row" :class="{ off: !m.enabled }">
+                          <label class="method-head">
+                            <input v-model="m.enabled" type="checkbox" />
+                            <strong>{{ t(`dashboard.settlement.rail.${m.railType}`) }}</strong>
+                            <span class="field-hint">{{ m.enabled ? t('admin.walletTypes.methodEnabled') : t('admin.walletTypes.methodDisabled') }}</span>
+                          </label>
+                          <div v-if="m.enabled" class="grid-3">
+                            <label class="field">
+                              {{ t('admin.walletTypes.methodFeePercent') }}
+                              <span class="affix">
+                                <input v-model="m.feePercent" type="number" min="0" max="100" step="0.001" class="admin-input" placeholder="0" />
+                                <span class="suffix">%</span>
+                              </span>
+                            </label>
+                            <label class="field">
+                              {{ t('admin.walletTypes.methodFixedFee') }}
+                              <span class="affix">
+                                <input v-model="m.fixedFee" type="number" min="0" :step="moneyStep" class="admin-input" placeholder="0" />
+                                <span class="suffix">{{ currencyCodeLabel }}</span>
+                              </span>
+                            </label>
+                            <label class="field">
+                              {{ t('admin.walletTypes.methodFeeRepository') }}
+                              <select v-model="m.feeRepositoryWalletId" class="admin-input" :required="methodHasFee(m)">
+                                <option value="">{{ t('admin.walletTypes.methodNoRepository') }}</option>
+                                <option v-for="w in feeRepositoryOptions" :key="w.id" :value="w.id">{{ repositoryLabel(w) }}</option>
+                                <option
+                                  v-if="m.feeRepositoryWalletId && !feeRepositoryOptions.some((w) => w.id === m.feeRepositoryWalletId)"
+                                  :value="m.feeRepositoryWalletId"
+                                >{{ m.feeRepositoryWalletId }}</option>
+                              </select>
+                            </label>
+                          </div>
+                        </div>
+                        <p class="field-hint">{{ t('admin.walletTypes.withdrawalMethodsFeeHint') }}</p>
+                        <p v-if="!feeRepositoryOptions.length" class="field-hint">{{ t('admin.walletTypes.methodNoRepositories') }}</p>
+                      </template>
                     </div>
                   </template>
                 </div>
@@ -1488,5 +1650,30 @@ fieldset:disabled .switch {
   .time-row {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+.withdrawal-methods {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.method-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 10px;
+}
+.method-row.off {
+  opacity: 0.65;
+}
+.method-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.method-head .field-hint {
+  margin-inline-start: auto;
 }
 </style>

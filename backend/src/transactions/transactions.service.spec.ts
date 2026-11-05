@@ -178,6 +178,7 @@ interface WalletTypeFixture {
   depositable?: boolean;
   unblockFee?: string | null;
   supportsAutoWithdraw?: boolean;
+  withdrawalMethods?: any[] | null;
 }
 
 interface WalletFixture {
@@ -1225,21 +1226,42 @@ function buildSweepService(options: {
   overridesByPurchase: Map<string, any[]>;
   computeAmountsImpl?: (rows: any[], amount: string) => any[];
   railType?: SettlementRailType;
+  withdrawalMethods?: any[];
+  feeRepositoryClosed?: boolean;
 }) {
   const wallet = {
     id: 'wallet-1',
     balance: options.walletBalance,
     railType: options.railType ?? null,
-    walletType: walletType({ name: 'Merchant', supportsAutoWithdraw: true }),
+    closedAt: null,
+    walletType: walletType({
+      name: 'Merchant',
+      supportsAutoWithdraw: true,
+      withdrawalMethods: options.withdrawalMethods ?? null,
+    }),
+  };
+  const feeRepository = {
+    id: 'fee-repo-1',
+    balance: '0',
+    closedAt: options.feeRepositoryClosed ? new Date() : null,
+    walletType: walletType({
+      code: 'MERCHANT_REPOSITORY',
+      name: 'Merchant Repository',
+    }),
+  };
+  const walletsById: Record<string, any> = {
+    [wallet.id]: wallet,
+    [feeRepository.id]: feeRepository,
   };
   const savedTransactions: any[] = [];
   const savedPurchases: any[] = [];
+  const feeTransactions: any[] = [];
   const railSettlementLinks: any[] = [];
   let idCounter = 0;
 
   const walletsService = {
-    lockById: jest.fn(async () => wallet),
-    getByIdUnscoped: jest.fn(async () => wallet),
+    lockById: jest.fn(async (_manager: unknown, id: string) => walletsById[id]),
+    getByIdUnscoped: jest.fn(async (id: string) => walletsById[id]),
   };
 
   const manager = {
@@ -1253,6 +1275,9 @@ function buildSweepService(options: {
       if (data.type === TransactionType.WITHDRAW) {
         data.id = data.id ?? `withdraw-${++idCounter}`;
         savedTransactions.push(data);
+      } else if (data.type === TransactionType.TRANSFER) {
+        data.id = data.id ?? `fee-${++idCounter}`;
+        feeTransactions.push(data);
       } else {
         savedPurchases.push(data);
       }
@@ -1301,7 +1326,7 @@ function buildSweepService(options: {
     }),
   };
 
-  const ledgerService = buildLedgerServiceStub([wallet]);
+  const ledgerService = buildLedgerServiceStub([wallet, feeRepository]);
 
   const service = new TransactionsService(
     dataSource as any,
@@ -1325,6 +1350,7 @@ function buildSweepService(options: {
     service,
     savedTransactions,
     savedPurchases,
+    feeTransactions,
     railSettlementsCreated,
     railSettlementLinks,
     ledgerService,
@@ -2274,6 +2300,147 @@ describe('TransactionsService.sweepAutoWithdraw rail-aware behavior', () => {
       destinationIban: 'default-iban',
       amount: '1000',
     });
+  });
+});
+
+describe('TransactionsService.sweepAutoWithdraw withdrawal-method fees', () => {
+  const satnaWithFee = (overrides: Record<string, unknown> = {}) => [
+    {
+      railType: SettlementRailType.SATNA,
+      enabled: true,
+      feePercent: '1.5',
+      fixedFee: '100',
+      feeRepositoryWalletId: 'fee-repo-1',
+      ...overrides,
+    },
+  ];
+
+  it('withholds the rail fee, transfers it to the fee repository, and pays out only the net amount', async () => {
+    const {
+      service,
+      savedTransactions,
+      feeTransactions,
+      railSettlementsCreated,
+      ledgerService,
+    } = buildSweepService({
+      walletBalance: '10000',
+      walletDefaults: [],
+      unsettledPurchases: [],
+      overridesByPurchase: new Map(),
+      railType: SettlementRailType.SATNA,
+      withdrawalMethods: satnaWithFee(),
+    });
+
+    await service.sweepAutoWithdraw('wallet-1');
+
+    // 1.5% of 10000 = 150, + 100 fixed = 250.
+    expect(feeTransactions).toHaveLength(1);
+    expect(feeTransactions[0]).toMatchObject({
+      type: TransactionType.TRANSFER,
+      fromWalletId: 'wallet-1',
+      toWalletId: 'fee-repo-1',
+      amount: '250',
+    });
+    expect(ledgerService.postWalletToWallet).toHaveBeenCalledWith(
+      expect.anything(),
+      feeTransactions[0].id,
+      expect.any(String),
+      expect.objectContaining({ id: 'wallet-1' }),
+      expect.objectContaining({ id: 'fee-repo-1' }),
+      250n,
+    );
+    expect(savedTransactions).toHaveLength(1);
+    expect(savedTransactions[0]).toMatchObject({ amount: '9750' });
+    expect(railSettlementsCreated[0]).toMatchObject({
+      amount: '9750',
+      feeAmount: '250',
+      feeTransactionId: feeTransactions[0].id,
+    });
+  });
+
+  it('charges the fee per generated payout slice in split-settlement mode', async () => {
+    const purchases = [
+      { id: 'purchase-1', amount: '1000', settledAt: null },
+      { id: 'purchase-2', amount: '2000', settledAt: null },
+    ];
+    const { service, savedTransactions, feeTransactions } = buildSweepService({
+      walletBalance: '3000',
+      walletDefaults: [{ iban: 'default-iban', label: null }],
+      unsettledPurchases: purchases,
+      overridesByPurchase: new Map(),
+      railType: SettlementRailType.SATNA,
+      withdrawalMethods: satnaWithFee({ feePercent: '10', fixedFee: '0' }),
+    });
+
+    await service.sweepAutoWithdraw('wallet-1');
+
+    expect(feeTransactions.map((t) => t.amount)).toEqual(['100', '200']);
+    expect(feeTransactions.map((t) => t.relatedTransactionId)).toEqual([
+      'purchase-1',
+      'purchase-2',
+    ]);
+    expect(savedTransactions.map((t) => t.amount)).toEqual(['900', '1800']);
+  });
+
+  it('skips the WITHDRAW entirely when the fee swallows the whole payout', async () => {
+    const { service, savedTransactions, feeTransactions, railSettlementsCreated } =
+      buildSweepService({
+        walletBalance: '80',
+        walletDefaults: [],
+        unsettledPurchases: [],
+        overridesByPurchase: new Map(),
+        railType: SettlementRailType.SATNA,
+        withdrawalMethods: satnaWithFee({ feePercent: '0', fixedFee: '100' }),
+      });
+
+    await service.sweepAutoWithdraw('wallet-1');
+
+    expect(feeTransactions).toHaveLength(1);
+    expect(feeTransactions[0].amount).toBe('80');
+    expect(savedTransactions).toHaveLength(0);
+    expect(railSettlementsCreated).toHaveLength(0);
+  });
+
+  it('charges nothing when the configured fee repository has been closed', async () => {
+    const { service, savedTransactions, feeTransactions } = buildSweepService({
+      walletBalance: '10000',
+      walletDefaults: [],
+      unsettledPurchases: [],
+      overridesByPurchase: new Map(),
+      railType: SettlementRailType.SATNA,
+      withdrawalMethods: satnaWithFee(),
+      feeRepositoryClosed: true,
+    });
+
+    await service.sweepAutoWithdraw('wallet-1');
+
+    expect(feeTransactions).toHaveLength(0);
+    expect(savedTransactions[0]).toMatchObject({ amount: '10000' });
+  });
+
+  it("uses only the wallet's own rail's fee, not another rail's", async () => {
+    const { service, savedTransactions, feeTransactions } = buildSweepService({
+      walletBalance: '10000',
+      walletDefaults: [],
+      unsettledPurchases: [],
+      overridesByPurchase: new Map(),
+      railType: SettlementRailType.PAYA,
+      withdrawalMethods: [
+        ...satnaWithFee(),
+        {
+          railType: SettlementRailType.PAYA,
+          enabled: true,
+          feePercent: '0',
+          fixedFee: '0',
+          feeRepositoryWalletId: null,
+        },
+      ],
+    });
+
+    await service.sweepAutoWithdraw('wallet-1');
+
+    expect(feeTransactions).toHaveLength(0);
+    expect(savedTransactions[0]).toMatchObject({ amount: '10000' });
   });
 });
 

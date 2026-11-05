@@ -88,6 +88,17 @@ A multi-wallet app, plus a standalone sandbox payment gateway (IPG) it settles m
   item but the last, which absorbs the rounding remainder, so the pieces reliably sum to the exact original
   amount. Wallets with no settlement config at all are unaffected — the sweep still does the original
   single-`WITHDRAW`-for-the-full-balance behavior.
+- **Merchant withdrawal methods (per-rail fees)**: a merchant's payouts leave over one of the interbank rails
+  (Pol Pay, Paya, Satna, bank transfer). When creating or editing a merchant-style wallet type
+  (`supportsAutoWithdraw`), the super admin can set `withdrawalMethods: [{ railType, enabled, feePercent?,
+  fixedFee?, feeRepositoryWalletId? }]`. Each entry decides whether merchants of that type may pick that rail,
+  and what one payout over it costs: `feePercent` of the payout (floored) plus a flat `fixedFee` in minor units,
+  never more than the payout itself. A rail with a fee must name a `MERCHANT_REPOSITORY` wallet in the same
+  currency. On every payout (instant or scheduled, one per generated `WITHDRAW` slice) the fee moves into that
+  repository as its own `TRANSFER` (GL: merchant wallet → `FEE_REVENUE`), and only the net amount goes out as the
+  `WITHDRAW`. The `rail_settlements` row records `feeAmount` and `feeTransactionId`. If the fee repository has
+  since been closed, no fee is charged. A type with no methods configured keeps the old behavior: every rail,
+  no fee. Merchants only see the enabled rails in their settlement settings, each labeled with its fee.
 - **Merchant-initiated checkout (phone + OTP, no Packeta session required)**: `POST /transactions/purchase/charge`
   lets a merchant create a payment link naming only an amount and currency — no customer or wallet is chosen
   yet, unlike `purchase/initiate`. The merchant hands that link to a customer who may have no Packeta account
@@ -284,7 +295,7 @@ All endpoints are JSON. Authenticated endpoints require `Authorization: Bearer <
 | GET    | `/transactions/:id`       | ✅   | full detail for one transaction (type, amount, from/to wallet + currency, note, idempotency key, purchase `status`/`expiresAt`) — must touch one of the caller's own wallets |
 | GET    | `/users/me`               | ✅   | the current user's id, email, role, and phone number                |
 | PATCH  | `/users/me/phone-number`  | ✅   | `{ phoneNumber }` → set/update the phone number used for the purchase gateway's OTP step |
-| POST   | `/wallet-types`           | 🔒 super admin | `{ code, name, currencyCode, allowNegativeBalance, creditLimit?, allowWithdraw, allowP2pOut, allowP2pIn, supportsAutoWithdraw?, allowPurchaseOut?, allowPurchaseIn? }` → create a new wallet type |
+| POST   | `/wallet-types`           | 🔒 super admin | `{ code, name, currencyCode, allowNegativeBalance, creditLimit?, allowWithdraw, allowP2pOut, allowP2pIn, supportsAutoWithdraw?, allowPurchaseOut?, allowPurchaseIn?, withdrawalMethods? }` → create a new wallet type |
 | PATCH  | `/wallet-types/:id`       | 🔒 super admin | partial update of a wallet type's rules (currency can't be changed after creation) |
 | DELETE | `/wallet-types/:id`       | 🔒 super admin | delete a wallet type — rejected with 409 if any wallet still uses it |
 | GET    | `/admin/users`            | 🔒 admin | list all users                                                       |

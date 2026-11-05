@@ -9,7 +9,11 @@ import {
   Matches,
   Max,
   Min,
+  IsArray,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+import { WithdrawalMethodDto } from './withdrawal-method.dto';
 import { CARD_COLOR_PRESETS } from '../entities/wallet-type.entity';
 
 export class CreateWalletTypeDto {
@@ -167,4 +171,13 @@ export class CreateWalletTypeDto {
   @IsOptional()
   @IsUUID()
   unblockFeeRepositoryWalletId?: string;
+
+  // Merchant-style (supportsAutoWithdraw) types only: one entry per payout
+  // rail, each with its own fee and fee repository (see
+  // WalletType.withdrawalMethods).
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => WithdrawalMethodDto)
+  withdrawalMethods?: WithdrawalMethodDto[];
 }

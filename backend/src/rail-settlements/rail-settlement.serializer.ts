@@ -6,6 +6,8 @@ export function serializeRailSettlement(settlement: RailSettlement) {
     walletId: settlement.walletId,
     railType: settlement.railType,
     amount: settlement.amount,
+    feeAmount: settlement.feeAmount,
+    feeTransactionId: settlement.feeTransactionId,
     destinationIban: settlement.destinationIban,
     label: settlement.label,
     status: settlement.status,

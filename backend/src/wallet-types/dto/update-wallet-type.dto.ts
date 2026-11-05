@@ -10,7 +10,11 @@ import {
   Max,
   Min,
   ValidateIf,
+  IsArray,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+import { WithdrawalMethodDto } from './withdrawal-method.dto';
 import { CARD_COLOR_PRESETS } from '../entities/wallet-type.entity';
 
 // Same "empty clears" convention as UpdateWalletDto: send an explicit empty
@@ -158,4 +162,14 @@ export class UpdateWalletTypeDto {
   @IsOptional()
   @IsUUID()
   unblockFeeRepositoryWalletId?: string;
+
+  // Merchant-style (supportsAutoWithdraw) types only: one entry per payout
+  // rail, each with its own fee and fee repository (see
+  // WalletType.withdrawalMethods). Replaces the whole list; an empty
+  // array clears it back to "every rail, no fee".
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => WithdrawalMethodDto)
+  withdrawalMethods?: WithdrawalMethodDto[];
 }
