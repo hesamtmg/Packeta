@@ -395,6 +395,13 @@ export default {
     closedAt: 'Closed at',
     blockedAt: 'Blocked at',
     createdAt: 'Created at',
+    merchant: {
+      heading: 'Store integration',
+      hint: 'The identifiers and endpoints your store uses to accept Packeta payments into this wallet.',
+      empty: 'No integration details have been set for this wallet yet.',
+      copy: 'Copy',
+      copied: 'Copied',
+    },
     widget: {
       heading: 'Wallet-viewing widget',
       hint: 'Copy this into your site to show a logged-in customer their own wallets, hosted inside a Packeta iframe — your site never handles OTP codes or Packeta credentials.',

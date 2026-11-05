@@ -8,6 +8,7 @@ import { formatDateTime } from '../utils/date';
 import { walletDisplayName } from '../utils/wallet-name';
 import type { Wallet } from '../stores/wallet';
 import AppLayout from '../components/AppLayout.vue';
+import MerchantIntegrationCard from '../components/MerchantIntegrationCard.vue';
 
 const { t } = useI18n();
 const route = useRoute();
@@ -42,6 +43,8 @@ async function copyWidgetSnippet() {
     // still visible and selectable, so this is a silent no-op.
   }
 }
+
+const isMerchant = computed(() => wallet.value?.walletType.code === 'MERCHANT');
 
 const amountWords = computed(() =>
   wallet.value ? formatAmountWords(wallet.value.balance, wallet.value.walletType.currency) : '',
@@ -123,27 +126,27 @@ onMounted(load);
           <dt>{{ t('walletDetail.restrictedCounterparties') }}</dt>
           <dd>{{ wallet.restrictedCounterparties.join(', ') }}</dd>
         </template>
-        <template v-if="wallet.terminalId">
+        <template v-if="!isMerchant && wallet.terminalId">
           <dt>{{ t('walletDetail.terminalId') }}</dt>
           <dd class="mono">{{ wallet.terminalId }}</dd>
         </template>
-        <template v-if="wallet.acceptorCode">
+        <template v-if="!isMerchant && wallet.acceptorCode">
           <dt>{{ t('walletDetail.acceptorCode') }}</dt>
           <dd class="mono">{{ wallet.acceptorCode }}</dd>
         </template>
-        <template v-if="wallet.storeName">
+        <template v-if="!isMerchant && wallet.storeName">
           <dt>{{ t('walletDetail.storeName') }}</dt>
           <dd>{{ wallet.storeName }}</dd>
         </template>
-        <template v-if="wallet.storeSite">
+        <template v-if="!isMerchant && wallet.storeSite">
           <dt>{{ t('walletDetail.storeSite') }}</dt>
           <dd class="mono">{{ wallet.storeSite }}</dd>
         </template>
-        <template v-if="wallet.allowedIps?.length">
+        <template v-if="!isMerchant && wallet.allowedIps?.length">
           <dt>{{ t('walletDetail.allowedIps') }}</dt>
           <dd class="mono">{{ wallet.allowedIps.join(', ') }}</dd>
         </template>
-        <template v-if="wallet.callbackUrl">
+        <template v-if="!isMerchant && wallet.callbackUrl">
           <dt>{{ t('walletDetail.callbackUrl') }}</dt>
           <dd class="mono">{{ wallet.callbackUrl }}</dd>
         </template>
@@ -187,7 +190,9 @@ onMounted(load);
         {{ t('dashboard.installments.viewLink') }}
       </router-link>
 
-      <div v-if="wallet.walletType.code === 'MERCHANT' && wallet.walletType.allowWidget" class="widget-section">
+      <MerchantIntegrationCard v-if="isMerchant" :wallet="wallet" />
+
+      <div v-if="isMerchant && wallet.walletType.allowWidget" class="widget-section">
         <h3>{{ t('walletDetail.widget.heading') }}</h3>
         <p class="widget-hint">{{ t('walletDetail.widget.hint') }}</p>
         <pre class="widget-snippet">{{ widgetSnippet }}</pre>
