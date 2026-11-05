@@ -2083,6 +2083,34 @@ describe('TransactionsService.verifyPurchase support top-up completion', () => {
     );
   });
 
+  it("completes a customer's first top-up even though their support wallet was only just created in this transaction", async () => {
+    const { service, manager, walletsService } = buildService({
+      senderWallet: creditWallet,
+      recipientWallet: merchantWallet,
+      repositoryWallet,
+      supportWallet,
+    });
+    // A wallet created by findOrCreateSupportWallet inside the still-open DB
+    // transaction is invisible to getByIdUnscoped's own connection — this
+    // used to surface as "Wallet not found" when returning from ZarinPal.
+    const original = walletsService.getByIdUnscoped.getMockImplementation()!;
+    walletsService.getByIdUnscoped.mockImplementation(async (id: string) => {
+      if (id === supportWallet.id) {
+        throw new NotFoundException('Wallet not found');
+      }
+      return original(id);
+    });
+    const { purchase, topUp } = buildTopUpTransactions();
+    mockQueryBuilderFor(manager, {
+      [topUp.id]: topUp,
+      [purchase.id]: purchase,
+    });
+
+    const result = await service.verifyPurchase(topUp.id);
+
+    expect(result.status).toBe('COMPLETED');
+  });
+
   it('does not re-credit the support wallet on a repeat verify call for an already-completed top-up', async () => {
     const { service, manager } = buildService({
       senderWallet: creditWallet,

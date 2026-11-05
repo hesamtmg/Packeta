@@ -2128,7 +2128,13 @@ export class TransactionsService {
     fromWalletRef: Wallet,
     fromWallet: Wallet,
     toWallet: Wallet,
-    supportFunding?: { supportWallet: Wallet; amount: bigint },
+    supportFunding?: {
+      supportWallet: Wallet;
+      // Same wallet with walletType/currency attached, loaded through
+      // `manager` so it's visible even when created in this transaction.
+      supportWalletRef: Wallet;
+      amount: bigint;
+    },
   ): Promise<void> {
     const purchaseAmount = BigInt(transaction.amount);
     // Sum of whatever externally funded this purchase (support top-up
@@ -2152,7 +2158,7 @@ export class TransactionsService {
       null;
 
     if (supportFunding && supportFunding.amount > 0n) {
-      const { supportWallet, amount } = supportFunding;
+      const { supportWallet, supportWalletRef, amount } = supportFunding;
       const currentSupportBalance = await this.ledgerService.getWalletBalance(
         manager,
         supportWallet.id,
@@ -2166,9 +2172,13 @@ export class TransactionsService {
         );
       }
       externallyFunded += amount;
-      const supportWalletRef = await this.walletsService.getByIdUnscoped(
-        supportWallet.id,
-      );
+      // supportWalletRef was loaded through this transaction's own manager
+      // (see completeSupportTopUp) — never re-fetch it with
+      // walletsService.getByIdUnscoped: on a customer's first top-up the
+      // support wallet was only just created in this still-uncommitted DB
+      // transaction, so a lookup on the repository's separate connection
+      // can't see it and threw "Wallet not found", rolling the whole
+      // top-up back.
       supportDebitLeg = {
         wallet: {
           id: supportWalletRef.id,
@@ -2436,7 +2446,11 @@ export class TransactionsService {
         fromWalletRef,
         fromWallet,
         toWallet,
-        { supportWallet, amount: topUpAmount },
+        {
+          supportWallet,
+          supportWalletRef: supportWalletRaw,
+          amount: topUpAmount,
+        },
       );
       this.notifyMerchantCallback(merchantWalletRef, purchase);
     }
