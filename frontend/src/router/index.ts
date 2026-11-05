@@ -24,6 +24,7 @@ import AdminOffboardingView from '../views/admin/AdminOffboardingView.vue';
 import AdminWalletDetailView from '../views/admin/AdminWalletDetailView.vue';
 import AdminGeneralLedgerView from '../views/admin/AdminGeneralLedgerView.vue';
 import AdminLiveActivityView from '../views/admin/AdminLiveActivityView.vue';
+import AdminPaymentGatewayView from '../views/admin/AdminPaymentGatewayView.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -173,6 +174,12 @@ const router = createRouter({
       component: AdminLiveActivityView,
       meta: { requiresAuth: true, requiresAdmin: true, requiresSection: 'liveActivity' },
     },
+    {
+      path: '/admin/payment-gateway',
+      name: 'admin-payment-gateway',
+      component: AdminPaymentGatewayView,
+      meta: { requiresAuth: true, requiresAdmin: true, requiresSuperAdmin: true },
+    },
   ],
 });
 
@@ -186,6 +193,9 @@ router.beforeEach((to) => {
   }
   if (to.meta.requiresAdmin && !auth.isAdmin) {
     return { name: 'dashboard' };
+  }
+  if (to.meta.requiresSuperAdmin && !auth.isSuperAdmin) {
+    return { name: 'admin-dashboard' };
   }
   const requiredSection = to.meta.requiresSection as string | string[] | undefined;
   if (requiredSection) {

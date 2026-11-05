@@ -26,6 +26,8 @@ import { WidgetSession } from './widget/entities/widget-session.entity';
 import { GlAccount } from './gl/entities/gl-account.entity';
 import { GlJournalEntry } from './gl/entities/gl-journal-entry.entity';
 import { GlPosting } from './gl/entities/gl-posting.entity';
+import { PlatformSetting } from './payment-gateway/entities/platform-setting.entity';
+import { PaymentGatewayModule } from './payment-gateway/payment-gateway.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { WalletsModule } from './wallets/wallets.module';
@@ -88,6 +90,7 @@ import { RealtimeModule } from './realtime/realtime.module';
           GlAccount,
           GlJournalEntry,
           GlPosting,
+          PlatformSetting,
         ],
         synchronize: false,
       }),
@@ -115,6 +118,7 @@ import { RealtimeModule } from './realtime/realtime.module';
     WidgetModule,
     GlModule,
     RealtimeModule,
+    PaymentGatewayModule,
   ],
 })
 export class AppModule {}

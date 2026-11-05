@@ -28,6 +28,8 @@ interface NavItem {
   label: string;
   icon: string;
   group: 'overview' | 'operations' | 'people' | 'system';
+  // Only SUPER_ADMIN accounts see it, regardless of sections.
+  superAdminOnly?: boolean;
 }
 
 const allNavItems = computed<NavItem[]>(() => [
@@ -122,10 +124,19 @@ const allNavItems = computed<NavItem[]>(() => [
     label: t('adminNav.liveActivity'),
     icon: 'M3 12h4l3 8 4-16 3 8h4',
   },
+  {
+    name: 'admin-payment-gateway',
+    group: 'system',
+    section: undefined,
+    superAdminOnly: true,
+    label: t('adminNav.paymentGateway'),
+    icon: 'M3 7a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7zM3 10h18M7 15h3',
+  },
 ]);
 
 const navItems = computed(() =>
   allNavItems.value.filter((item) => {
+    if (item.superAdminOnly) return auth.isSuperAdmin;
     if (!item.section) return true;
     const required = Array.isArray(item.section) ? item.section : [item.section];
     return required.some((section) => auth.hasSection(section));

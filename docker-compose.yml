@@ -184,6 +184,14 @@ services:
       # well-formed merchant id. Point both at production to go live.
       ZARINPAL_BASE_URL: ${ZARINPAL_BASE_URL:-https://sandbox.zarinpal.com}
       ZARINPAL_MERCHANT_ID: ${ZARINPAL_MERCHANT_ID:-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}
+      # Sadad (Bank Melli PSP) — a super-admin can switch real-money
+      # payments to it from Admin → Payment Gateway once these are set.
+      SADAD_MERCHANT_ID: ${SADAD_MERCHANT_ID:-}
+      SADAD_TERMINAL_ID: ${SADAD_TERMINAL_ID:-}
+      SADAD_TERMINAL_KEY: ${SADAD_TERMINAL_KEY:-}
+      SADAD_AMOUNT_MULTIPLIER: ${SADAD_AMOUNT_MULTIPLIER:-10}
+      # Sadad POSTs the customer back to this backend before the SPA.
+      BACKEND_PUBLIC_URL: https://${WALLET_DOMAIN:-packeta.ir}/api
       # Browser-facing.
       FRONTEND_URL: https://${WALLET_DOMAIN:-packeta.ir}
       IPG_FRONTEND_URL: https://${PAY_DOMAIN:-pay.packeta.ir}

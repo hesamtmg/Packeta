@@ -283,10 +283,11 @@ function buildService(options: {
     ...ipgOverrides,
   };
 
-  const zarinpalClientService = {
+  const paymentGatewayService = {
     createPayment: jest.fn().mockResolvedValue({
       authority: 'zarinpal-auth-1',
       paymentUrl: 'https://sandbox.zarinpal.com/pg/StartPay/zarinpal-auth-1',
+      provider: 'ZARINPAL',
     }),
     verifyPayment: jest
       .fn()
@@ -343,7 +344,7 @@ function buildService(options: {
     idempotencyService as any,
     loggingService as any,
     ipgClientService as any,
-    zarinpalClientService as any,
+    paymentGatewayService as any,
     configService as any,
     {} as any,
     settlementService as any,
@@ -366,7 +367,7 @@ function buildService(options: {
     lockCalls,
     manager,
     ipgClientService,
-    zarinpalClientService,
+    paymentGatewayService,
     railSettlementsService,
     walletsService,
     ledgerService,
@@ -430,7 +431,7 @@ describe('TransactionsService.deposit', () => {
       balance: '0',
       walletType: walletType({ depositable: true }),
     };
-    const { service, manager, zarinpalClientService, ipgClientService } =
+    const { service, manager, paymentGatewayService, ipgClientService } =
       buildService({ senderWallet: wallet });
 
     const result = await service.deposit('user-1', 'wallet-1', 250, 'idem-2');
@@ -438,7 +439,7 @@ describe('TransactionsService.deposit', () => {
     expect(result.redirectUrl).toBe(
       'https://sandbox.zarinpal.com/pg/StartPay/zarinpal-auth-1',
     );
-    expect(zarinpalClientService.createPayment).toHaveBeenCalled();
+    expect(paymentGatewayService.createPayment).toHaveBeenCalled();
     expect(ipgClientService.createPayment).not.toHaveBeenCalled();
     expect(manager.save).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1659,7 +1660,7 @@ describe('TransactionsService.verifyPurchase', () => {
       service,
       manager,
       ipgClientService,
-      zarinpalClientService,
+      paymentGatewayService,
       ledgerService,
     } = buildService({
       senderWallet: repositoryWallet,
@@ -1702,7 +1703,8 @@ describe('TransactionsService.verifyPurchase', () => {
     const result = await service.verifyPurchase('installment-tx-1');
 
     expect(result.status).toBe('COMPLETED');
-    expect(zarinpalClientService.verifyPayment).toHaveBeenCalledWith(
+    expect(paymentGatewayService.verifyPayment).toHaveBeenCalledWith(
+      undefined,
       'zarinpal-auth-1',
       '400',
     );
@@ -1736,7 +1738,7 @@ describe('TransactionsService.verifyPurchase', () => {
       balance: '200',
       walletType: walletType({ name: 'Buy' }),
     };
-    const { service, manager, zarinpalClientService, ledgerService } =
+    const { service, manager, paymentGatewayService, ledgerService } =
       buildService({ senderWallet: depositWallet });
 
     const pendingDeposit = {
@@ -1765,7 +1767,8 @@ describe('TransactionsService.verifyPurchase', () => {
     const result = await service.verifyPurchase('deposit-tx-1');
 
     expect(result.status).toBe('COMPLETED');
-    expect(zarinpalClientService.verifyPayment).toHaveBeenCalledWith(
+    expect(paymentGatewayService.verifyPayment).toHaveBeenCalledWith(
+      undefined,
       'zarinpal-auth-1',
       '300',
     );
@@ -2681,7 +2684,7 @@ describe('TransactionsService overdue-collection methods', () => {
   });
 
   it('initiateOverdueCollectionZarinPal creates a walletless DEPOSIT for the full outstanding total, tagged with settlesWalletId', async () => {
-    const { service, manager, zarinpalClientService } = buildOverdueService();
+    const { service, manager, paymentGatewayService } = buildOverdueService();
 
     const result = await service.initiateOverdueCollectionZarinPal(
       'admin-1',
@@ -2692,7 +2695,7 @@ describe('TransactionsService overdue-collection methods', () => {
     expect(result.redirectUrl).toBe(
       'https://sandbox.zarinpal.com/pg/StartPay/zarinpal-auth-1',
     );
-    expect(zarinpalClientService.createPayment).toHaveBeenCalled();
+    expect(paymentGatewayService.createPayment).toHaveBeenCalled();
     expect(manager.save).toHaveBeenCalledWith(
       expect.objectContaining({
         type: TransactionType.DEPOSIT,
@@ -2749,7 +2752,7 @@ describe('TransactionsService offboarding (quit-customer) methods', () => {
   }
 
   it('initiateQuitCollectionZarinPal works on a wallet that is not blocked and never folds in unblockFee', async () => {
-    const { service, manager, zarinpalClientService } = buildQuitService();
+    const { service, manager, paymentGatewayService } = buildQuitService();
 
     const result = await service.initiateQuitCollectionZarinPal(
       'admin-1',
@@ -2760,7 +2763,7 @@ describe('TransactionsService offboarding (quit-customer) methods', () => {
     expect(result.redirectUrl).toBe(
       'https://sandbox.zarinpal.com/pg/StartPay/zarinpal-auth-1',
     );
-    expect(zarinpalClientService.createPayment).toHaveBeenCalled();
+    expect(paymentGatewayService.createPayment).toHaveBeenCalled();
     // Just the one outstanding installment's amount (400) — the type's
     // unblockFee (50) never applies here, unlike the overdue-queue version.
     expect(manager.save).toHaveBeenCalledWith(

@@ -7,6 +7,7 @@ import { WalletsModule } from '../wallets/wallets.module';
 import { IdempotencyModule } from '../idempotency/idempotency.module';
 import { LoggingModule } from '../logging/logging.module';
 import { IpgModule } from '../ipg/ipg.module';
+import { PaymentGatewayModule } from '../payment-gateway/payment-gateway.module';
 import { CurrenciesModule } from '../currencies/currencies.module';
 import { SettlementModule } from '../settlement/settlement.module';
 import { InstallmentsModule } from '../installments/installments.module';
@@ -21,6 +22,7 @@ import { GlModule } from '../gl/gl.module';
     IdempotencyModule,
     LoggingModule,
     IpgModule,
+    PaymentGatewayModule,
     CurrenciesModule,
     SettlementModule,
     InstallmentsModule,

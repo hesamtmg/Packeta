@@ -45,6 +45,7 @@ export default {
     offboarding: 'Offboarding',
     generalLedger: 'General Ledger',
     liveActivity: 'Live Activity',
+    paymentGateway: 'Payment Gateway',
   },
   customerActions: {
     addWallet: 'Add wallet',
@@ -599,6 +600,25 @@ export default {
       dueIn: 'Due in {count} days',
       sequence: 'Installment #{n}',
       penaltyDays: '+ penalty · {count} days',
+    },
+    paymentGateway: {
+      title: 'Payment Gateway',
+      heading: 'Real-money payment gateway',
+      description: 'Choose which PSP deposits, installment repayments, collections and credit top-ups are paid through.',
+      active: 'Active',
+      sandbox: 'Sandbox',
+      notConfigured: 'Not configured',
+      inFlightHint: 'Payments already in progress keep verifying with the gateway they were started on.',
+      lastChanged: 'Last changed {when}',
+      save: 'Save',
+      saving: 'Saving…',
+      saved: '{provider} is now the active payment gateway.',
+      loadFailed: 'Could not load the payment gateway setting.',
+      saveFailed: 'Could not change the payment gateway.',
+      providers: {
+        ZARINPAL: { name: 'ZarinPal', description: 'ZarinPal REST gateway (zarinpal.com).' },
+        SADAD: { name: 'Sadad (Bank Melli)', description: 'Bank Melli Sadad VPG (sadad.shaparak.ir). Credentials are set via SADAD_* environment variables.' },
+      },
     },
     schedulerLogs: {
       title: 'Scheduler Logs',

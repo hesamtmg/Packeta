@@ -27,6 +27,24 @@ export default () => ({
       process.env.ZARINPAL_MERCHANT_ID ??
       'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
   },
+  // Sadad (Bank Melli PSP) — the alternative real-money gateway a
+  // super-admin can switch to from the admin panel (see
+  // PaymentGatewayService). Credentials come from Sadad; the TerminalKey is
+  // Base64 (24 bytes once decoded). Wallet amounts are multiplied by
+  // amountMultiplier before being sent (10 = Toman wallet → Rial for Sadad).
+  sadad: {
+    merchantId: process.env.SADAD_MERCHANT_ID ?? '',
+    terminalId: process.env.SADAD_TERMINAL_ID ?? '',
+    terminalKey: process.env.SADAD_TERMINAL_KEY ?? '',
+    apiBaseUrl: process.env.SADAD_API_URL ?? 'https://sadad.shaparak.ir',
+    purchaseBaseUrl:
+      process.env.SADAD_PURCHASE_URL ?? 'https://sadad.shaparak.ir',
+    amountMultiplier: parseInt(process.env.SADAD_AMOUNT_MULTIPLIER ?? '10', 10),
+  },
+  // This backend's public, browser-reachable base URL (e.g.
+  // https://packeta.ir/api). Sadad POSTs the customer back to
+  // <backendPublicUrl>/payment-gateway/sadad/return.
+  backendPublicUrl: process.env.BACKEND_PUBLIC_URL ?? 'http://localhost:3000',
   // Where the customer's browser lands after the IPG redirects back — used
   // to build each purchase's callbackUrl.
   frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:5173',

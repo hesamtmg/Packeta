@@ -97,6 +97,14 @@ export class Transaction {
   @Column({ type: 'varchar', length: 500, nullable: true })
   ipgPaymentUrl: string | null;
 
+  // Which real-money PSP (ZarinPal / Sadad) issued ipgAuthority — set by
+  // every PaymentGatewayService.createPayment caller so verify goes back to
+  // the same gateway even if a super-admin switched gateways in between.
+  // Null for in-house sandbox IPG purchases and for pre-Sadad rows (which
+  // were all ZarinPal).
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  ipgProvider: string | null;
+
   // Only set for PURCHASE rows created via the merchant-initiated charge
   // flow: which language the IPG pay page should render in for the
   // customer identifying themselves there, chosen by the merchant at
