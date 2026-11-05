@@ -500,8 +500,9 @@ async function loadRepositoryWallets() {
 const feeRepositoryOptions = computed(() =>
   repositoryWallets.value.filter((w) => w.walletType.currency.code === draftCurrency.value?.code),
 );
+// Name only, so it fits the narrow column; the full id is in the tooltip.
 function repositoryLabel(w: RepositoryOption): string {
-  return `${w.name || w.ownerEmail} · ${w.id.slice(0, 8)}`;
+  return w.name || w.ownerEmail;
 }
 function methodHasFee(m: WithdrawalMethodDraft): boolean {
   return Number(m.feePercent) > 0 || Number(m.fixedFee) > 0;
@@ -823,7 +824,7 @@ loadTypes();
                               {{ t('admin.walletTypes.methodFeeRepository') }}
                               <select v-model="m.feeRepositoryWalletId" class="admin-input" :required="methodHasFee(m)">
                                 <option value="">{{ t('admin.walletTypes.methodNoRepository') }}</option>
-                                <option v-for="w in feeRepositoryOptions" :key="w.id" :value="w.id">{{ repositoryLabel(w) }}</option>
+                                <option v-for="w in feeRepositoryOptions" :key="w.id" :value="w.id" :title="w.id">{{ repositoryLabel(w) }}</option>
                                 <option
                                   v-if="m.feeRepositoryWalletId && !feeRepositoryOptions.some((w) => w.id === m.feeRepositoryWalletId)"
                                   :value="m.feeRepositoryWalletId"
