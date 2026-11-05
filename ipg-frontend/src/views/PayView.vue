@@ -592,10 +592,11 @@ async function resolveTopUpCallback(topUpTransactionId: string) {
   }
 
   // The purchase is fully settled server-side by this point (or definitively
-  // failed) — only now does the customer head back to the merchant, the same
-  // "redirecting in a few seconds" handoff the sandbox-IPG confirm step uses.
-  // No merchant callbackUrl configured just means staying here with the
-  // plain result message instead.
+  // failed) — only now does the customer head back to Packeta's own
+  // purchase result page in the customer panel (the server always sends
+  // one on success), with the same "redirecting in a few seconds" handoff
+  // the sandbox-IPG confirm step uses. A failure carries no redirect and
+  // stays here with the result message instead.
   if (redirectUrlFromServer) {
     enterRedirectStep(redirectUrlFromServer);
   } else {

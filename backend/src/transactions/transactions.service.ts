@@ -89,10 +89,10 @@ export interface PurchaseVerifyResult {
   status: TransactionStatus;
   reason?: string;
   // Only set when this verify call resolves a credit-shortfall top-up (see
-  // completeSupportTopUp): the merchant's own callbackUrl to send the
-  // customer's browser back to now that the purchase is settled, one way
-  // or the other — not the server-to-server webhook notifyMerchantCallback
-  // already fired, but the customer-facing return trip.
+  // completeSupportTopUp): Packeta's own purchase result page
+  // (/purchase/:id/callback) to send the customer's browser to now that
+  // the purchase is settled — the merchant itself is told server-to-server
+  // by notifyMerchantCallback.
   redirectUrl?: string;
   // Set once a credit-funded purchase completes: the installment plan the
   // amount drawn on the credit line was just split into (see
@@ -2462,12 +2462,13 @@ export class TransactionsService {
 
     // The purchase is settled one way or the other by this point (completed
     // just now, or already completed on a repeat call) — only now does the
-    // customer's own browser head back to the merchant.
-    const redirectUrl = this.buildMerchantRedirectUrl(
-      merchantWalletRef.callbackUrl,
-      purchase.id,
-      purchase.status,
-    );
+    // customer's own browser leave the IPG, landing on Packeta's own
+    // purchase result page: the same /purchase/:id/callback page a regular
+    // (no-shortfall) purchase returns to from the sandbox IPG, which shows
+    // the outcome and installment plan in the customer panel. The merchant
+    // still hears about it server-to-server via notifyMerchantCallback.
+    const frontendUrl = this.configService.get<string>('frontendUrl');
+    const redirectUrl = `${frontendUrl}/purchase/${purchase.id}/callback`;
 
     return { transactionId: purchase.id, status: purchase.status, redirectUrl };
   }
@@ -3160,22 +3161,6 @@ export class TransactionsService {
       // Best-effort: the merchant's webhook being unreachable doesn't affect
       // the purchase itself, which has already completed on our ledger.
     });
-  }
-
-  // Where the customer's own browser goes back to once a credit-shortfall
-  // top-up is resolved (see completeSupportTopUp) — the merchant's own
-  // callbackUrl, the same one notifyMerchantCallback posts to server-to-
-  // server, just as a browser redirect instead of a webhook. No callbackUrl
-  // configured means no redirect target: the caller falls back to showing
-  // the result on the IPG's own pay page instead.
-  private buildMerchantRedirectUrl(
-    callbackUrl: string | null,
-    transactionId: string,
-    status: TransactionStatus,
-  ): string | undefined {
-    if (!callbackUrl) return undefined;
-    const separator = callbackUrl.includes('?') ? '&' : '?';
-    return `${callbackUrl}${separator}transactionId=${transactionId}&status=${status}`;
   }
 
   private async assertOwnsEitherSide(
