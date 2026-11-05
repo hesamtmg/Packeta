@@ -28,7 +28,7 @@ import { IdempotencyService } from '../idempotency/idempotency.service';
 import { LoggingService } from '../logging/logging.service';
 import { serializeWallet } from '../wallets/wallet.serializer';
 import { IpgClientService } from '../ipg/ipg-client.service';
-import { ZarinpalClientService } from '../ipg/zarinpal-client.service';
+import { PaymentGatewayService } from '../payment-gateway/payment-gateway.service';
 import { CurrenciesService } from '../currencies/currencies.service';
 import {
   formatAmount,
@@ -106,7 +106,7 @@ export class TransactionsService {
     private readonly idempotencyService: IdempotencyService,
     private readonly loggingService: LoggingService,
     private readonly ipgClientService: IpgClientService,
-    private readonly zarinpalClientService: ZarinpalClientService,
+    private readonly paymentGatewayService: PaymentGatewayService,
     private readonly configService: ConfigService,
     private readonly currenciesService: CurrenciesService,
     private readonly settlementService: SettlementService,
@@ -225,8 +225,8 @@ export class TransactionsService {
           buildCallbackUrl ??
           ((id: string) => `${frontendUrl}/purchase/${id}/callback`)
         )(transaction.id);
-        const { authority, paymentUrl } =
-          await this.zarinpalClientService.createPayment({
+        const { authority, paymentUrl, provider } =
+          await this.paymentGatewayService.createPayment({
             merchantName: 'Deposit',
             amount: transaction.amount,
             displayAmount: formatAmount(amount, walletRef.walletType.currency),
@@ -236,6 +236,7 @@ export class TransactionsService {
 
         transaction.ipgAuthority = authority;
         transaction.ipgPaymentUrl = paymentUrl;
+        transaction.ipgProvider = provider;
         await manager.save(transaction);
 
         return {
@@ -812,8 +813,8 @@ export class TransactionsService {
           buildCallbackUrl ??
           ((id: string) => `${frontendUrl}/purchase/${id}/callback`)
         )(transaction.id);
-        const { authority, paymentUrl } =
-          await this.zarinpalClientService.createPayment({
+        const { authority, paymentUrl, provider } =
+          await this.paymentGatewayService.createPayment({
             merchantName: 'Installment repayment',
             amount: transaction.amount,
             displayAmount: formatAmount(
@@ -826,6 +827,7 @@ export class TransactionsService {
 
         transaction.ipgAuthority = authority;
         transaction.ipgPaymentUrl = paymentUrl;
+        transaction.ipgProvider = provider;
         await manager.save(transaction);
 
         return {
@@ -1096,8 +1098,8 @@ export class TransactionsService {
         // when present; the route's own :authority is only used for a
         // best-effort, non-critical header fetch there.
         const ipgFrontendUrl = this.configService.get<string>('ipgFrontendUrl');
-        const { authority, paymentUrl } =
-          await this.zarinpalClientService.createPayment({
+        const { authority, paymentUrl, provider } =
+          await this.paymentGatewayService.createPayment({
             merchantName: 'Overdue installment collection',
             amount: transaction.amount,
             displayAmount: formatAmount(
@@ -1110,6 +1112,7 @@ export class TransactionsService {
 
         transaction.ipgAuthority = authority;
         transaction.ipgPaymentUrl = paymentUrl;
+        transaction.ipgProvider = provider;
         await manager.save(transaction);
 
         return {
@@ -1287,8 +1290,8 @@ export class TransactionsService {
         await manager.save(transaction);
 
         const ipgFrontendUrl = this.configService.get<string>('ipgFrontendUrl');
-        const { authority, paymentUrl } =
-          await this.zarinpalClientService.createPayment({
+        const { authority, paymentUrl, provider } =
+          await this.paymentGatewayService.createPayment({
             merchantName: 'Credit line payoff',
             amount: transaction.amount,
             displayAmount: formatAmount(
@@ -1301,6 +1304,7 @@ export class TransactionsService {
 
         transaction.ipgAuthority = authority;
         transaction.ipgPaymentUrl = paymentUrl;
+        transaction.ipgProvider = provider;
         await manager.save(transaction);
 
         return {
@@ -1745,8 +1749,8 @@ export class TransactionsService {
       // `?Authority=...&Status=...` onto the callback URL as-is, so a
       // callback that already had a `?topupTxnId=` came back as
       // `?topupTxnId=<id>?Authority=...` and the id no longer parsed.
-      const { authority, paymentUrl } =
-        await this.zarinpalClientService.createPayment({
+      const { authority, paymentUrl, provider } =
+        await this.paymentGatewayService.createPayment({
           merchantName: 'Credit top-up',
           amount: topUp.amount,
           displayAmount: formatAmount(
@@ -1759,6 +1763,7 @@ export class TransactionsService {
 
       topUp.ipgAuthority = authority;
       topUp.ipgPaymentUrl = paymentUrl;
+      topUp.ipgProvider = provider;
       await manager.save(topUp);
 
       return { redirectUrl: paymentUrl, topUpTransactionId: topUp.id };
@@ -1870,17 +1875,21 @@ export class TransactionsService {
         );
       }
 
-      // Deposits and installment repayments are paid through ZarinPal (a
-      // real gateway) — see deposit() and payInstallment() above. Every
-      // other flow here (regular purchases) still uses the in-house
+      // Deposits and installment repayments are paid through a real
+      // gateway — ZarinPal or Sadad, whichever issued this transaction's
+      // authority (ipgProvider) — see deposit() and payInstallment() above.
+      // Every other flow here (regular purchases) still uses the in-house
       // sandbox IPG.
-      const verifyClient = isRealMoneyIn
-        ? this.zarinpalClientService
-        : this.ipgClientService;
-      const verifyResult = await verifyClient.verifyPayment(
-        transaction.ipgAuthority!,
-        transaction.amount,
-      );
+      const verifyResult = isRealMoneyIn
+        ? await this.paymentGatewayService.verifyPayment(
+            transaction.ipgProvider,
+            transaction.ipgAuthority!,
+            transaction.amount,
+          )
+        : await this.ipgClientService.verifyPayment(
+            transaction.ipgAuthority!,
+            transaction.amount,
+          );
       if (!verifyResult.success) {
         return {
           transactionId: transaction.id,

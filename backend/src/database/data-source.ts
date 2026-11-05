@@ -11,6 +11,7 @@ import { RailSettlement } from '../rail-settlements/entities/rail-settlement.ent
 import { GlAccount } from '../gl/entities/gl-account.entity';
 import { GlJournalEntry } from '../gl/entities/gl-journal-entry.entity';
 import { GlPosting } from '../gl/entities/gl-posting.entity';
+import { PlatformSetting } from '../payment-gateway/entities/platform-setting.entity';
 
 export const AppDataSource = new DataSource({
   type: 'postgres',
@@ -31,6 +32,7 @@ export const AppDataSource = new DataSource({
     GlAccount,
     GlJournalEntry,
     GlPosting,
+    PlatformSetting,
   ],
   migrations: [__dirname + '/migrations/*.{ts,js}'],
   synchronize: false,

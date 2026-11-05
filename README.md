@@ -234,9 +234,17 @@ npm run start:dev
 
 API listens on `http://localhost:4000`. Packeta's backend calls this over HTTP for purchase
 and installment-repayment initiate/verify — set `IPG_BASE_URL`/`IPG_API_KEY` in `backend/.env`
-to match. Deposits, on the other hand, always go through ZarinPal (a real payment gateway,
-not this sandbox) — see `ZARINPAL_BASE_URL`/`ZARINPAL_MERCHANT_ID` below; a deposit only
-completes once ZarinPal itself confirms it.
+to match. Deposits, on the other hand, always go through a real payment gateway (not this
+sandbox) — ZarinPal by default (`ZARINPAL_BASE_URL`/`ZARINPAL_MERCHANT_ID`); a deposit only
+completes once that gateway itself confirms it.
+
+**Choosing the gateway (ZarinPal or Sadad).** A super-admin picks the real-money PSP in
+*Admin → Payment Gateway* (`GET/PUT /admin/payment-gateway`). Sadad (Bank Melli VPG) needs
+`SADAD_MERCHANT_ID`, `SADAD_TERMINAL_ID`, `SADAD_TERMINAL_KEY` (Base64) and
+`BACKEND_PUBLIC_URL` (Sadad POSTs the customer back to
+`<BACKEND_PUBLIC_URL>/payment-gateway/sadad/return`); it can't be activated until they're
+set. Amounts are sent ×`SADAD_AMOUNT_MULTIPLIER` (default 10, Toman → Rial). Each payment
+remembers its gateway, so switching never breaks payments already in progress.
 
 ### 5. IPG frontend (payment page)
 

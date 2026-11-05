@@ -45,6 +45,7 @@ export default {
     offboarding: 'قطع همکاری',
     generalLedger: 'دفتر کل',
     liveActivity: 'فعالیت زنده',
+    paymentGateway: 'درگاه پرداخت',
   },
   customerActions: {
     addWallet: 'افزودن کیف پول',
@@ -599,6 +600,25 @@ export default {
       dueIn: '{count} روز تا سررسید',
       sequence: 'قسط شماره {n}',
       penaltyDays: '+ جریمه · {count} روز',
+    },
+    paymentGateway: {
+      title: 'درگاه پرداخت',
+      heading: 'درگاه پرداخت واقعی',
+      description: 'انتخاب کنید واریز، بازپرداخت اقساط، وصول مطالبات و شارژ اعتبار از طریق کدام PSP انجام شود.',
+      active: 'فعال',
+      sandbox: 'آزمایشی',
+      notConfigured: 'پیکربندی نشده',
+      inFlightHint: 'پرداخت‌های در جریان با همان درگاهی که آغاز شده‌اند تأیید می‌شوند.',
+      lastChanged: 'آخرین تغییر {when}',
+      save: 'ذخیره',
+      saving: 'در حال ذخیره…',
+      saved: '{provider} اکنون درگاه پرداخت فعال است.',
+      loadFailed: 'بارگذاری تنظیمات درگاه پرداخت ممکن نشد.',
+      saveFailed: 'تغییر درگاه پرداخت ممکن نشد.',
+      providers: {
+        ZARINPAL: { name: 'زرین‌پال', description: 'درگاه REST زرین‌پال (zarinpal.com).' },
+        SADAD: { name: 'سداد (بانک ملی)', description: 'درگاه سداد بانک ملی (sadad.shaparak.ir). اطلاعات پذیرنده از متغیرهای محیطی SADAD_* خوانده می‌شود.' },
+      },
     },
     schedulerLogs: {
       title: 'گزارش زمان‌بند',
