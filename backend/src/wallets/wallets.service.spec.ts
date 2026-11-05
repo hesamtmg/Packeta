@@ -473,26 +473,7 @@ describe('WalletsService.createForUser / updateForUser limit validation', () => 
 });
 
 describe('WalletsService.createForUser / updateForUser rail validation', () => {
-  it('rejects a BANK_TRANSFER rail with no railScheduleTimes at creation', async () => {
-    const manager = { create: jest.fn(), save: jest.fn() };
-    const service = new WalletsService(
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-    );
-
-    await expect(
-      service.createForUser(manager as any, 'user-1', 'type-1', {
-        railType: SettlementRailType.BANK_TRANSFER,
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    expect(manager.create).not.toHaveBeenCalled();
-  });
-
-  it('allows a BANK_TRANSFER rail when railScheduleTimes is supplied', async () => {
+  it('creates an instant BANK_TRANSFER rail with no schedule, dropping any supplied times', async () => {
     const manager = {
       create: jest.fn((_entity: unknown, data: unknown) => data),
       save: jest.fn(async (data: any) => data),
@@ -516,8 +497,32 @@ describe('WalletsService.createForUser / updateForUser rail validation', () => {
       expect.anything(),
       expect.objectContaining({
         railType: SettlementRailType.BANK_TRANSFER,
-        railScheduleTimes: ['09:00'],
+        railScheduleTimes: null,
       }),
+    );
+  });
+
+  it('keeps a PAYA schedule supplied at creation', async () => {
+    const manager = {
+      create: jest.fn((_entity: unknown, data: unknown) => data),
+      save: jest.fn(async (data: any) => data),
+    };
+    const service = new WalletsService(
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await service.createForUser(manager as any, 'user-1', 'type-1', {
+      railType: SettlementRailType.PAYA,
+      railScheduleTimes: ['10:15'],
+    });
+    expect(manager.create).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ railScheduleTimes: ['10:15'] }),
     );
   });
 
@@ -542,30 +547,41 @@ describe('WalletsService.createForUser / updateForUser rail validation', () => {
     ).resolves.toBeDefined();
   });
 
-  it('rejects switching an existing wallet to BANK_TRANSFER without supplying a schedule', async () => {
+  it('clears a leftover schedule when switching a PAYA wallet to instant POL_PAY', async () => {
     const { service } = buildService({
       id: 'wallet-1',
       userId: 'user-1',
       balance: '0',
       closedAt: null,
-      railType: null,
-      railScheduleTimes: null,
+      railType: SettlementRailType.PAYA,
+      railScheduleTimes: ['09:00', '13:00'],
+      walletType: {},
     } as any);
+    const manager = {
+      update: jest.fn(async () => undefined),
+      findOne: jest.fn(async () => ({ id: 'wallet-1' })),
+    };
 
-    await expect(
-      service.updateForUser({} as any, 'user-1', 'wallet-1', {
-        railType: SettlementRailType.BANK_TRANSFER,
+    await service.updateForUser(manager as any, 'user-1', 'wallet-1', {
+      railType: SettlementRailType.POL_PAY,
+    });
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
+      'wallet-1',
+      expect.objectContaining({
+        railType: SettlementRailType.POL_PAY,
+        railScheduleTimes: null,
       }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    );
   });
 
-  it('allows switching to BANK_TRANSFER when the same request also supplies a schedule', async () => {
+  it('updates the schedule of a SATNA wallet', async () => {
     const { service } = buildService({
       id: 'wallet-1',
       userId: 'user-1',
       balance: '0',
       closedAt: null,
-      railType: null,
+      railType: SettlementRailType.SATNA,
       railScheduleTimes: null,
       walletType: {},
     } as any);
@@ -574,12 +590,12 @@ describe('WalletsService.createForUser / updateForUser rail validation', () => {
       findOne: jest.fn(async () => ({ id: 'wallet-1' })),
     };
 
-    await expect(
-      service.updateForUser(manager as any, 'user-1', 'wallet-1', {
-        railType: SettlementRailType.BANK_TRANSFER,
-        railScheduleTimes: ['10:00'],
-      }),
-    ).resolves.toBeDefined();
+    await service.updateForUser(manager as any, 'user-1', 'wallet-1', {
+      railScheduleTimes: ['11:45'],
+    });
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), 'wallet-1', {
+      railScheduleTimes: ['11:45'],
+    });
   });
 });
 

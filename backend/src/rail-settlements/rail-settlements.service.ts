@@ -87,12 +87,17 @@ export class RailSettlementsService {
 
   // Every rail settlement across every wallet the caller owns — the
   // customer-facing audit trail of "what left, over which rail, and when."
-  async findAllForUser(userId: string): Promise<RailSettlement[]> {
-    return this.railSettlementsRepository
+  async findAllForUser(
+    userId: string,
+    walletId?: string,
+  ): Promise<RailSettlement[]> {
+    const query = this.railSettlementsRepository
       .createQueryBuilder('settlement')
       .innerJoin('wallets', 'wallet', 'wallet."id" = settlement."walletId"')
-      .where('wallet."userId" = :userId', { userId })
-      .orderBy('settlement.scheduledFor', 'DESC')
-      .getMany();
+      .where('wallet."userId" = :userId', { userId });
+    if (walletId) {
+      query.andWhere('settlement."walletId" = :walletId', { walletId });
+    }
+    return query.orderBy('settlement.scheduledFor', 'DESC').getMany();
   }
 }

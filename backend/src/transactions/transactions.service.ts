@@ -45,6 +45,7 @@ import {
   InstallmentStatus,
 } from '../installments/entities/installment.entity';
 import { RailSettlementsService } from '../rail-settlements/rail-settlements.service';
+import { isInstantRail } from '../rail-settlements/rail-schedule';
 import {
   RailSettlementStatus,
   SettlementRailType,
@@ -2002,6 +2003,10 @@ export class TransactionsService {
 
     void this.emitTransactionStatusChanged(result.transactionId, result.reason);
 
+    if (result.status === TransactionStatus.COMPLETED) {
+      await this.settleInstantRailIfConfigured(result.transactionId);
+    }
+
     if (result.status === TransactionStatus.COMPLETED && planPurchaseId) {
       const installments =
         await this.installmentsService.findForPurchase(planPurchaseId);
@@ -2021,6 +2026,70 @@ export class TransactionsService {
       }
     }
     return result;
+  }
+
+  // Instant rails (Pol Pay / direct bank transfer — see rail-schedule.ts)
+  // have no schedule: the merchant is paid out synchronously, right after
+  // each purchase into their wallet commits, through the same
+  // sweepAutoWithdraw path the scheduler uses for Paya/Satna (so IBAN splits,
+  // per-charge overrides and RailSettlement audit rows all behave the same).
+  // Runs after the verify transaction has committed and never fails the
+  // verify itself — a payout error is logged and the purchase stays
+  // unsettled (settledAt IS NULL), so the next completed purchase retries it.
+  private async settleInstantRailIfConfigured(
+    transactionId: string,
+  ): Promise<void> {
+    let merchantWalletId: string | null = null;
+    try {
+      const transaction = await this.dataSource.manager.findOne(Transaction, {
+        where: { id: transactionId },
+      });
+      if (
+        !transaction ||
+        transaction.type !== TransactionType.PURCHASE ||
+        !transaction.toWalletId ||
+        transaction.settledAt
+      ) {
+        return;
+      }
+      merchantWalletId = transaction.toWalletId;
+      const merchantWallet =
+        await this.walletsService.getByIdUnscoped(merchantWalletId);
+      if (
+        !isInstantRail(merchantWallet.railType) ||
+        !merchantWallet.walletType.supportsAutoWithdraw ||
+        merchantWallet.closedAt
+      ) {
+        return;
+      }
+      const created = await this.sweepAutoWithdraw(merchantWalletId);
+      await this.loggingService.log({
+        category: 'SCHEDULER',
+        action: 'rail_settlement_instant',
+        success: true,
+        metadata: {
+          walletId: merchantWalletId,
+          railType: merchantWallet.railType,
+          purchaseId: transactionId,
+          transactions: created.map((tx) => ({
+            id: tx.id,
+            amount: tx.amount,
+            destinationIban: tx.destinationIban,
+          })),
+        },
+      });
+    } catch (err) {
+      await this.loggingService.log({
+        category: 'SCHEDULER',
+        action: 'rail_settlement_instant',
+        success: false,
+        metadata: {
+          walletId: merchantWalletId,
+          purchaseId: transactionId,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+    }
   }
 
   // Completes a PURCHASE from a CREDIT wallet, funding it with real money

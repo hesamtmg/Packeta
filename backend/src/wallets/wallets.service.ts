@@ -17,6 +17,7 @@ import { SettlementService } from '../settlement/settlement.service';
 import { SettlementAccountDto } from '../settlement/dto/settlement-account.dto';
 import { UsersService } from '../users/users.service';
 import { SettlementRailType } from '../rail-settlements/entities/rail-settlement.entity';
+import { isInstantRail } from '../rail-settlements/rail-schedule';
 import { IdempotencyService } from '../idempotency/idempotency.service';
 import {
   Transaction,
@@ -83,7 +84,6 @@ export class WalletsService {
       options?.minTransactionAmount,
       options?.maxTransactionAmount,
     );
-    this.assertValidRailConfig(options?.railType, options?.railScheduleTimes);
 
     const wallet = manager.create(Wallet, {
       userId,
@@ -104,7 +104,12 @@ export class WalletsService {
       virtualAmount: options?.virtualAmount?.toString() ?? null,
       nationalCode: options?.nationalCode ?? null,
       railType: options?.railType ?? null,
-      railScheduleTimes: options?.railScheduleTimes ?? null,
+      // Instant rails settle per purchase, never on a schedule — see
+      // rail-schedule.ts — so any supplied times are dropped.
+      railScheduleTimes:
+        !isInstantRail(options?.railType) && options?.railScheduleTimes?.length
+          ? options.railScheduleTimes
+          : null,
     });
     await manager.save(wallet);
 
@@ -164,13 +169,6 @@ export class WalletsService {
           ? Number(wallet.maxTransactionAmount)
           : undefined,
     );
-    this.assertValidRailConfig(
-      options.railType !== undefined ? options.railType : wallet.railType,
-      options.railScheduleTimes !== undefined
-        ? options.railScheduleTimes
-        : wallet.railScheduleTimes,
-    );
-
     const patch: Partial<Wallet> = {};
     if (options.name !== undefined) {
       patch.name = options.name.trim() ? options.name.trim() : null;
@@ -234,6 +232,18 @@ export class WalletsService {
       patch.railScheduleTimes = options.railScheduleTimes.length
         ? options.railScheduleTimes
         : null;
+    }
+    // Switching to (or staying on) an instant rail clears any leftover
+    // schedule — those rails settle per purchase, not at fixed times.
+    const effectiveRail =
+      options.railType !== undefined ? options.railType : wallet.railType;
+    if (
+      isInstantRail(effectiveRail) &&
+      (options.railType !== undefined ||
+        options.railScheduleTimes !== undefined ||
+        wallet.railScheduleTimes?.length)
+    ) {
+      patch.railScheduleTimes = null;
     }
     if (Object.keys(patch).length) {
       await manager.update(Wallet, walletId, patch);
@@ -515,25 +525,6 @@ export class WalletsService {
     if (min !== undefined && max !== undefined && min > max) {
       throw new BadRequestException(
         'minTransactionAmount cannot be greater than maxTransactionAmount',
-      );
-    }
-  }
-
-  // BANK_TRANSFER has no built-in default schedule (see
-  // RAIL_DEFAULT_SCHEDULE_TIMES) — a direct bank transfer's timing is
-  // entirely bank-specific, so a wallet choosing that rail must supply its
-  // own railScheduleTimes explicitly. Every other rail is fine unconfigured
-  // (falls back to its built-in default at sweep time).
-  private assertValidRailConfig(
-    railType?: SettlementRailType | null,
-    scheduleTimes?: string[] | null,
-  ): void {
-    if (
-      railType === SettlementRailType.BANK_TRANSFER &&
-      !scheduleTimes?.length
-    ) {
-      throw new BadRequestException(
-        'BANK_TRANSFER has no default schedule — railScheduleTimes must be set explicitly for this wallet',
       );
     }
   }

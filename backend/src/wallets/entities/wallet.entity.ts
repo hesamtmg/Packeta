@@ -170,10 +170,10 @@ export class Wallet {
   @Column({ type: 'enum', enum: SettlementRailType, nullable: true })
   railType: SettlementRailType | null;
 
-  // Optional "HH:MM" (server-local) schedule override for the chosen rail —
-  // falls back to that rail's built-in default when unset. Required (no
-  // sensible default exists) when railType is BANK_TRANSFER, since a direct
-  // bank transfer's timing is entirely bank-specific.
+  // Optional "HH:MM" (Tehran time) schedule override for a scheduled rail
+  // (PAYA/SATNA) — falls back to that rail's built-in default when unset.
+  // Always null for an instant rail (POL_PAY/BANK_TRANSFER), which pays out
+  // per purchase instead of on a schedule (see rail-schedule.ts).
   @Column({ type: 'varchar', length: 5, array: true, nullable: true })
   railScheduleTimes: string[] | null;
 

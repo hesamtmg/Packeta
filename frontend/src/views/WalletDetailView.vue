@@ -9,6 +9,7 @@ import { walletDisplayName } from '../utils/wallet-name';
 import type { Wallet } from '../stores/wallet';
 import AppLayout from '../components/AppLayout.vue';
 import MerchantIntegrationCard from '../components/MerchantIntegrationCard.vue';
+import MerchantSettlementCard from '../components/MerchantSettlementCard.vue';
 
 const { t } = useI18n();
 const route = useRoute();
@@ -154,15 +155,15 @@ onMounted(load);
           <dt>{{ t('walletDetail.category') }}</dt>
           <dd>{{ wallet.category }}{{ wallet.subCategory ? ` / ${wallet.subCategory}` : '' }}</dd>
         </template>
-        <template v-if="wallet.railType">
+        <template v-if="!(isMerchant && wallet.walletType.supportsAutoWithdraw) && wallet.railType">
           <dt>{{ t('walletDetail.railType') }}</dt>
           <dd>{{ t(`dashboard.settlement.rail.${wallet.railType}`) }}</dd>
         </template>
-        <template v-if="wallet.railScheduleTimes?.length">
+        <template v-if="!(isMerchant && wallet.walletType.supportsAutoWithdraw) && wallet.railScheduleTimes?.length">
           <dt>{{ t('walletDetail.railScheduleTimes') }}</dt>
           <dd>{{ wallet.railScheduleTimes.join(', ') }}</dd>
         </template>
-        <template v-if="wallet.settlementAccounts?.length">
+        <template v-if="!(isMerchant && wallet.walletType.supportsAutoWithdraw) && wallet.settlementAccounts?.length">
           <dt>{{ t('walletDetail.settlementAccounts') }}</dt>
           <dd>
             <div v-for="account in wallet.settlementAccounts" :key="account.id">
@@ -191,6 +192,12 @@ onMounted(load);
       </router-link>
 
       <MerchantIntegrationCard v-if="isMerchant" :wallet="wallet" />
+
+      <MerchantSettlementCard
+        v-if="isMerchant && wallet.walletType.supportsAutoWithdraw && !wallet.closedAt"
+        :wallet="wallet"
+        @updated="wallet = $event"
+      />
 
       <div v-if="isMerchant && wallet.walletType.allowWidget" class="widget-section">
         <h3>{{ t('walletDetail.widget.heading') }}</h3>
