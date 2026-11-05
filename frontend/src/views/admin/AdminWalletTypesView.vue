@@ -274,7 +274,9 @@ function draftFromType(type: WalletType): Draft {
 function toPayload(d: Draft, currency: CurrencyInfo | null, isCreate: boolean) {
   const credit = d.enableCreditLine;
   const num = (v: string) => (credit && v !== '' ? Number(v) : undefined);
-  const id = (v: string) => (credit && v ? v : undefined);
+  // On edit, an emptied picker sends '' so the server clears it back to the
+  // main repository; on create, empty is simply omitted.
+  const id = (v: string) => (credit && (v || !isCreate) ? v : undefined);
   const filledTimes = d.autoWithdrawTimes.filter(Boolean);
   const body: Record<string, unknown> = {
     name: d.name,
@@ -945,18 +947,40 @@ loadTypes();
                     <details class="routing" :open="!!(draft.feeRepositoryWalletId || draft.penaltyRepositoryWalletId || draft.unblockFeeRepositoryWalletId)">
                       <summary>{{ t('admin.walletTypes.routingGroup') }}</summary>
                       <p class="field-hint">{{ t('admin.walletTypes.routingHint') }}</p>
+                      <p v-if="!feeRepositoryOptions.length" class="field-hint">{{ t('admin.walletTypes.methodNoRepositories') }}</p>
                       <div class="routing-fields">
                         <label class="field">
                           {{ t('admin.walletTypes.feeRepoShort') }}
-                          <input v-model="draft.feeRepositoryWalletId" type="text" class="admin-input mono" :placeholder="t('admin.walletTypes.repositoryWalletIdPlaceholder')" />
+                          <select v-model="draft.feeRepositoryWalletId" class="admin-input">
+                            <option value="">{{ t('admin.walletTypes.routingMainRepository') }}</option>
+                            <option v-for="w in feeRepositoryOptions" :key="w.id" :value="w.id" :title="w.id">{{ repositoryLabel(w) }}</option>
+                            <option
+                              v-if="draft.feeRepositoryWalletId && !feeRepositoryOptions.some((w) => w.id === draft.feeRepositoryWalletId)"
+                              :value="draft.feeRepositoryWalletId"
+                            >{{ draft.feeRepositoryWalletId }}</option>
+                          </select>
                         </label>
                         <label class="field">
                           {{ t('admin.walletTypes.penaltyRepoShort') }}
-                          <input v-model="draft.penaltyRepositoryWalletId" type="text" class="admin-input mono" :placeholder="t('admin.walletTypes.repositoryWalletIdPlaceholder')" />
+                          <select v-model="draft.penaltyRepositoryWalletId" class="admin-input">
+                            <option value="">{{ t('admin.walletTypes.routingMainRepository') }}</option>
+                            <option v-for="w in feeRepositoryOptions" :key="w.id" :value="w.id" :title="w.id">{{ repositoryLabel(w) }}</option>
+                            <option
+                              v-if="draft.penaltyRepositoryWalletId && !feeRepositoryOptions.some((w) => w.id === draft.penaltyRepositoryWalletId)"
+                              :value="draft.penaltyRepositoryWalletId"
+                            >{{ draft.penaltyRepositoryWalletId }}</option>
+                          </select>
                         </label>
                         <label class="field">
                           {{ t('admin.walletTypes.unblockRepoShort') }}
-                          <input v-model="draft.unblockFeeRepositoryWalletId" type="text" class="admin-input mono" :placeholder="t('admin.walletTypes.repositoryWalletIdPlaceholder')" />
+                          <select v-model="draft.unblockFeeRepositoryWalletId" class="admin-input">
+                            <option value="">{{ t('admin.walletTypes.routingMainRepository') }}</option>
+                            <option v-for="w in feeRepositoryOptions" :key="w.id" :value="w.id" :title="w.id">{{ repositoryLabel(w) }}</option>
+                            <option
+                              v-if="draft.unblockFeeRepositoryWalletId && !feeRepositoryOptions.some((w) => w.id === draft.unblockFeeRepositoryWalletId)"
+                              :value="draft.unblockFeeRepositoryWalletId"
+                            >{{ draft.unblockFeeRepositoryWalletId }}</option>
+                          </select>
                         </label>
                       </div>
                     </details>

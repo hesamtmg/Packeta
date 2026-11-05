@@ -966,6 +966,7 @@ export default {
       chargesGroup: 'کارمزد و جریمه',
       routingGroup: 'هدایت کارمزدها به مخزن‌های جداگانه',
       routingHint: 'اختیاری. هر کدام باید کیف پول مخزن تجاری با همین ارز باشد؛ در صورت خالی بودن، مبلغ به مخزن اصلی می‌رود.',
+      routingMainRepository: '— مخزن اصلی —',
       chipWithdrawalMethods: '{count} روش برداشت',
       withdrawalMethodsTitle: 'مدیریت روش‌های برداشت',
       withdrawalMethodsHint: 'مشخص کنید پذیرندگان این نوع کیف پول از کدام روش‌های تسویه استفاده کنند و کارمزد هر روش چقدر باشد. خاموش = همه روش‌ها بدون کارمزد.',

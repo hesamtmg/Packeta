@@ -151,15 +151,21 @@ export class UpdateWalletTypeDto {
   // routed instead of the credit wallet's own backing repository — each
   // must be an existing MERCHANT_REPOSITORY-type wallet in this type's
   // currency (see WalletTypesService.validateSubRepository).
+  // An empty string clears it back to the main repository.
   @IsOptional()
+  @ValidateIf((o) => !!o.feeRepositoryWalletId)
   @IsUUID()
   feeRepositoryWalletId?: string;
 
+  // An empty string clears it back to the main repository.
   @IsOptional()
+  @ValidateIf((o) => !!o.penaltyRepositoryWalletId)
   @IsUUID()
   penaltyRepositoryWalletId?: string;
 
+  // An empty string clears it back to the main repository.
   @IsOptional()
+  @ValidateIf((o) => !!o.unblockFeeRepositoryWalletId)
   @IsUUID()
   unblockFeeRepositoryWalletId?: string;
 

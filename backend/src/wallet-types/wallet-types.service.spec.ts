@@ -624,3 +624,26 @@ describe('WalletTypesService — merchant withdrawal methods', () => {
     expect(updated.withdrawalMethods).toBeNull();
   });
 });
+
+describe('WalletTypesService.update — clearing credit fee repositories', () => {
+  it('clears a fee/penalty/unblock repository back to null when given an empty string', async () => {
+    const { service } = buildServiceForAutoWithdraw({
+      id: 'type-1',
+      code: 'CREDIT',
+      currencyId: 'currency-1',
+      allowNegativeBalance: false,
+      supportsAutoWithdraw: false,
+      feeRepositoryWalletId: 'repo-1',
+      penaltyRepositoryWalletId: 'repo-2',
+      unblockFeeRepositoryWalletId: 'repo-3',
+    });
+    const updated = await service.update('type-1', {
+      feeRepositoryWalletId: '',
+      penaltyRepositoryWalletId: '',
+      unblockFeeRepositoryWalletId: '',
+    } as any);
+    expect(updated.feeRepositoryWalletId).toBeNull();
+    expect(updated.penaltyRepositoryWalletId).toBeNull();
+    expect(updated.unblockFeeRepositoryWalletId).toBeNull();
+  });
+});

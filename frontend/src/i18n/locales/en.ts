@@ -966,6 +966,7 @@ export default {
       chargesGroup: 'Fees & penalties',
       routingGroup: 'Route fees to separate repositories',
       routingHint: 'Optional. Each must be a Merchant Repository wallet in this currency; left empty, the amount goes to the main repository.',
+      routingMainRepository: '— Main repository —',
       chipWithdrawalMethods: '{count} withdrawal methods',
       withdrawalMethodsTitle: 'Manage withdrawal methods',
       withdrawalMethodsHint: 'Choose which payout methods merchants of this type can use, and the fee each one charges. Off = every method, no fee.',
