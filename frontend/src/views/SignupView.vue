@@ -1,181 +1,69 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useRouter } from 'vue-router';
-import { useAuthStore } from '../stores/auth';
-import { apiRequest, ApiError } from '../api/client';
-import LanguageSwitcher from '../components/LanguageSwitcher.vue';
+import { useRoute, useRouter } from 'vue-router';
+import AuthShell from '../components/AuthShell.vue';
+import AuthMethodTabs, { type AuthMethod } from '../components/AuthMethodTabs.vue';
 import PhoneAuthForm from '../components/PhoneAuthForm.vue';
-import '../styles/admin-theme.css';
-import '../styles/customer-theme.css';
+import PasswordAuthForm from '../components/PasswordAuthForm.vue';
+import { useCompleteAuth } from '../composables/useCompleteAuth';
 
-const email = ref('');
-const password = ref('');
-const error = ref('');
-const loading = ref(false);
-const method = ref<'email' | 'phone'>('phone');
-
-const auth = useAuthStore();
-const router = useRouter();
 const { t } = useI18n();
+const route = useRoute();
+const router = useRouter();
+const completeAuth = useCompleteAuth();
 
-async function completeAuth(accessToken: string) {
-  auth.setToken(accessToken);
-  const me = await apiRequest<{
-    role: string;
-    email: string;
-    avatarUrl: string | null;
-    panelRole: { permissions: string[] } | null;
-  }>('/users/me');
-  auth.setRole(me.role);
-  auth.setEmail(me.email);
-  auth.setPermissions(me.panelRole?.permissions ?? null);
-  auth.setAvatarUrl(me.avatarUrl ?? null);
-  router.push({ name: 'dashboard' });
-}
+const method = ref<AuthMethod>(route.query.method === 'email' ? 'email' : 'phone');
+watch(method, (m) => {
+  router.replace({ query: { ...route.query, method: m === 'email' ? 'email' : undefined } });
+});
 
-async function onSubmit() {
-  error.value = '';
-  loading.value = true;
-  try {
-    const { accessToken } = await apiRequest<{ accessToken: string }>(
-      '/auth/signup',
-      { method: 'POST', body: { email: email.value, password: password.value } },
-    );
-    await completeAuth(accessToken);
-  } catch (err) {
-    error.value = err instanceof ApiError ? err.message : t('auth.signup.error');
-  } finally {
-    loading.value = false;
-  }
-}
+const loginLink = computed(() => ({ name: 'login', query: route.query }));
 </script>
 
 <template>
-  <div class="customer-theme auth-theme">
-    <LanguageSwitcher class="lang-corner" />
-    <div class="auth-page">
-      <div class="auth-form admin-card">
-        <div class="auth-logo">P</div>
-        <h1>{{ t('auth.signup.title') }}</h1>
-        <p class="auth-sub">{{ t('auth.signup.subtitle') }}</p>
+  <AuthShell :title="t('auth.signup.title')" :subtitle="t('auth.signup.subtitle')">
+    <AuthMethodTabs v-model="method" />
+    <PhoneAuthForm v-if="method === 'phone'" mode="signup" @success="completeAuth" />
+    <PasswordAuthForm v-else mode="signup" @success="completeAuth" />
 
-        <template v-if="method === 'phone'">
-          <PhoneAuthForm :eyebrow="t('auth.signup.phoneEyebrow')" @success="completeAuth" />
-          <button type="button" class="method-link" @click="method = 'email'">
-            {{ t('auth.useEmailInstead') }}
-          </button>
-        </template>
-        <template v-else>
-          <form @submit.prevent="onSubmit">
-            <label>
-              {{ t('auth.signup.email') }}
-              <input v-model="email" type="text" autocomplete="username" class="admin-input" required />
-            </label>
-            <label>
-              {{ t('auth.signup.password') }}
-              <input v-model="password" type="password" class="admin-input" minlength="8" required />
-            </label>
-            <p v-if="error" class="admin-error">{{ error }}</p>
-            <button type="submit" class="admin-btn admin-btn-primary" :disabled="loading">{{ t('auth.signup.submit') }}</button>
-          </form>
-          <button type="button" class="method-link" @click="method = 'phone'">
-            {{ t('auth.usePhoneInstead') }}
-          </button>
-        </template>
+    <p class="signup-perk">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M5 12l5 5 9-10" />
+      </svg>
+      {{ t('auth.signup.perk') }}
+    </p>
 
-        <router-link :to="{ name: 'login' }" class="auth-link">{{ t('auth.signup.haveAccount') }}</router-link>
-      </div>
-    </div>
-  </div>
+    <template #footer>
+      {{ t('auth.signup.haveAccount') }}
+      <router-link :to="loginLink" class="auth-switch">{{ t('auth.signup.loginLink') }}</router-link>
+    </template>
+  </AuthShell>
 </template>
 
 <style scoped>
-.auth-theme {
-  padding: 0;
-  position: relative;
-}
-.lang-corner {
-  position: absolute;
-  top: 16px;
-  inset-inline-end: 16px;
-  z-index: 1;
-}
-.auth-page {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 100vh;
-}
-.auth-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  width: 340px;
-  padding: 32px 28px;
-}
-.auth-form form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.auth-form .method-link {
-  width: auto;
-  align-self: center;
-  margin-top: 0;
-  border: none;
-  background: transparent;
-  color: var(--text-dim);
-  font-size: 0.8rem;
-  text-decoration: underline;
-  cursor: pointer;
-}
-.auth-form .method-link:hover {
-  color: var(--text);
-}
-.auth-logo {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: var(--brand-gradient, var(--text));
-  color: #fff;
+.signup-perk {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 700;
-  margin-bottom: 4px;
-  box-shadow: var(--shadow-btn, none);
-}
-.auth-form h1 {
-  margin: 0;
-  font-size: 1.5rem;
-}
-.auth-sub {
-  margin: -6px 0 6px;
-  color: var(--text-dim);
-  font-size: 0.88rem;
-}
-label {
-  display: flex;
-  flex-direction: column;
   gap: 6px;
-  font-size: 0.85rem;
+  margin: -4px 0 0;
+  font-size: 0.8rem;
   color: var(--text-dim);
-}
-.admin-input {
-  width: 100%;
-}
-.auth-form button {
-  margin-top: 6px;
-  width: 100%;
-}
-.auth-link {
   text-align: center;
-  color: var(--text-dim);
-  font-size: 0.85rem;
+}
+.signup-perk svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--accent-lime);
+}
+.auth-switch {
+  color: var(--accent-blue);
+  font-weight: 600;
   text-decoration: none;
 }
-.auth-link:hover {
-  color: var(--text);
+.auth-switch:hover {
+  text-decoration: underline;
 }
 </style>

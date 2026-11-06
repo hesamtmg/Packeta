@@ -11,6 +11,14 @@ export class ApiError extends Error {
   }
 }
 
+// NestJS validation errors arrive as `message: string[]` (one entry per
+// failed constraint) — join them instead of letting Error() comma-join them.
+function errorMessage(data: { message?: unknown } | null): string {
+  const message = data?.message;
+  if (Array.isArray(message)) return message.join('\n');
+  return typeof message === 'string' && message ? message : 'Request failed';
+}
+
 interface RequestOptions {
   method?: string;
   body?: unknown;
@@ -41,7 +49,7 @@ export async function apiRequest<T>(
   const data = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new ApiError(response.status, data?.message ?? 'Request failed');
+    throw new ApiError(response.status, errorMessage(data));
   }
 
   return data as T;
@@ -92,7 +100,7 @@ export async function postMultipart<T>(
   const data = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new ApiError(response.status, data?.message ?? 'Request failed');
+    throw new ApiError(response.status, errorMessage(data));
   }
 
   return data as T;
