@@ -15,6 +15,7 @@ import { groupTransactionClusters } from '../utils/txCluster';
 import AppLayout from '../components/AppLayout.vue';
 import CreditInstallmentsCard from '../components/CreditInstallmentsCard.vue';
 import ActivityChart from '../components/ActivityChart.vue';
+import AmountInput from '../components/AmountInput.vue';
 
 const wallet = useWalletStore();
 const auth = useAuthStore();
@@ -968,11 +969,11 @@ async function onGrantCredit() {
             </div>
 
             <form v-if="isWalletActionOpen(sw, 'deposit')" class="wallet-inline-form" @submit.prevent="onDeposit">
-                <input v-model="depositAmount" type="number" :placeholder="t('dashboard.actions.amountPlaceholder')" min="0" :step="depositStep" class="admin-input" required />
+                <AmountInput v-model="depositAmount" :currency="findWallet(depositWalletId)?.walletType.currency" :placeholder="t('dashboard.actions.amountPlaceholder')" min="0" :step="depositStep" class="admin-input" required />
                 <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.actions.deposit.submit') }}</button>
               </form>
 <form v-if="isWalletActionOpen(sw, 'withdraw')" class="wallet-inline-form" @submit.prevent="onWithdraw">
-                <input v-model="withdrawAmount" type="number" :placeholder="t('dashboard.actions.amountPlaceholder')" min="0" :step="withdrawStep" class="admin-input" required />
+                <AmountInput v-model="withdrawAmount" :currency="findWallet(withdrawWalletId)?.walletType.currency" :placeholder="t('dashboard.actions.amountPlaceholder')" min="0" :step="withdrawStep" class="admin-input" required />
                 <select v-model="withdrawRailType" class="admin-input" required>
                   <option value="" disabled>{{ t('dashboard.actions.withdraw.chooseRail') }}</option>
                   <option value="POL_PAY">{{ t('dashboard.settlement.rail.POL_PAY') }}</option>
@@ -991,12 +992,12 @@ async function onGrantCredit() {
               </form>
 <form v-if="isWalletActionOpen(sw, 'transfer')" class="wallet-inline-form" @submit.prevent="onTransfer">
                 <input v-model="transferEmail" type="email" :placeholder="t('dashboard.actions.transfer.recipientPlaceholder')" class="admin-input" required />
-                <input v-model="transferAmount" type="number" :placeholder="t('dashboard.actions.amountPlaceholder')" min="0" :step="transferStep" class="admin-input" required />
+                <AmountInput v-model="transferAmount" :currency="findWallet(transferFromWalletId)?.walletType.currency" :placeholder="t('dashboard.actions.amountPlaceholder')" min="0" :step="transferStep" class="admin-input" required />
                 <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.actions.transfer.submit') }}</button>
               </form>
 <form v-if="isWalletActionOpen(sw, 'purchase')" class="wallet-inline-form" @submit.prevent="onPurchase">
                 <input v-model="purchaseEmail" type="email" :placeholder="t('dashboard.actions.purchase.merchantPlaceholder')" class="admin-input" required />
-                <input v-model="purchaseAmount" type="number" :placeholder="t('dashboard.actions.amountPlaceholder')" min="0" :step="purchaseStep" class="admin-input" required />
+                <AmountInput v-model="purchaseAmount" :currency="findWallet(purchaseFromWalletId)?.walletType.currency" :placeholder="t('dashboard.actions.amountPlaceholder')" min="0" :step="purchaseStep" class="admin-input" required />
                 <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.actions.purchase.submit') }}</button>
               </form>
 
@@ -1056,11 +1057,11 @@ async function onGrantCredit() {
 
                 <label class="field">
                   {{ t('dashboard.wallets.minAmountLabel') }}
-                  <input v-model="editMinAmount" type="number" min="0" :step="amountStep(sw.walletType.currency)" class="admin-input" />
+                  <AmountInput v-model="editMinAmount" :currency="sw.walletType.currency" min="0" :step="amountStep(sw.walletType.currency)" class="admin-input" />
                 </label>
                 <label class="field">
                   {{ t('dashboard.wallets.maxAmountLabel') }}
-                  <input v-model="editMaxAmount" type="number" min="0" :step="amountStep(sw.walletType.currency)" class="admin-input" />
+                  <AmountInput v-model="editMaxAmount" :currency="sw.walletType.currency" min="0" :step="amountStep(sw.walletType.currency)" class="admin-input" />
                 </label>
 
                 <template v-if="sw.walletType.supportsAutoWithdraw">
@@ -1225,9 +1226,9 @@ async function onGrantCredit() {
             <option value="" disabled>{{ t('dashboard.charge.currencyPlaceholder') }}</option>
             <option v-for="c in purchaseInCurrencies" :key="c.code" :value="c.code">{{ c.code }}</option>
           </select>
-          <input
+          <AmountInput
             v-model="chargeAmount"
-            type="number"
+            :currency="chargeCurrency"
             min="0"
             :step="chargeStep"
             :placeholder="t('dashboard.charge.amountPlaceholder')"
@@ -1248,9 +1249,9 @@ async function onGrantCredit() {
                 <option value="PERCENT">{{ t('dashboard.settlement.percent') }}</option>
                 <option value="FIXED">{{ t('dashboard.settlement.fixed') }}</option>
               </select>
-              <input
+              <AmountInput
                 v-model="row.value"
-                type="number"
+                :currency="row.type === 'FIXED' ? chargeCurrency : null"
                 min="0"
                 :placeholder="row.type === 'PERCENT' ? t('dashboard.settlement.percentPlaceholder') : t('dashboard.settlement.amountPlaceholder')"
                 class="admin-input"
@@ -1294,9 +1295,9 @@ async function onGrantCredit() {
             <option value="" disabled>{{ t('dashboard.grantCredit.walletTypePlaceholder') }}</option>
             <option v-for="wt in creditWalletTypes" :key="wt.id" :value="wt.id">{{ wt.name }} ({{ wt.currency.code }})</option>
           </select>
-          <input
+          <AmountInput
             v-model="grantVirtualAmount"
-            type="number"
+            :currency="grantRepositoryWallet?.walletType.currency"
             min="0"
             :step="grantAmountStep"
             :placeholder="t('dashboard.grantCredit.amountPlaceholder')"
@@ -1463,9 +1464,9 @@ async function onGrantCredit() {
 
                 <label class="field">
                   {{ t('dashboard.wallets.minAmountLabel') }}
-                  <input
+                  <AmountInput
                     v-model="newWalletMinAmount"
-                    type="number"
+                    :currency="selectedNewWalletType?.currency"
                     min="0"
                     :step="selectedNewWalletType ? amountStep(selectedNewWalletType.currency) : '0.01'"
                     class="admin-input"
@@ -1473,9 +1474,9 @@ async function onGrantCredit() {
                 </label>
                 <label class="field">
                   {{ t('dashboard.wallets.maxAmountLabel') }}
-                  <input
+                  <AmountInput
                     v-model="newWalletMaxAmount"
-                    type="number"
+                    :currency="selectedNewWalletType?.currency"
                     min="0"
                     :step="selectedNewWalletType ? amountStep(selectedNewWalletType.currency) : '0.01'"
                     class="admin-input"
@@ -1484,9 +1485,9 @@ async function onGrantCredit() {
 
                 <label v-if="showVirtualAmountField" class="field">
                   {{ t('dashboard.wallets.virtualAmountLabel') }}
-                  <input
+                  <AmountInput
                     v-model="newWalletVirtualAmount"
-                    type="number"
+                    :currency="selectedNewWalletType?.currency"
                     min="0"
                     :step="selectedNewWalletType ? amountStep(selectedNewWalletType.currency) : '0.01'"
                     :placeholder="t('dashboard.wallets.virtualAmountPlaceholder')"

@@ -7,6 +7,7 @@ import type { SettlementRailType } from '../../stores/wallet';
 import { CARD_THEME_OPTIONS, cardGradient } from '../../utils/cardTheme';
 import { useAuthStore } from '../../stores/auth';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
+import AmountInput from '../../components/AmountInput.vue';
 
 const { t } = useI18n();
 const auth = useAuthStore();
@@ -818,7 +819,7 @@ loadTypes();
                             <label class="field">
                               {{ t('admin.walletTypes.methodFixedFee') }}
                               <span class="affix">
-                                <input v-model="m.fixedFee" type="number" min="0" :step="moneyStep" class="admin-input" placeholder="0" />
+                                <AmountInput v-model="m.fixedFee" :currency="draftCurrency" min="0" :step="moneyStep" class="admin-input" placeholder="0" />
                                 <span class="suffix">{{ currencyCodeLabel }}</span>
                               </span>
                             </label>
@@ -881,7 +882,7 @@ loadTypes();
                     <label class="field">
                       {{ t('admin.walletTypes.creditLimitShort') }}
                       <span class="affix">
-                        <input v-model="draft.creditLimit" type="number" min="0" :step="moneyStep" class="admin-input" required />
+                        <AmountInput v-model="draft.creditLimit" :currency="draftCurrency" min="0" :step="moneyStep" class="admin-input" required />
                         <span class="suffix">{{ currencyCodeLabel }}</span>
                       </span>
                     </label>
@@ -931,7 +932,7 @@ loadTypes();
                       <label class="field">
                         {{ t('admin.walletTypes.unblockShort') }}
                         <span class="affix">
-                          <input v-model="draft.unblockFee" type="number" min="0" :step="moneyStep" class="admin-input" />
+                          <AmountInput v-model="draft.unblockFee" :currency="draftCurrency" min="0" :step="moneyStep" class="admin-input" />
                           <span class="suffix">{{ currencyCodeLabel }}</span>
                         </span>
                       </label>

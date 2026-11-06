@@ -7,6 +7,7 @@ import AdminLayout from '../../components/admin/AdminLayout.vue';
 import { formatDateTime } from '../../utils/date';
 import { displayIdentity } from '../../utils/identity';
 import { initials } from '../../utils/adminFormat';
+import AmountInput from '../../components/AmountInput.vue';
 
 const { t } = useI18n();
 
@@ -184,7 +185,7 @@ async function onCopyLink() {
               <label class="field">
                 {{ t('admin.purchase.amountLabel') }}
                 <span class="amount-wrap">
-                  <input v-model="amount" type="number" min="0" :step="amountStepValue" class="admin-input amount-input" :placeholder="t('admin.purchase.amountPlaceholder')" required />
+                  <AmountInput v-model="amount" :currency="selectedWallet.walletType.currency" min="0" :step="amountStepValue" class="admin-input amount-input" :placeholder="t('admin.purchase.amountPlaceholder')" required />
                   <span class="amount-cur">{{ selectedWallet.walletType.currency.code }}</span>
                 </span>
               </label>

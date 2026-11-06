@@ -12,6 +12,7 @@ import {
 } from '../utils/currency';
 import { formatCalendarDate, formatDateTime } from '../utils/date';
 import { cardGradient } from '../utils/cardTheme';
+import AmountInput from './AmountInput.vue';
 
 interface WidgetStatus {
   merchantName: string;
@@ -535,9 +536,9 @@ onMounted(async () => {
                 @submit.prevent="onDeposit(w)"
               >
                 <label class="icon-field">
-                  <input
+                  <AmountInput
                     v-model="depositAmount"
-                    type="number"
+                    :currency="w.walletType.currency"
                     min="0"
                     :step="amountStep(w.walletType.currency)"
                     :placeholder="t('widget.deposit.amountPlaceholder', { code: w.walletType.currency.code })"
