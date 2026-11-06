@@ -20,11 +20,18 @@ watch(method, (m) => {
   router.replace({ query: { ...route.query, method: m === 'email' ? 'email' : undefined } });
 });
 
-const signupLink = computed(() => ({ name: 'signup', query: route.query }));
+// Set by the router when a stored session lapsed (see handleSessionExpired).
+const sessionExpired = computed(() => route.query.expired === '1');
+
+const signupLink = computed(() => {
+  const { expired: _expired, ...query } = route.query;
+  return { name: 'signup', query };
+});
 </script>
 
 <template>
   <AuthShell :title="t('auth.login.title')" :subtitle="t('auth.login.subtitle')">
+    <p v-if="sessionExpired" class="session-expired" role="status">{{ t('auth.login.sessionExpired') }}</p>
     <AuthMethodTabs v-model="method" />
     <PhoneAuthForm v-if="method === 'phone'" mode="login" @success="completeAuth" />
     <PasswordAuthForm v-else mode="login" @success="completeAuth" />
@@ -37,6 +44,14 @@ const signupLink = computed(() => ({ name: 'signup', query: route.query }));
 </template>
 
 <style scoped>
+.session-expired {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+  color: var(--text);
+  font-size: 0.9rem;
+}
 .auth-switch {
   color: var(--accent-blue);
   font-weight: 600;
