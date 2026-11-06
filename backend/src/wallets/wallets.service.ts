@@ -38,6 +38,13 @@ const WALLET_NONZERO_BALANCE_SQL = `EXISTS (
 )`;
 
 const WALLET_RELATIONS = { walletType: { currency: true } } as const;
+
+// A user's own wallets in the order they arranged them (see
+// reorderForUser); wallets never placed yet sort after, oldest first.
+const USER_WALLET_ORDER = {
+  sortOrder: { direction: 'ASC', nulls: 'LAST' },
+  createdAt: 'ASC',
+} as const;
 const WALLET_RELATIONS_WITH_OWNER = {
   walletType: { currency: true },
   user: true,
@@ -480,7 +487,11 @@ export class WalletsService {
         'Withdraw or transfer out the remaining balance before closing this wallet',
       );
     }
-    await this.walletsRepository.update(walletId, { closedAt: new Date() });
+    // A closed wallet can't receive anything, so it can't stay the default.
+    await this.walletsRepository.update(walletId, {
+      closedAt: new Date(),
+      isDefault: false,
+    });
     return this.getById(userId, walletId);
   }
 
@@ -514,7 +525,11 @@ export class WalletsService {
         'Withdraw or transfer out the remaining balance before closing this wallet',
       );
     }
-    await this.walletsRepository.update(walletId, { closedAt: new Date() });
+    // A closed wallet can't receive anything, so it can't stay the default.
+    await this.walletsRepository.update(walletId, {
+      closedAt: new Date(),
+      isDefault: false,
+    });
     return this.getByIdUnscoped(walletId);
   }
 
@@ -631,8 +646,57 @@ export class WalletsService {
     return this.walletsRepository.find({
       where: { userId },
       relations: WALLET_RELATIONS,
-      order: { createdAt: 'ASC' },
+      order: USER_WALLET_ORDER,
     });
+  }
+
+  // Saves the owner's own arrangement of their wallets. walletIds lists the
+  // wallets in their new order; it must only name this user's wallets, each
+  // once. Any of the user's wallets it leaves out (e.g. ones hidden from the
+  // customer) keep their current relative order, after the listed ones.
+  async reorderForUser(userId: string, walletIds: string[]): Promise<void> {
+    if (new Set(walletIds).size !== walletIds.length) {
+      throw new BadRequestException('Each wallet may only appear once');
+    }
+    await this.walletsRepository.manager.transaction(async (manager) => {
+      const wallets = await manager.find(Wallet, {
+        where: { userId },
+        order: USER_WALLET_ORDER,
+      });
+      const owned = new Set(wallets.map((wallet) => wallet.id));
+      if (walletIds.some((id) => !owned.has(id))) {
+        throw new ForbiddenException('This wallet does not belong to you');
+      }
+      const listed = new Set(walletIds);
+      const ordered = [
+        ...walletIds,
+        ...wallets.map((wallet) => wallet.id).filter((id) => !listed.has(id)),
+      ];
+      for (const [index, id] of ordered.entries()) {
+        await manager.update(Wallet, { id }, { sortOrder: index });
+      }
+    });
+  }
+
+  // Makes one of the owner's open wallets their default, clearing the flag
+  // from whichever wallet held it before (at most one per user, enforced by
+  // a partial unique index — the clear has to run first).
+  async setDefaultForUser(userId: string, walletId: string): Promise<Wallet> {
+    const wallet = await this.getById(userId, walletId);
+    if (wallet.closedAt) {
+      throw new BadRequestException('A closed wallet cannot be the default');
+    }
+    if (!wallet.isDefault) {
+      await this.walletsRepository.manager.transaction(async (manager) => {
+        await manager.update(
+          Wallet,
+          { userId, isDefault: true },
+          { isDefault: false },
+        );
+        await manager.update(Wallet, { id: walletId }, { isDefault: true });
+      });
+    }
+    return this.getById(userId, walletId);
   }
 
   async getById(userId: string, walletId: string): Promise<Wallet> {
@@ -745,7 +809,9 @@ export class WalletsService {
   }
 
   // Any wallet of the given currency that is eligible to receive a
-  // peer-to-peer transfer, oldest first — the recipient's own choice of
+  // peer-to-peer transfer — the recipient's default wallet if it qualifies,
+  // otherwise the first in the recipient's own wallet order (oldest first
+  // for wallets they never arranged). The recipient's own choice of
   // which specific wallet to expose is not something the sender gets to
   // pick. Scoping to the sender's currency keeps transfers same-currency
   // only, since there's no exchange-rate conversion.
@@ -761,12 +827,15 @@ export class WalletsService {
       .andWhere('walletType.allowP2pIn = true')
       .andWhere('walletType.currencyId = :currencyId', { currencyId })
       .andWhere('wallet.closedAt IS NULL')
-      .orderBy('wallet.createdAt', 'ASC')
+      .orderBy('wallet.isDefault', 'DESC')
+      .addOrderBy('wallet.sortOrder', 'ASC', 'NULLS LAST')
+      .addOrderBy('wallet.createdAt', 'ASC')
       .getOne();
   }
 
   // Same idea as findEligibleP2pInWallet, but for PURCHASE: resolves the
-  // merchant's oldest wallet whose type accepts purchases, in the payer's
+  // merchant's default wallet, else the first in their own order, whose type
+  // accepts purchases, in the payer's
   // currency. The customer never sees or picks a merchant's specific wallet
   // id directly.
   async findEligiblePurchaseInWallet(
@@ -781,7 +850,9 @@ export class WalletsService {
       .andWhere('walletType.allowPurchaseIn = true')
       .andWhere('walletType.currencyId = :currencyId', { currencyId })
       .andWhere('wallet.closedAt IS NULL')
-      .orderBy('wallet.createdAt', 'ASC')
+      .orderBy('wallet.isDefault', 'DESC')
+      .addOrderBy('wallet.sortOrder', 'ASC', 'NULLS LAST')
+      .addOrderBy('wallet.createdAt', 'ASC')
       .getOne();
   }
 
@@ -802,7 +873,9 @@ export class WalletsService {
       .andWhere('walletType.currencyId = :currencyId', { currencyId })
       .andWhere('wallet.closedAt IS NULL')
       .andWhere('walletType.code != :code', { code: 'SUPPORT' })
-      .orderBy('wallet.createdAt', 'ASC')
+      .orderBy('wallet.isDefault', 'DESC')
+      .addOrderBy('wallet.sortOrder', 'ASC', 'NULLS LAST')
+      .addOrderBy('wallet.createdAt', 'ASC')
       .getMany();
   }
 

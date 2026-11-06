@@ -354,6 +354,11 @@ const walletSearch = ref('');
 const walletListShowClosed = ref(false);
 const closedWalletCount = computed(() => wallet.wallets.filter((w) => w.closedAt).length);
 const walletList = computed(() => {
+  if (arrangeOrder.value) {
+    return arrangeOrder.value
+      .map((id) => findWallet(id))
+      .filter((w): w is Wallet => !!w);
+  }
   const term = walletSearch.value.trim().toLowerCase();
   return wallet.wallets
     .filter((w) => walletListShowClosed.value || !w.closedAt)
@@ -365,9 +370,81 @@ const walletList = computed(() => {
     .sort((a, b) => Number(!!a.closedAt) - Number(!!b.closedAt));
 });
 
+// Arranging the wallet list: while non-null this holds the draft order
+// (ids of the wallets shown — open ones, plus closed ones when they're
+// visible), edited by drag-and-drop or the move buttons and only sent to the
+// server on Save. The list (wallet.wallets) already comes back from the API
+// in the saved order.
+const arrangeOrder = ref<string[] | null>(null);
+const draggingWalletId = ref<string | null>(null);
+
+function startArranging() {
+  walletSearch.value = '';
+  arrangeOrder.value = wallet.wallets
+    .filter((w) => walletListShowClosed.value || !w.closedAt)
+    .sort((a, b) => Number(!!a.closedAt) - Number(!!b.closedAt))
+    .map((w) => w.id);
+}
+
+function cancelArranging() {
+  arrangeOrder.value = null;
+  draggingWalletId.value = null;
+}
+
+function moveWallet(id: string, offset: number) {
+  const order = arrangeOrder.value;
+  if (!order) return;
+  const from = order.indexOf(id);
+  const to = from + offset;
+  if (from < 0 || to < 0 || to >= order.length) return;
+  const next = [...order];
+  next.splice(from, 1);
+  next.splice(to, 0, id);
+  arrangeOrder.value = next;
+}
+
+function onWalletDragStart(event: DragEvent, id: string) {
+  draggingWalletId.value = id;
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', id);
+  }
+}
+
+// Live reorder as the dragged row passes over another one.
+function onWalletDragOver(id: string) {
+  const order = arrangeOrder.value;
+  const dragging = draggingWalletId.value;
+  if (!order || !dragging || dragging === id) return;
+  moveWallet(dragging, order.indexOf(id) - order.indexOf(dragging));
+}
+
+function onWalletDragEnd() {
+  draggingWalletId.value = null;
+}
+
+function saveArrangement() {
+  const order = arrangeOrder.value;
+  if (!order) return;
+  runAction(async () => {
+    // Wallets not shown while arranging (closed ones, when hidden) keep
+    // their relative order after the arranged ones.
+    const rest = wallet.wallets.map((w) => w.id).filter((id) => !order.includes(id));
+    await wallet.reorderWallets([...order, ...rest]);
+    arrangeOrder.value = null;
+  });
+}
+
+const defaultWallet = computed(() => wallet.wallets.find((w) => w.isDefault && !w.closedAt) ?? null);
+
+function onSetDefaultWallet(w: Wallet) {
+  runAction(() => wallet.setDefaultWallet(w.id));
+}
+
 const selectedWalletId = ref<string | null>(null);
 const selectedWallet = computed<Wallet | null>(() =>
   (selectedWalletId.value && findWallet(selectedWalletId.value)) ||
+  defaultWallet.value ||
   wallet.wallets.find((w) => !w.closedAt) ||
   wallet.wallets[0] ||
   null,
@@ -853,7 +930,16 @@ async function onGrantCredit() {
           <h2>{{ t('dashboard.wallets.title') }}</h2>
           <p class="admin-card-sub">{{ t('dashboard.wallets.subtitle') }}</p>
         </div>
-        <div class="wallets-tools">
+        <div v-if="arrangeOrder" class="wallets-tools">
+          <span class="wallets-arrange-hint">{{ t('dashboard.wallets.arrangeHint') }}</span>
+          <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" :disabled="busy" @click="cancelArranging">
+            {{ t('dashboard.wallets.arrangeCancel') }}
+          </button>
+          <button type="button" class="admin-btn admin-btn-primary admin-btn-sm" :disabled="busy" @click="saveArrangement">
+            {{ t('dashboard.wallets.arrangeSave') }}
+          </button>
+        </div>
+        <div v-else class="wallets-tools">
           <label class="admin-search">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
             <input v-model="walletSearch" class="admin-input" :placeholder="t('dashboard.wallets.searchPlaceholder')" />
@@ -866,6 +952,14 @@ async function onGrantCredit() {
             @click="walletListShowClosed = !walletListShowClosed"
           >
             {{ t('dashboard.wallets.showClosed', { count: closedWalletCount }) }}
+          </button>
+          <button
+            v-if="wallet.wallets.length > 1"
+            type="button"
+            class="admin-btn admin-btn-ghost admin-btn-sm"
+            @click="startArranging"
+          >
+            {{ t('dashboard.wallets.arrange') }}
           </button>
         </div>
       </div>
@@ -880,7 +974,54 @@ async function onGrantCredit() {
       </div>
 
       <div v-else class="wallets-layout">
-        <ul class="wallet-list" role="listbox" :aria-label="t('dashboard.wallets.title')">
+        <ul v-if="arrangeOrder" class="wallet-list arranging" :aria-label="t('dashboard.wallets.arrange')">
+          <li
+            v-for="(w, index) in walletList"
+            :key="w.id"
+            class="wallet-row wallet-row-arrange"
+            :class="{ dragging: draggingWalletId === w.id, closed: !!w.closedAt }"
+            draggable="true"
+            @dragstart="onWalletDragStart($event, w.id)"
+            @dragover.prevent="onWalletDragOver(w.id)"
+            @drop.prevent
+            @dragend="onWalletDragEnd"
+          >
+            <span class="wallet-row-handle" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" /><circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" /><circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" /></svg>
+            </span>
+            <span class="wallet-row-chip" :style="cardFaceStyle(w)">
+              <img v-if="cardImageSrc(w)" :src="cardImageSrc(w)!" alt="" />
+              <template v-else>{{ w.walletType.currency.code.slice(0, 3) }}</template>
+            </span>
+            <span class="wallet-row-main">
+              <span class="wallet-row-name">{{ walletDisplayName(w) }}</span>
+              <span class="wallet-row-meta">{{ w.walletType.name }}</span>
+            </span>
+            <span class="wallet-row-move">
+              <button
+                type="button"
+                class="admin-btn admin-btn-ghost admin-btn-sm"
+                :disabled="index === 0"
+                :aria-label="t('dashboard.wallets.moveUp', { name: walletDisplayName(w) })"
+                :title="t('dashboard.wallets.moveUp', { name: walletDisplayName(w) })"
+                @click="moveWallet(w.id, -1)"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6" /></svg>
+              </button>
+              <button
+                type="button"
+                class="admin-btn admin-btn-ghost admin-btn-sm"
+                :disabled="index === walletList.length - 1"
+                :aria-label="t('dashboard.wallets.moveDown', { name: walletDisplayName(w) })"
+                :title="t('dashboard.wallets.moveDown', { name: walletDisplayName(w) })"
+                @click="moveWallet(w.id, 1)"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6" /></svg>
+              </button>
+            </span>
+          </li>
+        </ul>
+        <ul v-else class="wallet-list" role="listbox" :aria-label="t('dashboard.wallets.title')">
           <li v-for="w in walletList" :key="w.id">
             <button
               type="button"
@@ -895,7 +1036,10 @@ async function onGrantCredit() {
                 <template v-else>{{ w.walletType.currency.code.slice(0, 3) }}</template>
               </span>
               <span class="wallet-row-main">
-                <span class="wallet-row-name">{{ walletDisplayName(w) }}</span>
+                <span class="wallet-row-name">
+                  {{ walletDisplayName(w) }}
+                  <span v-if="w.isDefault && !w.closedAt" class="admin-badge admin-badge-info wallet-default-badge">{{ t('dashboard.wallets.defaultBadge') }}</span>
+                </span>
                 <span class="wallet-row-meta">
                   {{ w.walletType.name }} · <span class="wallet-row-mask">•• {{ w.id.replace(/-/g, '').slice(-4).toUpperCase() }}</span>
                 </span>
@@ -943,7 +1087,8 @@ async function onGrantCredit() {
                 <span class="wallet-panel-label">{{ t('dashboard.wallets.cardBalanceLabel') }}</span>
                 <span class="wallet-panel-balance">{{ formatAmount(sw.balance, sw.walletType.currency) }}</span>
                 <span v-if="sw.balance !== '0'" class="amount-words">{{ formatAmountWords(sw.balance, sw.walletType.currency) }}</span>
-                <div v-if="badges(sw).length" class="badges">
+                <div v-if="badges(sw).length || (sw.isDefault && !sw.closedAt)" class="badges">
+                  <span v-if="sw.isDefault && !sw.closedAt" class="admin-badge admin-badge-info">{{ t('dashboard.wallets.defaultBadge') }}</span>
                   <span v-for="b in badges(sw)" :key="b" class="admin-badge">{{ b }}</span>
                 </div>
                 <span class="mono-id">{{ sw.id }}</span>
@@ -1020,6 +1165,16 @@ async function onGrantCredit() {
                 @click="toggleEditWallet(sw)"
               >
                 {{ t('dashboard.wallets.edit') }}
+              </button>
+              <button
+                v-if="!sw.closedAt && !sw.isDefault"
+                type="button"
+                class="admin-btn admin-btn-ghost admin-btn-sm"
+                :disabled="busy"
+                :title="t('dashboard.wallets.setDefaultHint')"
+                @click="onSetDefaultWallet(sw)"
+              >
+                {{ t('dashboard.wallets.setDefault') }}
               </button>
               <span class="wallet-panel-links-spacer" />
               <button
@@ -1763,6 +1918,48 @@ async function onGrantCredit() {
 }
 .wallet-row.closed {
   opacity: 0.6;
+}
+.wallet-default-badge {
+  margin-inline-start: 6px;
+  vertical-align: middle;
+}
+.wallets-arrange-hint {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+.wallet-list.arranging .wallet-row-arrange {
+  border-color: var(--border);
+  border-style: dashed;
+  cursor: grab;
+  user-select: none;
+}
+.wallet-list.arranging .wallet-row-arrange.dragging {
+  opacity: 0.5;
+  background: var(--active-tint);
+  cursor: grabbing;
+}
+.wallet-row-handle {
+  flex: none;
+  display: flex;
+  width: 18px;
+  height: 18px;
+  opacity: 0.5;
+}
+.wallet-row-handle svg {
+  width: 100%;
+  height: 100%;
+}
+.wallet-row-move {
+  flex: none;
+  display: flex;
+  gap: 4px;
+}
+.wallet-row-move .admin-btn {
+  padding-inline: 6px;
+}
+.wallet-row-move svg {
+  width: 16px;
+  height: 16px;
 }
 .wallet-row-chip {
   flex: none;

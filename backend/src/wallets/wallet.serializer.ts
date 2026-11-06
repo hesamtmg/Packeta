@@ -19,6 +19,8 @@ export function serializeWallet(
     id: wallet.id,
     name: wallet.name,
     balance,
+    isDefault: wallet.isDefault ?? false,
+    sortOrder: wallet.sortOrder ?? null,
     purchaseTimeoutSeconds: wallet.purchaseTimeoutSeconds,
     restrictedCounterparties: wallet.restrictedCounterparties,
     closedAt: wallet.closedAt,

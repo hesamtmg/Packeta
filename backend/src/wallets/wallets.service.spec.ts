@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -348,6 +349,210 @@ describe('WalletsService.closeForUser', () => {
       expect.objectContaining({ closedAt: expect.any(Date) }),
     );
     expect(result.closedAt).toBeInstanceOf(Date);
+  });
+
+  it('clears the default flag from a wallet being closed', async () => {
+    const { service, walletsRepository } = buildService({
+      id: 'wallet-1',
+      userId: 'user-1',
+      balance: '0',
+      closedAt: null,
+    });
+
+    await service.closeForUser('user-1', 'wallet-1');
+
+    expect(walletsRepository.update).toHaveBeenCalledWith(
+      'wallet-1',
+      expect.objectContaining({ isDefault: false }),
+    );
+  });
+});
+
+// An in-memory wallets table for the ordering/default tests: find() honours
+// a userId filter, findOne() an id, and the transaction's manager.update()
+// applies a partial patch to every row matching a flat where-object.
+function buildOrderingService(
+  rows: {
+    id: string;
+    userId: string;
+    sortOrder: number | null;
+    isDefault: boolean;
+    closedAt: Date | null;
+  }[],
+) {
+  const matches = (row: any, where: any) =>
+    Object.entries(where).every(([key, value]) => row[key] === value);
+  const manager = {
+    find: jest.fn(async (_entity: unknown, options: any) =>
+      rows.filter((row) => matches(row, options.where)),
+    ),
+    update: jest.fn(async (_entity: unknown, where: any, patch: any) => {
+      rows
+        .filter((row) => matches(row, where))
+        .forEach((row) => {
+          Object.assign(row, patch);
+        });
+    }),
+  };
+  const walletsRepository = {
+    findOne: jest.fn(async (options: any) => {
+      const row = rows.find((candidate) => candidate.id === options.where.id);
+      return row ? { ...row } : null;
+    }),
+    manager: {
+      transaction: jest.fn(async (work: (m: typeof manager) => unknown) =>
+        work(manager),
+      ),
+    },
+  };
+  const service = new WalletsService(
+    walletsRepository as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+  );
+  return { service, rows, manager };
+}
+
+describe('WalletsService.reorderForUser', () => {
+  const baseRows = () => [
+    {
+      id: 'a',
+      userId: 'user-1',
+      sortOrder: null,
+      isDefault: false,
+      closedAt: null,
+    },
+    {
+      id: 'b',
+      userId: 'user-1',
+      sortOrder: null,
+      isDefault: false,
+      closedAt: null,
+    },
+    {
+      id: 'c',
+      userId: 'user-1',
+      sortOrder: null,
+      isDefault: false,
+      closedAt: null,
+    },
+    {
+      id: 'x',
+      userId: 'user-2',
+      sortOrder: null,
+      isDefault: false,
+      closedAt: null,
+    },
+  ];
+
+  it("stores each wallet's position from the given order", async () => {
+    const { service, rows } = buildOrderingService(baseRows());
+
+    await service.reorderForUser('user-1', ['c', 'a', 'b']);
+
+    const order = Object.fromEntries(
+      rows.map((row) => [row.id, row.sortOrder]),
+    );
+    expect(order).toEqual({ c: 0, a: 1, b: 2, x: null });
+  });
+
+  it('places wallets left out of the list after the listed ones', async () => {
+    const { service, rows } = buildOrderingService(baseRows());
+
+    await service.reorderForUser('user-1', ['b']);
+
+    const order = Object.fromEntries(
+      rows.map((row) => [row.id, row.sortOrder]),
+    );
+    expect(order).toMatchObject({ b: 0, a: 1, c: 2 });
+  });
+
+  it('rejects a wallet that belongs to someone else', async () => {
+    const { service, rows } = buildOrderingService(baseRows());
+
+    await expect(
+      service.reorderForUser('user-1', ['a', 'x']),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(rows.every((row) => row.sortOrder === null)).toBe(true);
+  });
+
+  it('rejects a wallet listed twice', async () => {
+    const { service } = buildOrderingService(baseRows());
+
+    await expect(
+      service.reorderForUser('user-1', ['a', 'a']),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('WalletsService.setDefaultForUser', () => {
+  it('moves the default flag to the chosen wallet', async () => {
+    const { service, rows } = buildOrderingService([
+      {
+        id: 'a',
+        userId: 'user-1',
+        sortOrder: null,
+        isDefault: true,
+        closedAt: null,
+      },
+      {
+        id: 'b',
+        userId: 'user-1',
+        sortOrder: null,
+        isDefault: false,
+        closedAt: null,
+      },
+      {
+        id: 'x',
+        userId: 'user-2',
+        sortOrder: null,
+        isDefault: true,
+        closedAt: null,
+      },
+    ]);
+
+    const result = await service.setDefaultForUser('user-1', 'b');
+
+    expect(result.isDefault).toBe(true);
+    const flags = Object.fromEntries(
+      rows.map((row) => [row.id, row.isDefault]),
+    );
+    expect(flags).toEqual({ a: false, b: true, x: true });
+  });
+
+  it('rejects a closed wallet', async () => {
+    const { service } = buildOrderingService([
+      {
+        id: 'a',
+        userId: 'user-1',
+        sortOrder: null,
+        isDefault: false,
+        closedAt: new Date(),
+      },
+    ]);
+
+    await expect(
+      service.setDefaultForUser('user-1', 'a'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects a wallet that belongs to someone else', async () => {
+    const { service } = buildOrderingService([
+      {
+        id: 'x',
+        userId: 'user-2',
+        sortOrder: null,
+        isDefault: false,
+        closedAt: null,
+      },
+    ]);
+
+    await expect(
+      service.setDefaultForUser('user-1', 'x'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 });
 

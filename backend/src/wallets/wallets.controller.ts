@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   UseGuards,
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
@@ -27,6 +28,7 @@ import { SettlementRailType } from '../rail-settlements/entities/rail-settlement
 import { CreateWalletDto } from './dto/create-wallet.dto';
 import { UpdateWalletDto } from './dto/update-wallet.dto';
 import { GrantCreditDto } from './dto/grant-credit.dto';
+import { ReorderWalletsDto } from './dto/reorder-wallets.dto';
 import { serializeWallet } from './wallet.serializer';
 import { SettlementService } from '../settlement/settlement.service';
 import { CustomerActionGuard } from '../admin/guards/customer-action.guard';
@@ -66,6 +68,30 @@ export class WalletsController {
         );
       }),
     );
+  }
+
+  // Saves the customer's own arrangement of their wallet list.
+  @Put('order')
+  async reorder(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ReorderWalletsDto,
+  ) {
+    await this.walletsService.reorderForUser(user.userId, dto.walletIds);
+    return this.list(user);
+  }
+
+  // Marks one of the customer's open wallets as their default.
+  @Post(':id/default')
+  async setDefault(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    const wallet = await this.walletsService.setDefaultForUser(user.userId, id);
+    const [settlementAccounts, balance] = await Promise.all([
+      this.settlementService.findForWallet(this.dataSource.manager, wallet.id),
+      this.ledgerService.getWalletBalance(this.dataSource.manager, wallet.id),
+    ]);
+    return serializeWallet(wallet, balance.toString(), settlementAccounts);
   }
 
   @Get(':id')
@@ -158,11 +184,7 @@ export class WalletsController {
       this.dataSource.manager,
       wallet.id,
     );
-    return serializeWallet(
-      { ...wallet, walletType },
-      '0',
-      settlementAccounts,
-    );
+    return serializeWallet({ ...wallet, walletType }, '0', settlementAccounts);
   }
 
   // A repository owner splits off some of their unallocated virtual pool
