@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BrandMark from './BrandMark.vue';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { ApiError } from '../api/client';
@@ -418,7 +419,7 @@ onMounted(async () => {
   <div class="widget-shell" :dir="locale === 'fa' ? 'rtl' : 'ltr'" :lang="locale">
     <div class="widget-card">
       <header class="widget-nav">
-        <span class="logo-mark">P</span>
+        <span class="logo-mark"><BrandMark /></span>
         <span class="logo-text">{{ t('brand') }}</span>
         <span class="secure-badge">
           <svg viewBox="0 0 24 24" fill="none"><path d="M12 2 4 5v6c0 5 3.4 8.7 8 9 4.6-.3 8-4 8-9V5l-8-3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m9 12 2 2 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>

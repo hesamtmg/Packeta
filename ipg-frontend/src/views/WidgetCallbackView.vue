@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BrandMark from '../components/BrandMark.vue';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
@@ -96,7 +97,7 @@ onUnmounted(() => {
   <div class="widget-shell">
     <div class="widget-card">
       <header class="widget-nav">
-        <span class="logo-mark">P</span>
+        <span class="logo-mark"><BrandMark /></span>
         <span class="logo-text">{{ t('brand') }}</span>
       </header>
 

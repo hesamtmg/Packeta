@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BrandMark from './BrandMark.vue';
 import { useI18n } from 'vue-i18n';
 import LanguageSwitcher from './LanguageSwitcher.vue';
 import '../styles/admin-theme.css';
@@ -14,7 +15,7 @@ const features = ['wallets', 'payments', 'security'] as const;
   <div class="customer-theme auth-shell">
     <aside class="auth-aside">
       <router-link :to="{ name: 'landing' }" class="auth-brand auth-brand-light">
-        <span class="auth-brand-mark">P</span>
+        <span class="auth-brand-mark"><BrandMark /></span>
         <span class="auth-brand-name">Packeta</span>
       </router-link>
 
@@ -50,7 +51,7 @@ const features = ['wallets', 'payments', 'security'] as const;
     <main class="auth-main">
       <header class="auth-topbar">
         <router-link :to="{ name: 'landing' }" class="auth-brand auth-brand-compact">
-          <span class="auth-brand-mark">P</span>
+          <span class="auth-brand-mark"><BrandMark /></span>
           <span class="auth-brand-name">Packeta</span>
         </router-link>
         <router-link :to="{ name: 'landing' }" class="auth-back">

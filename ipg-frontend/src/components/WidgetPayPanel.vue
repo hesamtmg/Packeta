@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BrandMark from './BrandMark.vue';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { apiRequest, ApiError } from '../api/client';
@@ -347,7 +348,7 @@ onUnmounted(() => {
   <div class="widget-shell" :dir="locale === 'fa' ? 'rtl' : 'ltr'" :lang="locale">
     <div class="widget-card">
       <header class="widget-nav">
-        <span class="logo-mark">P</span>
+        <span class="logo-mark"><BrandMark /></span>
         <span class="logo-text">{{ t('brand') }}</span>
         <span v-if="countdownLabel && step !== 'completed' && step !== 'failed'" class="countdown" :class="{ expiring: isExpired }">{{ countdownLabel }}</span>
       </header>

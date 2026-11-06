@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/packeta-logo-dark.png">
+    <img src="docs/brand/packeta-logo.png" alt="Packeta" width="300">
+  </picture>
+</p>
+
 # Packeta
 
 A multi-wallet app, plus a standalone sandbox payment gateway (IPG) it settles merchant purchases through.
@@ -341,3 +348,11 @@ npm test
 cd ipg-backend
 npm test
 ```
+
+## Brand
+
+The logo is the **Ledger P** — a "P" built from ledger rows, a nod to the append-only transaction ledger at
+Packeta's core. Source files live in [`docs/brand/`](docs/brand/): `packeta-mark.svg` (app icon / favicon),
+`packeta-logo.svg` and `packeta-logo-dark.svg` (mark + wordmark for light and dark backgrounds), plus PNG
+exports. In the apps, the mark is rendered by `BrandMark.vue` (one copy in `frontend/`, one in
+`ipg-frontend/`), which draws the bars in `currentColor` so each placement keeps its own tile styling.
