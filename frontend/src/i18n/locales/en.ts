@@ -83,6 +83,7 @@ export default {
       submitting: 'Logging in…',
       noAccount: 'New to Packeta?',
       signupLink: 'Create an account',
+      sessionExpired: 'Your session has expired. Please log in again.',
       error: 'Login failed — please try again',
     },
     signup: {

@@ -17,11 +17,13 @@ import '@fontsource/vazirmatn/latin-ext-500.css';
 import '@fontsource/vazirmatn/latin-ext-600.css';
 import '@fontsource/vazirmatn/latin-ext-700.css';
 import App from './App.vue';
-import router from './router';
+import router, { handleSessionExpired } from './router';
+import { setUnauthorizedHandler } from './api/client';
 import { i18n } from './i18n';
 
 const app = createApp(App);
 app.use(createPinia());
 app.use(router);
+setUnauthorizedHandler(handleSessionExpired);
 app.use(i18n);
 app.mount('#app');

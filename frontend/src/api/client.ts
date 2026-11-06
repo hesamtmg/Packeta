@@ -19,6 +19,23 @@ function errorMessage(data: { message?: unknown } | null): string {
   return typeof message === 'string' && message ? message : 'Request failed';
 }
 
+// Called when an authenticated request comes back 401 — the token has
+// expired (JWTs are short-lived, see JWT_EXPIRES_IN) or was revoked. Wired up
+// in main.ts so this module doesn't import the router (which would create an
+// import cycle through the views).
+let onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: () => void) {
+  onUnauthorized = handler;
+}
+
+// Only treat a 401 as "session expired" when we actually sent a token: an
+// anonymous 401 (e.g. a wrong password on /auth/login) is an ordinary error
+// for the form to display.
+function handleUnauthorized(status: number, sentToken: boolean) {
+  if (status === 401 && sentToken) onUnauthorized?.();
+}
+
 interface RequestOptions {
   method?: string;
   body?: unknown;
@@ -49,6 +66,7 @@ export async function apiRequest<T>(
   const data = await response.json().catch(() => null);
 
   if (!response.ok) {
+    handleUnauthorized(response.status, !!headers.Authorization);
     throw new ApiError(response.status, errorMessage(data));
   }
 
@@ -100,6 +118,7 @@ export async function postMultipart<T>(
   const data = await response.json().catch(() => null);
 
   if (!response.ok) {
+    handleUnauthorized(response.status, !!headers.Authorization);
     throw new ApiError(response.status, errorMessage(data));
   }
 

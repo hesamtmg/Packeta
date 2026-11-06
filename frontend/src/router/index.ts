@@ -183,8 +183,33 @@ const router = createRouter({
   ],
 });
 
+function redirectQuery(fullPath: string): Record<string, string> {
+  return fullPath !== '/dashboard' ? { redirect: fullPath } : {};
+}
+
+// The API rejected our token mid-session (it expired while the tab was open,
+// or was revoked): drop the session and send the visitor to login, keeping
+// the page they were on so they come straight back after signing in.
+export function handleSessionExpired() {
+  const auth = useAuthStore();
+  auth.logout();
+  const current = router.currentRoute.value;
+  if (current.name === 'login') return;
+  const redirect = current.meta.requiresAuth ? redirectQuery(current.fullPath) : {};
+  router.replace({ name: 'login', query: { ...redirect, expired: '1' } });
+}
+
 router.beforeEach((to) => {
   const auth = useAuthStore();
+  // A stored token that has since expired is a dead session: clear it so
+  // the guards below (and the layouts) see a logged-out visitor, and tell
+  // the login page why they landed there.
+  if (auth.accessToken && !auth.isAuthenticated) {
+    auth.logout();
+    if (to.meta.requiresAuth) {
+      return { name: 'login', query: { ...redirectQuery(to.fullPath), expired: '1' } };
+    }
+  }
   // Already signed in: the public landing and the login/signup pages have
   // nothing to offer, so go straight to the app.
   if (
@@ -196,7 +221,7 @@ router.beforeEach((to) => {
   if (to.meta.requiresAuth && !auth.isAuthenticated) {
     // Remember where the visitor was headed so login can send them back
     // there (validated in useCompleteAuth's safeRedirect).
-    return { name: 'login', query: to.fullPath !== '/dashboard' ? { redirect: to.fullPath } : {} };
+    return { name: 'login', query: redirectQuery(to.fullPath) };
   }
   if (to.meta.requiresAdmin && !auth.isAdmin) {
     return { name: 'dashboard' };

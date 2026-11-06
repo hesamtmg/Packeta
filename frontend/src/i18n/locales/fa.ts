@@ -83,6 +83,7 @@ export default {
       submitting: 'در حال ورود…',
       noAccount: 'تازه به پاکتا آمده‌اید؟',
       signupLink: 'ساخت حساب کاربری',
+      sessionExpired: 'نشست شما منقضی شده است. لطفاً دوباره وارد شوید.',
       error: 'ورود ناموفق بود — دوباره تلاش کنید',
     },
     signup: {

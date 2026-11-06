@@ -16,6 +16,23 @@ function readPermissions(): string[] {
   }
 }
 
+// Reads the `exp` claim (seconds since epoch) from a JWT without verifying
+// it — only used to notice locally that a stored token has lapsed, so a
+// visitor returning after a while goes to login instead of a broken page.
+// The backend remains the authority; an unparseable token is left for it
+// to reject.
+export function isTokenExpired(token: string): boolean {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return false;
+    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+    const exp = (JSON.parse(json) as { exp?: unknown }).exp;
+    return typeof exp === 'number' && exp * 1000 <= Date.now();
+  } catch {
+    return false;
+  }
+}
+
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     accessToken: localStorage.getItem(TOKEN_KEY) as string | null,
@@ -31,7 +48,7 @@ export const useAuthStore = defineStore('auth', {
     avatarUrl: localStorage.getItem(AVATAR_URL_KEY) as string | null,
   }),
   getters: {
-    isAuthenticated: (state) => !!state.accessToken,
+    isAuthenticated: (state) => !!state.accessToken && !isTokenExpired(state.accessToken),
     isAdmin: (state) => state.role === 'ADMIN' || state.role === 'SUPER_ADMIN',
     isSuperAdmin: (state) => state.role === 'SUPER_ADMIN',
     // SUPER_ADMIN bypasses the section system entirely, same as the
