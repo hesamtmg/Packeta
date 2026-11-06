@@ -119,7 +119,7 @@ export class TransactionsController {
     return this.transactionsService.initiatePurchase(
       user.userId,
       dto.fromWalletId,
-      dto.toEmail,
+      dto.merchant,
       dto.amount,
       idempotencyKey,
     );

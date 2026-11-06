@@ -6,6 +6,7 @@ import { apiRequest, ApiError } from '../api/client';
 import { formatAmount, formatAmountWords } from '../utils/currency';
 import { formatDateTime } from '../utils/date';
 import { walletDisplayName } from '../utils/wallet-name';
+import { displayBalance, hasVirtualPart } from '../utils/wallet-balance';
 import type { Wallet } from '../stores/wallet';
 import AppLayout from '../components/AppLayout.vue';
 import CreditInstallmentsCard from '../components/CreditInstallmentsCard.vue';
@@ -49,7 +50,7 @@ async function copyWidgetSnippet() {
 const isMerchant = computed(() => wallet.value?.walletType.code === 'MERCHANT');
 
 const amountWords = computed(() =>
-  wallet.value ? formatAmountWords(wallet.value.balance, wallet.value.walletType.currency) : '',
+  wallet.value ? formatAmountWords(displayBalance(wallet.value), wallet.value.walletType.currency) : '',
 );
 const virtualAmountWords = computed(() =>
   wallet.value?.virtualAmount ? formatAmountWords(wallet.value.virtualAmount, wallet.value.walletType.currency) : '',
@@ -73,8 +74,14 @@ onMounted(load);
 
     <section v-if="wallet" class="admin-card detail-card">
       <span class="admin-badge">{{ walletDisplayName(wallet) }}</span>
-      <span class="amount">{{ formatAmount(wallet.balance, wallet.walletType.currency) }}</span>
+      <span class="amount">{{ formatAmount(displayBalance(wallet), wallet.walletType.currency) }}</span>
       <span v-if="amountWords" class="amount-words">{{ amountWords }}</span>
+      <span v-if="hasVirtualPart(wallet)" class="amount-words">
+        {{ t('dashboard.wallets.balanceBreakdown', {
+          real: formatAmount(wallet.balance, wallet.walletType.currency),
+          virtual: formatAmount(wallet.virtualAmount!, wallet.walletType.currency),
+        }) }}
+      </span>
       <div class="badges">
         <span v-if="wallet.closedAt" class="status-badge reversed">{{ t('walletDetail.closed') }}</span>
         <span v-if="wallet.blockedAt" class="status-badge reversed">{{ t('walletDetail.blocked') }}</span>

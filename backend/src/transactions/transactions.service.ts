@@ -44,6 +44,7 @@ import {
   formatAmountWords,
 } from '../common/format-amount';
 import { displayIdentity } from '../common/synthetic-email';
+import { normalizePhoneNumber } from '../common/phone-number';
 import { SettlementService } from '../settlement/settlement.service';
 import { SettlementSplitDto } from '../settlement/dto/settlement-split.dto';
 import { InstallmentsService } from '../installments/installments.service';
@@ -606,17 +607,19 @@ export class TransactionsService {
   // row with no balance change yet, then asks the sandbox IPG for a payment
   // page to redirect the customer to. Money only moves once /verify
   // confirms the gateway authorized it (or the timeout sweep reverses it).
+  // `merchantIdentifier` is either the merchant's mobile number or one of
+  // their merchant wallets' terminal number (see resolvePurchaseMerchant).
   async initiatePurchase(
     userId: string,
     fromWalletId: string,
-    toEmail: string,
+    merchantIdentifier: string,
     amount: number,
     idempotencyKey: string,
   ): Promise<PurchaseInitiateResult> {
     return this.run(
       'purchase_initiate',
       userId,
-      { fromWalletId, toEmail, amount },
+      { fromWalletId, merchant: merchantIdentifier, amount },
       idempotencyKey,
       async (manager) => {
         const fromWalletRef = await this.walletsService.getById(
@@ -640,26 +643,17 @@ export class TransactionsService {
         const customer = await manager.findOne(User, {
           where: { id: userId },
         });
-        const merchant = await manager.findOne(User, {
-          where: { email: toEmail },
-        });
-        if (!merchant) {
-          throw new NotFoundException(
-            this.i18n.t('transactions.MERCHANT_NOT_FOUND'),
+        const { merchant, wallet: toWalletRef } =
+          await this.resolvePurchaseMerchant(
+            manager,
+            merchantIdentifier,
+            fromWalletRef.walletType.currencyId,
           );
-        }
         if (merchant.id === userId) {
           throw new BadRequestException(
             this.i18n.t('transactions.CANNOT_PURCHASE_FROM_SELF'),
           );
         }
-
-        const toWalletRef =
-          await this.walletsService.findEligiblePurchaseInWallet(
-            manager,
-            merchant.id,
-            fromWalletRef.walletType.currencyId,
-          );
         if (!toWalletRef) {
           throw new NotFoundException(
             this.i18n.t('transactions.MERCHANT_NO_ELIGIBLE_WALLET', {
@@ -670,7 +664,7 @@ export class TransactionsService {
         if (
           !this.walletsService.isCounterpartyAllowed(
             fromWalletRef.restrictedCounterparties,
-            toEmail,
+            merchant.email,
             toWalletRef.restrictedCounterparties,
             customer!.email,
           )
@@ -704,7 +698,7 @@ export class TransactionsService {
         const frontendUrl = this.configService.get<string>('frontendUrl');
         const { authority, paymentUrl } =
           await this.ipgClientService.createPayment({
-            merchantName: merchant.email,
+            merchantName: displayIdentity(merchant),
             amount: transaction.amount,
             displayAmount: formatAmount(
               amount,
@@ -744,6 +738,50 @@ export class TransactionsService {
         };
       },
     );
+  }
+
+  // Identifies who a customer-initiated purchase goes to from what the
+  // customer typed: a merchant wallet's terminal number first (exact match
+  // on Wallet.terminalId), otherwise the merchant's mobile number (local
+  // "09…" or E.164, see normalizePhoneNumber). A terminal number pins the
+  // receiving wallet itself — it must be in the paying wallet's currency;
+  // a phone number resolves to that merchant's default eligible wallet for
+  // the currency. `wallet` is null when the merchant exists but has nothing
+  // that can receive this currency.
+  private async resolvePurchaseMerchant(
+    manager: EntityManager,
+    identifier: string,
+    currencyId: string,
+  ): Promise<{ merchant: User; wallet: Wallet | null }> {
+    const trimmed = (identifier ?? '').trim();
+    const byTerminal =
+      await this.walletsService.findPurchaseInWalletByTerminalId(
+        manager,
+        trimmed,
+      );
+    if (byTerminal) {
+      return {
+        merchant: byTerminal.user,
+        wallet:
+          byTerminal.walletType.currencyId === currencyId ? byTerminal : null,
+      };
+    }
+    const merchant = trimmed
+      ? await manager.findOne(User, {
+          where: { phoneNumber: normalizePhoneNumber(trimmed) },
+        })
+      : null;
+    if (!merchant) {
+      throw new NotFoundException(
+        this.i18n.t('transactions.MERCHANT_NOT_FOUND'),
+      );
+    }
+    const wallet = await this.walletsService.findEligiblePurchaseInWallet(
+      manager,
+      merchant.id,
+      currencyId,
+    );
+    return { merchant, wallet };
   }
 
   // Repays one of a credit wallet's scheduled installments (see

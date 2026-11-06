@@ -43,6 +43,11 @@ import { UpdateUserRoleDto } from './dto/update-user-role.dto';
 import { AssignPanelRoleDto } from './dto/assign-panel-role.dto';
 import { AdminCreateChargeDto } from './dto/admin-create-charge.dto';
 import { AdminCreateWalletDto } from './dto/admin-create-wallet.dto';
+import { UpdateWalletDto } from '../wallets/dto/update-wallet.dto';
+import {
+  assertUpdateApplicable,
+  toUpdateOptions,
+} from '../wallets/wallet-field-rules';
 import { normalizePhoneNumber } from '../common/phone-number';
 import { SectionGuard } from './guards/section.guard';
 import { RequireSection } from './decorators/require-section.decorator';
@@ -145,11 +150,39 @@ export class AdminController {
     };
   }
 
-  // Looks a merchant up by phone number and lists which of their wallets
-  // can receive purchases — backs the "create a charge on this merchant's
-  // behalf" card, since an admin (unlike the merchant themselves) needs to
-  // see and choose among all of that merchant's eligible wallets rather
-  // than having one auto-picked for a single currency.
+  // Looks a merchant up by mobile number or by one of their merchant
+  // wallets' terminal number, and lists which of their wallets can receive
+  // purchases — backs the "create a charge on this merchant's behalf" card,
+  // since an admin (unlike the merchant themselves) needs to see and choose
+  // among all of that merchant's eligible wallets rather than having one
+  // auto-picked for a single currency. A terminal-number match also returns
+  // `matchedWalletId` so the panel can preselect that exact wallet.
+  @Get('merchants/lookup')
+  @RequireSection('purchase')
+  async lookupMerchant(@Query('query') query: string) {
+    const trimmed = (query ?? '').trim();
+    if (!trimmed) {
+      throw new BadRequestException('query parameter is required');
+    }
+    const byTerminal =
+      await this.walletsService.findPurchaseInWalletByTerminalId(
+        this.dataSource.manager,
+        trimmed,
+      );
+    const merchant =
+      byTerminal?.user ??
+      (await this.usersService.findByPhoneNumber(
+        normalizePhoneNumber(trimmed),
+      ));
+    if (!merchant) {
+      throw new NotFoundException(
+        'No merchant found with that mobile number or terminal number',
+      );
+    }
+    return this.serializeMerchant(merchant, byTerminal?.id ?? null);
+  }
+
+  // Kept for existing integrations — phone-only form of merchants/lookup.
   @Get('merchants/by-phone')
   @RequireSection('purchase')
   async getMerchantByPhone(@Query('phone') phone: string) {
@@ -162,6 +195,13 @@ export class AdminController {
     if (!merchant) {
       throw new NotFoundException('No account found with that phone number');
     }
+    return this.serializeMerchant(merchant, null);
+  }
+
+  private async serializeMerchant(
+    merchant: User,
+    matchedWalletId: string | null,
+  ) {
     const wallets = await this.walletsService.listMerchantEligibleWallets(
       merchant.id,
     );
@@ -173,6 +213,7 @@ export class AdminController {
       id: merchant.id,
       email: merchant.email,
       phoneNumber: merchant.phoneNumber,
+      matchedWalletId,
       wallets: wallets.map((wallet) =>
         serializeWallet(wallet, (walletBalances.get(wallet.id) ?? 0n).toString()),
       ),
@@ -180,7 +221,8 @@ export class AdminController {
   }
 
   // Creates a charge/payment link on behalf of a merchant the admin looked
-  // up by phone — the merchant never has to be logged in for this.
+  // up by phone or terminal number — the merchant never has to be logged in
+  // for this.
   @Post('purchase/charge')
   @RequireSection('purchase')
   async createCharge(
@@ -795,9 +837,10 @@ export class AdminController {
 
   // Full single-wallet detail (every column, plus owner identity and its
   // settlement account split) — backs the admin panel's wallet detail page,
-  // reached by clicking a row on the Wallets list.
+  // reached by clicking a row on the Wallets list, and the customer page's
+  // wallet edit form (hence the customers section too).
   @Get('wallets/:id')
-  @RequireSection('wallets')
+  @RequireSection('wallets', 'customers')
   async getWallet(
     @CurrentUser() admin: AuthenticatedUser,
     @Param('id') walletId: string,
@@ -814,6 +857,31 @@ export class AdminController {
       ownerEmail: wallet.user.email,
       ownerPhoneNumber: wallet.user.phoneNumber,
     };
+  }
+
+  // Admin edit of an existing wallet — same fields and per-type rules as the
+  // owner's own PATCH /wallets/:id (see UpdateWalletDto and
+  // assertUpdateApplicable), applied on the owner's behalf. Backs the edit
+  // form on the admin wallet detail page and the customer page's wallets.
+  @Patch('wallets/:id')
+  @RequireSection('wallets', 'customers')
+  async updateWallet(
+    @CurrentUser() admin: AuthenticatedUser,
+    @Param('id') walletId: string,
+    @Body() dto: UpdateWalletDto,
+  ) {
+    await this.assertWalletInScope(admin.userId, walletId);
+    const existing = await this.walletsService.getByIdUnscoped(walletId);
+    assertUpdateApplicable(dto, existing.walletType);
+    await this.dataSource.transaction((manager) =>
+      this.walletsService.updateForUser(
+        manager,
+        existing.userId,
+        walletId,
+        toUpdateOptions(dto),
+      ),
+    );
+    return this.getWallet(admin, walletId);
   }
 
   // Reopens a wallet a customer (or a previous admin action) closed —

@@ -13,6 +13,8 @@ const { t } = useI18n();
 
 interface MerchantWallet {
   id: string;
+  name?: string | null;
+  terminalId?: string | null;
   balance: string;
   walletType: {
     name: string;
@@ -25,10 +27,13 @@ interface Merchant {
   id: string;
   email: string;
   phoneNumber: string | null;
+  // Set when the lookup matched a terminal number — that exact wallet.
+  matchedWalletId: string | null;
   wallets: MerchantWallet[];
 }
 
-const phone = ref('');
+// The merchant's mobile number or one of their wallets' terminal number.
+const query = ref('');
 const lookupError = ref('');
 const lookupBusy = ref(false);
 const merchant = ref<Merchant | null>(null);
@@ -53,14 +58,16 @@ async function onLookup() {
   merchant.value = null;
   selectedWalletId.value = '';
   result.value = null;
-  if (!phone.value.trim()) return;
+  if (!query.value.trim()) return;
   lookupBusy.value = true;
   try {
     const found = await apiRequest<Merchant>(
-      `/admin/merchants/by-phone?phone=${encodeURIComponent(phone.value.trim())}`,
+      `/admin/merchants/lookup?query=${encodeURIComponent(query.value.trim())}`,
     );
     merchant.value = found;
-    if (found.wallets.length === 1) {
+    if (found.matchedWalletId && found.wallets.some((w) => w.id === found.matchedWalletId)) {
+      selectedWalletId.value = found.matchedWalletId;
+    } else if (found.wallets.length === 1) {
       selectedWalletId.value = found.wallets[0].id;
     }
     if (!found.wallets.length) {
@@ -132,7 +139,7 @@ async function onCopyLink() {
             <form class="lookup" @submit.prevent="onLookup">
               <label class="admin-search lookup-input">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a2 2 0 01-2 2A16 16 0 013 6a2 2 0 012-2" /></svg>
-                <input v-model="phone" type="tel" class="admin-input" :placeholder="t('admin.purchase.phonePlaceholder')" required />
+                <input v-model="query" type="text" inputmode="numeric" autocomplete="off" class="admin-input" :placeholder="t('admin.purchase.phonePlaceholder')" required />
               </label>
               <button type="submit" class="admin-btn admin-btn-primary" :disabled="lookupBusy">{{ t('admin.purchase.lookup') }}</button>
             </form>
@@ -167,7 +174,8 @@ async function onCopyLink() {
               >
                 <span class="radio" />
                 <span class="wallet-text">
-                  <span class="wallet-name">{{ w.walletType.name }} <span class="cur">{{ w.walletType.currency.code }}</span></span>
+                  <span class="wallet-name">{{ w.name || w.walletType.name }} <span class="cur">{{ w.walletType.currency.code }}</span></span>
+                  <span v-if="w.terminalId" class="wallet-bal">{{ t('walletDetail.terminalId') }}: {{ w.terminalId }}</span>
                   <span class="wallet-bal">{{ t('admin.purchase.balance', { amount: formatAmount(w.balance, w.walletType.currency) }) }}</span>
                 </span>
               </button>

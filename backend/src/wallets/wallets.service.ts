@@ -856,6 +856,32 @@ export class WalletsService {
       .getOne();
   }
 
+  // Resolves a merchant wallet by its payment-switch terminal number (see
+  // Wallet.terminalId) — the alternative to a phone number for identifying
+  // who a purchase goes to. Only a not-closed wallet whose type can receive
+  // purchases matches; its owner is loaded alongside. When several wallets
+  // share the number, the owner's default/first-ordered one wins, same
+  // ordering as findEligiblePurchaseInWallet.
+  async findPurchaseInWalletByTerminalId(
+    manager: EntityManager,
+    terminalId: string,
+  ): Promise<Wallet | null> {
+    const trimmed = terminalId.trim();
+    if (!trimmed) return null;
+    return manager
+      .createQueryBuilder(Wallet, 'wallet')
+      .innerJoinAndSelect('wallet.walletType', 'walletType')
+      .innerJoinAndSelect('walletType.currency', 'currency')
+      .innerJoinAndSelect('wallet.user', 'user')
+      .where('wallet.terminalId = :terminalId', { terminalId: trimmed })
+      .andWhere('walletType.allowPurchaseIn = true')
+      .andWhere('wallet.closedAt IS NULL')
+      .orderBy('wallet.isDefault', 'DESC')
+      .addOrderBy('wallet.sortOrder', 'ASC', 'NULLS LAST')
+      .addOrderBy('wallet.createdAt', 'ASC')
+      .getOne();
+  }
+
   // Every wallet a customer could pay a given purchase's merchant from —
   // used by the purchase gateway (phone+OTP flow) to show the customer their
   // own choices at the IPG, rather than resolving just one automatically the
