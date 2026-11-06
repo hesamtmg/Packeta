@@ -26,6 +26,8 @@ import SortableTh from '../../components/admin/SortableTh.vue';
 import ListPagination from '../../components/admin/ListPagination.vue';
 import { useAuthStore } from '../../stores/auth';
 import AmountInput from '../../components/AmountInput.vue';
+import AdminWalletEditForm from '../../components/admin/AdminWalletEditForm.vue';
+import type { Wallet as FullWallet } from '../../stores/wallet';
 
 const { t } = useI18n();
 const auth = useAuthStore();
@@ -74,6 +76,10 @@ const addWalletBusy = ref(false);
 
 const walletError = ref('');
 const walletBusy = ref(false);
+// The wallet currently open in the edit form — loaded in full from
+// GET /admin/wallets/:id, since the customer detail only carries a summary.
+const editingWallet = ref<FullWallet | null>(null);
+const walletNotice = ref('');
 
 const newWalletTypeId = ref('');
 const newWalletVirtualAmount = ref('');
@@ -117,6 +123,8 @@ async function openCustomer(id: string) {
   drawerOpen.value = true;
   loadingDetail.value = true;
   selected.value = null;
+  editingWallet.value = null;
+  walletNotice.value = '';
   await selectUser(id);
   loadingDetail.value = false;
 }
@@ -243,6 +251,25 @@ async function reopenWallet(wallet: Wallet) {
   } finally {
     walletBusy.value = false;
   }
+}
+
+async function startEditWallet(wallet: Wallet) {
+  walletError.value = '';
+  walletNotice.value = '';
+  walletBusy.value = true;
+  try {
+    editingWallet.value = await apiRequest<FullWallet>(`/admin/wallets/${wallet.id}`);
+  } catch (err) {
+    walletError.value = err instanceof ApiError ? err.message : t('admin.walletDetail.loadFailed');
+  } finally {
+    walletBusy.value = false;
+  }
+}
+
+async function onWalletEdited() {
+  editingWallet.value = null;
+  walletNotice.value = t('admin.walletDetail.saved');
+  if (selected.value) await selectUser(selected.value.id);
 }
 
 async function closeWallet(wallet: Wallet) {
@@ -456,8 +483,9 @@ loadRoles();
                   <router-link v-if="w.walletType.code === 'CREDIT'" :to="{ name: 'wallet-installments', params: { walletId: w.id } }" class="admin-btn admin-btn-ghost admin-btn-sm">{{ t('dashboard.installments.viewLink') }}</router-link>
                   <span class="spacer" />
                   <button v-if="w.closedAt" type="button" class="admin-btn admin-btn-ghost admin-btn-sm" :disabled="walletBusy" @click="reopenWallet(w)">{{ t('admin.wallets.reopen') }}</button>
+                  <button v-else type="button" class="admin-btn admin-btn-ghost admin-btn-sm" data-shot="edit-wallet" :disabled="walletBusy" @click="startEditWallet(w)">{{ t('admin.walletDetail.edit') }}</button>
                   <button
-                    v-else
+                    v-if="!w.closedAt"
                     type="button"
                     class="admin-btn admin-btn-danger admin-btn-sm"
                     :disabled="walletBusy || w.balance !== '0'"
@@ -469,6 +497,14 @@ loadRoles();
             </article>
             <p v-if="!selected.wallets.length" class="muted">{{ t('admin.customers.noWallets') }}</p>
           </div>
+          <p v-if="walletNotice" class="admin-success">{{ walletNotice }}</p>
+          <AdminWalletEditForm
+            v-if="editingWallet"
+            :wallet="editingWallet"
+            class="wallet-edit-block"
+            @saved="onWalletEdited"
+            @cancel="editingWallet = null"
+          />
 
           <form v-if="auth.isSuperAdmin" class="add-wallet" @submit.prevent="onAddWallet">
             <span class="add-title">{{ t('admin.customers.addWalletHeading') }}</span>
@@ -704,6 +740,13 @@ loadRoles();
 }
 .spacer {
   flex: 1;
+}
+.wallet-edit-block {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-bg);
 }
 .add-wallet {
   margin-top: 14px;

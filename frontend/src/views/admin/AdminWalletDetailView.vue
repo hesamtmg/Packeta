@@ -11,6 +11,7 @@ import { transactionTypeClass, transactionStatusClass, type AdminTransaction } f
 import type { Wallet } from '../../stores/wallet';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
 import AmountInput from '../../components/AmountInput.vue';
+import AdminWalletEditForm from '../../components/admin/AdminWalletEditForm.vue';
 
 interface AdminWalletDetail extends Wallet {
   ownerId: string;
@@ -28,6 +29,15 @@ const error = ref('');
 const busy = ref(false);
 const adjustAmount = ref('');
 const adjustReason = ref('');
+const editing = ref(false);
+const savedNotice = ref('');
+
+function onEdited(updated: Wallet) {
+  if (!wallet.value) return;
+  wallet.value = { ...wallet.value, ...updated };
+  editing.value = false;
+  savedNotice.value = t('admin.walletDetail.saved');
+}
 
 // Signed relative to *this* wallet — a TRANSFER out of it reads as negative
 // even though the same row is positive on the receiving wallet's own page.
@@ -231,7 +241,25 @@ onMounted(load);
         <button v-if="wallet.closedAt" class="admin-btn admin-btn-ghost" :disabled="busy" @click="onReopen">
           {{ t('admin.wallets.reopen') }}
         </button>
+        <button
+          v-else-if="!editing"
+          type="button"
+          class="admin-btn admin-btn-primary"
+          data-shot="edit-wallet"
+          @click="editing = true; savedNotice = ''"
+        >
+          {{ t('admin.walletDetail.edit') }}
+        </button>
       </div>
+      <p v-if="savedNotice" class="admin-success">{{ savedNotice }}</p>
+
+      <AdminWalletEditForm
+        v-if="editing && !wallet.closedAt"
+        :wallet="wallet"
+        class="edit-block"
+        @saved="onEdited"
+        @cancel="editing = false"
+      />
 
       <form class="adjust-form" @submit.prevent="onAdjust">
         <h2>{{ t('admin.wallets.adjust') }}</h2>
@@ -342,6 +370,11 @@ dd {
   display: flex;
   gap: 8px;
   margin-top: 10px;
+}
+.edit-block {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--card-border);
 }
 .adjust-form {
   display: flex;

@@ -299,7 +299,7 @@ All endpoints are JSON. Authenticated endpoints require `Authorization: Bearer <
 | POST   | `/transactions/deposit`   | ✅   | `{ walletId, amount }` (minor units) + `Idempotency-Key` header      |
 | POST   | `/transactions/withdraw`  | ✅   | `{ walletId, amount }` + `Idempotency-Key` header (blocked if the wallet type disallows withdrawals) |
 | POST   | `/transactions/transfer`  | ✅   | `{ fromWalletId, toEmail, amount }` + `Idempotency-Key` header (both wallets' types must allow peer-to-peer) |
-| POST   | `/transactions/purchase/initiate` | ✅ | `{ fromWalletId, toEmail, amount }` + `Idempotency-Key` header → creates a `PENDING` purchase and returns `{ transactionId, redirectUrl, expiresAt }` to send the customer to the IPG |
+| POST   | `/transactions/purchase/initiate` | ✅ | `{ fromWalletId, merchant, amount }` (`merchant` = the merchant's mobile number or a merchant wallet's terminal number) + `Idempotency-Key` header → creates a `PENDING` purchase and returns `{ transactionId, redirectUrl, expiresAt }` to send the customer to the IPG |
 | POST   | `/transactions/purchase/charge` | ✅ | `{ amount, currencyCode }` + `Idempotency-Key` header → merchant-only "checkout link", no customer/wallet chosen yet; returns `{ transactionId, redirectUrl, expiresAt }` |
 | POST   | `/transactions/purchase/:id/verify` | — | public; called after the IPG callback; verifies with the IPG and, on success, moves the money and marks `COMPLETED` |
 | POST   | `/transactions/purchase/:id/cancel` | — | public; cancels a still-`PENDING` purchase (no funds to unwind) — used when the customer cancels on the IPG page |

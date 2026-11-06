@@ -9,6 +9,7 @@ import { amountStep, formatAmount, formatAmountWords, toMinorUnits, type Currenc
 import { formatDateTime } from '../utils/date';
 import { cardGradient } from '../utils/cardTheme';
 import { transactionTypeClass, transactionStatusClass } from '../types/admin';
+import { displayBalance, hasVirtualPart } from '../utils/wallet-balance';
 import { walletDisplayName } from '../utils/wallet-name';
 import { useListControls } from '../composables/useListControls';
 import { groupTransactionClusters } from '../utils/txCluster';
@@ -48,23 +49,6 @@ const newWalletRailType = ref('');
 const newWalletRailScheduleTimes = ref('');
 const newWalletVirtualAmount = ref('');
 
-const editingWalletId = ref<string | null>(null);
-const editWalletName = ref('');
-const editRestrictedCounterparties = ref('');
-const editPurchaseTimeoutMinutes = ref('');
-const editSettlementAccounts = ref<{ iban: string; label: string; percent: string }[]>([]);
-const editTerminalId = ref('');
-const editAcceptorCode = ref('');
-const editMinAmount = ref('');
-const editMaxAmount = ref('');
-const editStoreName = ref('');
-const editStoreSite = ref('');
-const editAllowedIps = ref('');
-const editCallbackUrl = ref('');
-const editCategory = ref('');
-const editSubCategory = ref('');
-const editRailType = ref('');
-const editRailScheduleTimes = ref('');
 const chargeSettlementSplits = ref<
   { iban: string; label: string; type: 'PERCENT' | 'FIXED'; value: string }[]
 >([]);
@@ -78,7 +62,7 @@ const transferFromWalletId = ref('');
 const transferEmail = ref('');
 const transferAmount = ref('');
 const purchaseFromWalletId = ref('');
-const purchaseEmail = ref('');
+const purchaseMerchant = ref('');
 const purchaseAmount = ref('');
 const actionError = ref('');
 const busy = ref(false);
@@ -187,7 +171,7 @@ const transferStep = computed(() => {
 });
 
 function walletLabel(w: Wallet): string {
-  return `${walletDisplayName(w)} (${w.walletType.currency.code}) — ${formatAmount(w.balance, w.walletType.currency)}`;
+  return `${walletDisplayName(w)} (${w.walletType.currency.code}) — ${formatAmount(displayBalance(w), w.walletType.currency)}`;
 }
 
 // Item: give each wallet a payment-card look — the gradient an admin
@@ -349,11 +333,7 @@ const totalsByCurrency = computed(() => {
     if (w.closedAt) continue;
     const code = w.walletType.currency.code;
     const entry = map.get(code) ?? { currency: w.walletType.currency, total: 0n, count: 0 };
-    try {
-      entry.total += BigInt(w.balance);
-    } catch {
-      entry.total += BigInt(Math.round(Number(w.balance)));
-    }
+    entry.total += BigInt(displayBalance(w));
     entry.count += 1;
     map.set(code, entry);
   }
@@ -467,7 +447,6 @@ function selectWallet(w: Wallet) {
   if (selectedWallet.value?.id === w.id) return;
   selectedWalletId.value = w.id;
   openWalletAction.value = null;
-  editingWalletId.value = null;
 }
 
 const addWalletOpen = ref(false);
@@ -506,7 +485,6 @@ function toggleWalletAction(w: Wallet, action: 'deposit' | 'withdraw' | 'transfe
     openWalletAction.value = null;
     return;
   }
-  editingWalletId.value = null;
   openWalletAction.value = { walletId: w.id, action };
   if (action === 'deposit') {
     depositWalletId.value = w.id;
@@ -522,7 +500,7 @@ function toggleWalletAction(w: Wallet, action: 'deposit' | 'withdraw' | 'transfe
     transferAmount.value = '';
   } else {
     purchaseFromWalletId.value = w.id;
-    purchaseEmail.value = '';
+    purchaseMerchant.value = '';
     purchaseAmount.value = '';
   }
 }
@@ -616,53 +594,11 @@ function removeSettlementAccountRow(index: number) {
   newWalletSettlementAccounts.value.splice(index, 1);
 }
 
-function addEditSettlementAccountRow() {
-  editSettlementAccounts.value.push({ iban: '', label: '', percent: '' });
-}
-function removeEditSettlementAccountRow(index: number) {
-  editSettlementAccounts.value.splice(index, 1);
-}
-
 function parseEmailList(raw: string): string[] {
   return raw
     .split(',')
     .map((email) => email.trim())
     .filter((email) => email.length > 0);
-}
-
-function toggleEditWallet(w: Wallet) {
-  if (editingWalletId.value === w.id) {
-    editingWalletId.value = null;
-    return;
-  }
-  editingWalletId.value = w.id;
-  openWalletAction.value = null;
-  editWalletName.value = w.name ?? '';
-  editRestrictedCounterparties.value = (w.restrictedCounterparties ?? []).join(', ');
-  editPurchaseTimeoutMinutes.value = w.purchaseTimeoutSeconds
-    ? String(Math.round(w.purchaseTimeoutSeconds / 60))
-    : '';
-  editSettlementAccounts.value = (w.settlementAccounts ?? []).map((account) => ({
-    iban: account.iban,
-    label: account.label ?? '',
-    percent: account.percent,
-  }));
-  editTerminalId.value = w.terminalId ?? '';
-  editAcceptorCode.value = w.acceptorCode ?? '';
-  editMinAmount.value = w.minTransactionAmount
-    ? String(Number(w.minTransactionAmount) / 10 ** w.walletType.currency.decimalPlaces)
-    : '';
-  editMaxAmount.value = w.maxTransactionAmount
-    ? String(Number(w.maxTransactionAmount) / 10 ** w.walletType.currency.decimalPlaces)
-    : '';
-  editStoreName.value = w.storeName ?? '';
-  editStoreSite.value = w.storeSite ?? '';
-  editAllowedIps.value = (w.allowedIps ?? []).join(', ');
-  editCallbackUrl.value = w.callbackUrl ?? '';
-  editCategory.value = w.category ?? '';
-  editSubCategory.value = w.subCategory ?? '';
-  editRailType.value = w.railType ?? '';
-  editRailScheduleTimes.value = (w.railScheduleTimes ?? []).join(', ');
 }
 
 function parseIpList(raw: string): string[] {
@@ -677,55 +613,6 @@ function parseTimeList(raw: string): string[] {
     .split(',')
     .map((time) => time.trim())
     .filter((time) => time.length > 0);
-}
-
-function onSaveWalletEdit(w: Wallet) {
-  runAction(async () => {
-    const options: WalletOptionsInput = {
-      name: editWalletName.value,
-      restrictedCounterparties: parseEmailList(editRestrictedCounterparties.value),
-    };
-    const scale = 10 ** w.walletType.currency.decimalPlaces;
-    if (editMinAmount.value) {
-      options.minTransactionAmount = Math.round(Number(editMinAmount.value) * scale);
-    }
-    if (editMaxAmount.value) {
-      options.maxTransactionAmount = Math.round(Number(editMaxAmount.value) * scale);
-    }
-    if (w.walletType.supportsAutoWithdraw) {
-      const filledAccounts = editSettlementAccounts.value.filter(
-        (row) => row.iban && row.percent,
-      );
-      options.settlementAccounts = filledAccounts.length
-        ? filledAccounts.map((row) => ({
-            iban: row.iban,
-            label: row.label || undefined,
-            percent: Number(row.percent),
-          }))
-        : undefined;
-      if (editRailType.value) {
-        options.railType = editRailType.value as WalletOptionsInput['railType'];
-        options.railScheduleTimes = editRailScheduleTimes.value
-          ? parseTimeList(editRailScheduleTimes.value)
-          : undefined;
-      }
-    }
-    if (w.walletType.allowPurchaseIn) {
-      options.purchaseTimeoutSeconds = editPurchaseTimeoutMinutes.value
-        ? Math.round(Number(editPurchaseTimeoutMinutes.value) * 60)
-        : undefined;
-      options.terminalId = editTerminalId.value;
-      options.acceptorCode = editAcceptorCode.value;
-      options.storeName = editStoreName.value;
-      options.storeSite = editStoreSite.value;
-      options.allowedIps = parseIpList(editAllowedIps.value);
-      options.callbackUrl = editCallbackUrl.value;
-      options.category = editCategory.value;
-      options.subCategory = editSubCategory.value;
-    }
-    await wallet.updateWallet(w.id, options);
-    editingWalletId.value = null;
-  });
 }
 
 function onCloseWallet(w: Wallet) {
@@ -857,7 +744,7 @@ function onPurchase() {
     if (!w) return;
     const result = await wallet.initiatePurchase(
       w.id,
-      purchaseEmail.value,
+      purchaseMerchant.value,
       toMinorUnits(purchaseAmount.value, w.walletType.currency),
     );
     window.location.href = result.redirectUrl;
@@ -1058,7 +945,7 @@ async function onGrantCredit() {
                 </span>
               </span>
               <span class="wallet-row-end">
-                <span class="wallet-row-balance" :class="{ negative: w.balance.startsWith('-') }">{{ formatAmount(w.balance, w.walletType.currency) }}</span>
+                <span class="wallet-row-balance" :class="{ negative: displayBalance(w).startsWith('-') }">{{ formatAmount(displayBalance(w), w.walletType.currency) }}</span>
                 <span v-if="w.closedAt" class="admin-badge">{{ t('dashboard.wallets.closedBadge') }}</span>
                 <span v-else-if="w.blockedAt" class="admin-badge admin-badge-danger"><i class="status-dot" />{{ t('dashboard.wallets.blockedShort') }}</span>
               </span>
@@ -1098,8 +985,14 @@ async function onGrantCredit() {
 
               <div class="wallet-panel-summary">
                 <span class="wallet-panel-label">{{ t('dashboard.wallets.cardBalanceLabel') }}</span>
-                <span class="wallet-panel-balance">{{ formatAmount(sw.balance, sw.walletType.currency) }}</span>
-                <span v-if="sw.balance !== '0'" class="amount-words">{{ formatAmountWords(sw.balance, sw.walletType.currency) }}</span>
+                <span class="wallet-panel-balance">{{ formatAmount(displayBalance(sw), sw.walletType.currency) }}</span>
+                <span v-if="displayBalance(sw) !== '0'" class="amount-words">{{ formatAmountWords(displayBalance(sw), sw.walletType.currency) }}</span>
+                <span v-if="hasVirtualPart(sw)" class="balance-breakdown">
+                  {{ t('dashboard.wallets.balanceBreakdown', {
+                    real: formatAmount(sw.balance, sw.walletType.currency),
+                    virtual: formatAmount(sw.virtualAmount!, sw.walletType.currency),
+                  }) }}
+                </span>
                 <div v-if="badges(sw).length || (sw.isDefault && !sw.closedAt)" class="badges">
                   <span v-if="sw.isDefault && !sw.closedAt" class="admin-badge admin-badge-info">{{ t('dashboard.wallets.defaultBadge') }}</span>
                   <span v-for="b in badges(sw)" :key="b" class="admin-badge">{{ b }}</span>
@@ -1154,7 +1047,7 @@ async function onGrantCredit() {
                 <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.actions.transfer.submit') }}</button>
               </form>
 <form v-if="isWalletActionOpen(sw, 'purchase')" class="wallet-inline-form" @submit.prevent="onPurchase">
-                <input v-model="purchaseEmail" type="email" :placeholder="t('dashboard.actions.purchase.merchantPlaceholder')" class="admin-input" required />
+                <input v-model="purchaseMerchant" type="text" inputmode="numeric" autocomplete="off" maxlength="100" :placeholder="t('dashboard.actions.purchase.merchantPlaceholder')" class="admin-input" required />
                 <AmountInput v-model="purchaseAmount" :currency="findWallet(purchaseFromWalletId)?.walletType.currency" :placeholder="t('dashboard.actions.amountPlaceholder')" min="0" :step="purchaseStep" class="admin-input" required />
                 <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.actions.purchase.submit') }}</button>
               </form>
@@ -1170,15 +1063,6 @@ async function onGrantCredit() {
               >
                 {{ t('dashboard.installments.viewLink') }}
               </router-link>
-              <button
-                type="button"
-                class="admin-btn admin-btn-ghost admin-btn-sm"
-                :class="{ active: editingWalletId === sw.id }"
-                :disabled="!!sw.closedAt"
-                @click="toggleEditWallet(sw)"
-              >
-                {{ t('dashboard.wallets.edit') }}
-              </button>
               <button
                 v-if="!sw.closedAt && !sw.isDefault"
                 type="button"
@@ -1201,116 +1085,6 @@ async function onGrantCredit() {
               </button>
             </div>
 
-            <form v-if="editingWalletId === sw.id" class="wallet-edit-form form-grid" @submit.prevent="onSaveWalletEdit(sw)">
-                <label class="field">
-                  {{ t('dashboard.wallets.nameLabel') }}
-                  <input
-                    v-model="editWalletName"
-                    type="text"
-                    maxlength="100"
-                    :placeholder="t('dashboard.wallets.namePlaceholder')"
-                    class="admin-input"
-                  />
-                </label>
-                <label class="field span-2">
-                  {{ t('dashboard.wallets.marketLabel') }}
-                  <input
-                    v-model="editRestrictedCounterparties"
-                    type="text"
-                    :placeholder="t('dashboard.wallets.marketPlaceholder')"
-                    class="admin-input"
-                  />
-                </label>
-                <span class="field-hint span-2">{{ t('dashboard.wallets.marketHint') }}</span>
-
-                <label class="field">
-                  {{ t('dashboard.wallets.minAmountLabel') }}
-                  <AmountInput v-model="editMinAmount" :currency="sw.walletType.currency" min="0" :step="amountStep(sw.walletType.currency)" class="admin-input" />
-                </label>
-                <label class="field">
-                  {{ t('dashboard.wallets.maxAmountLabel') }}
-                  <AmountInput v-model="editMaxAmount" :currency="sw.walletType.currency" min="0" :step="amountStep(sw.walletType.currency)" class="admin-input" />
-                </label>
-
-                <template v-if="sw.walletType.supportsAutoWithdraw">
-                  <div class="settlement-rows span-2">
-                    <span class="hint">{{ t('dashboard.settlement.walletHint') }}</span>
-                    <div v-for="(row, i2) in editSettlementAccounts" :key="i2" class="settlement-row">
-                      <input v-model="row.iban" type="text" :placeholder="t('dashboard.settlement.ibanPlaceholder')" class="admin-input" />
-                      <input v-model="row.label" type="text" :placeholder="t('dashboard.settlement.labelPlaceholder')" class="admin-input" />
-                      <input v-model="row.percent" type="number" min="0" max="100" :placeholder="t('dashboard.settlement.percentPlaceholder')" class="admin-input" />
-                      <button type="button" class="admin-btn admin-btn-ghost" @click="removeEditSettlementAccountRow(i2)">{{ t('dashboard.settlement.remove') }}</button>
-                    </div>
-                    <button type="button" class="admin-btn admin-btn-ghost" @click="addEditSettlementAccountRow">
-                      {{ t('dashboard.settlement.addAccount') }}
-                    </button>
-                  </div>
-
-                  <label class="field">
-                    {{ t('dashboard.settlement.railLabel') }}
-                    <select v-model="editRailType" class="admin-input">
-                      <option value="">{{ t('dashboard.settlement.railPlaceholder') }}</option>
-                      <option v-for="rail in availableRails(sw.walletType)" :key="rail" :value="rail">{{ railOptionLabel(sw.walletType, rail) }}</option>
-                    </select>
-                  </label>
-                  <label v-if="editRailType === 'PAYA' || editRailType === 'SATNA'" class="field">
-                    {{ t('dashboard.settlement.railScheduleLabel') }}
-                    <input
-                      v-model="editRailScheduleTimes"
-                      type="text"
-                      :placeholder="t('dashboard.settlement.railSchedulePlaceholder')"
-                      class="admin-input"
-                    />
-                    <span class="hint">
-                      {{ t('dashboard.settlement.railScheduleHint') }}
-                    </span>
-                  </label>
-                </template>
-
-                <template v-if="sw.walletType.allowPurchaseIn">
-                  <label class="field">
-                    {{ t('dashboard.wallets.verifyTimeoutLabel') }}
-                    <input v-model="editPurchaseTimeoutMinutes" type="number" min="1" placeholder="15" class="admin-input" />
-                  </label>
-                  <label class="field">
-                    {{ t('dashboard.wallets.terminalIdLabel') }}
-                    <input v-model="editTerminalId" type="text" class="admin-input" />
-                  </label>
-                  <label class="field">
-                    {{ t('dashboard.wallets.acceptorCodeLabel') }}
-                    <input v-model="editAcceptorCode" type="text" class="admin-input" />
-                  </label>
-                  <label class="field">
-                    {{ t('dashboard.wallets.storeNameLabel') }}
-                    <input v-model="editStoreName" type="text" class="admin-input" />
-                  </label>
-                  <label class="field">
-                    {{ t('dashboard.wallets.storeSiteLabel') }}
-                    <input v-model="editStoreSite" type="url" class="admin-input" />
-                  </label>
-                  <label class="field">
-                    {{ t('dashboard.wallets.allowedIpsLabel') }}
-                    <input v-model="editAllowedIps" type="text" :placeholder="t('dashboard.wallets.allowedIpsPlaceholder')" class="admin-input" />
-                  </label>
-                  <label class="field">
-                    {{ t('dashboard.wallets.callbackUrlLabel') }}
-                    <input v-model="editCallbackUrl" type="url" class="admin-input" />
-                  </label>
-                  <label class="field">
-                    {{ t('dashboard.wallets.categoryLabel') }}
-                    <input v-model="editCategory" type="text" class="admin-input" />
-                  </label>
-                  <label class="field">
-                    {{ t('dashboard.wallets.subCategoryLabel') }}
-                    <input v-model="editSubCategory" type="text" class="admin-input" />
-                  </label>
-                </template>
-
-                <div class="form-actions">
-                  <button type="button" class="admin-btn admin-btn-ghost" @click="editingWalletId = null">{{ t('dashboard.wallets.cancelEdit') }}</button>
-                  <button type="submit" class="admin-btn admin-btn-primary" :disabled="busy">{{ t('dashboard.wallets.saveEdit') }}</button>
-                </div>
-              </form>
           </template>
         </div>
       </div>
@@ -2174,11 +1948,9 @@ async function onGrantCredit() {
   flex: 1;
 }
 
-.wallet-edit-form {
-  padding: 16px;
-  background: var(--card-bg);
-  border: 1px solid var(--card-border);
-  border-radius: 14px;
+.balance-breakdown {
+  font-size: 0.82rem;
+  color: var(--text-dim);
 }
 
 .modal-host {

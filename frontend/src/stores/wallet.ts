@@ -363,12 +363,13 @@ export const useWalletStore = defineStore('wallet', {
       });
       await Promise.all([this.fetchWallets(), this.fetchTransactions()]);
     },
-    async initiatePurchase(fromWalletId: string, toEmail: string, amount: number) {
+    // `merchant` is the merchant's mobile number or terminal number.
+    async initiatePurchase(fromWalletId: string, merchant: string, amount: number) {
       return apiRequest<{ transactionId: string; redirectUrl: string; expiresAt: string }>(
         '/transactions/purchase/initiate',
         {
           method: 'POST',
-          body: { fromWalletId, toEmail, amount },
+          body: { fromWalletId, merchant: merchant.trim(), amount },
           idempotent: true,
         },
       );

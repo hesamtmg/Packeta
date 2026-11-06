@@ -325,8 +325,9 @@ the webhook, or use it to reconcile at the end of the day.
 If you don't have (or don't want) a Packeta account, a Packeta admin can
 create the charge for you:
 
-1. Admin looks you up: `GET /admin/merchants/by-phone?phone=<your phone>` →
-   your account + eligible wallets.
+1. Admin looks you up: `GET /admin/merchants/lookup?query=<your mobile number or terminal number>` →
+   your account + eligible wallets (a terminal-number match also returns
+   `matchedWalletId`). The older `GET /admin/merchants/by-phone?phone=…` still works.
 2. Admin creates the charge: `POST /admin/purchase/charge`
    `{ "walletId": "<your wallet id>", "amount": 125000, "language": "en" }`
    → same `{ transactionId, redirectUrl, expiresAt }` shape as §4.
@@ -348,14 +349,16 @@ POST /transactions/purchase/initiate
 Authorization: Bearer <customer JWT>
 Idempotency-Key: <uuid>
 
-{ "fromWalletId": "<customer wallet>", "toEmail": "merchant@example.com", "amount": 125000 }
+{ "fromWalletId": "<customer wallet>", "merchant": "09121234567", "amount": 125000 }
 
 → { "transactionId": "uuid", "redirectUrl": "...", "expiresAt": "..." }
 ```
 
-The merchant's destination wallet is resolved server-side from their email
-(their oldest eligible wallet for that currency) — you never see or choose
-another user's wallet id.
+`merchant` is the merchant's mobile number (`09…` or `+98…`) or one of their
+merchant wallets' terminal number. A terminal number selects that exact
+wallet (it must be in the paying wallet's currency); a mobile number resolves
+to the merchant's default eligible wallet for that currency — you never see
+or choose another user's wallet id. Email is no longer accepted.
 
 Related endpoints with the same auth + `Idempotency-Key` pattern:
 

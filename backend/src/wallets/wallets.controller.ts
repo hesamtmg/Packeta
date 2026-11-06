@@ -19,12 +19,15 @@ import {
 } from '../common/decorators/current-user.decorator';
 import { WalletsService } from './wallets.service';
 import { WalletTypesService } from '../wallet-types/wallet-types.service';
+import { WalletTypeCode } from '../wallet-types/entities/wallet-type.entity';
 import {
-  WalletType,
-  WalletTypeCode,
-} from '../wallet-types/entities/wallet-type.entity';
-import { isRailEnabled } from '../wallet-types/withdrawal-methods';
-import { SettlementRailType } from '../rail-settlements/entities/rail-settlement.entity';
+  assertAutoWithdrawCapable,
+  assertPurchaseInCapable,
+  assertRailEnabled,
+  assertUpdateApplicable,
+  assertVirtualBalanceCapable,
+  toUpdateOptions,
+} from './wallet-field-rules';
 import { CreateWalletDto } from './dto/create-wallet.dto';
 import { UpdateWalletDto } from './dto/update-wallet.dto';
 import { GrantCreditDto } from './dto/grant-credit.dto';
@@ -124,36 +127,28 @@ export class WalletsController {
         'SUPPORT wallets are provisioned automatically when a credit purchase needs a top-up',
       );
     }
-    this.assertPurchaseInCapable(dto.purchaseTimeoutSeconds, walletType);
-    this.assertAutoWithdrawCapable(
+    assertPurchaseInCapable(dto.purchaseTimeoutSeconds, walletType);
+    assertAutoWithdrawCapable(
       dto.settlementAccounts,
       walletType,
       'settlement accounts',
     );
-    this.assertAutoWithdrawCapable(
-      dto.railType,
-      walletType,
-      'a withdrawal rail',
-    );
-    this.assertAutoWithdrawCapable(
+    assertAutoWithdrawCapable(dto.railType, walletType, 'a withdrawal rail');
+    assertAutoWithdrawCapable(
       dto.railScheduleTimes,
       walletType,
       'a withdrawal rail schedule',
     );
-    this.assertRailEnabled(dto.railType, walletType);
-    this.assertPurchaseInCapable(dto.terminalId, walletType, 'a terminal id');
-    this.assertPurchaseInCapable(
-      dto.acceptorCode,
-      walletType,
-      'an acceptor code',
-    );
-    this.assertPurchaseInCapable(dto.storeName, walletType, 'a store name');
-    this.assertPurchaseInCapable(dto.storeSite, walletType, 'a store site');
-    this.assertPurchaseInCapable(dto.allowedIps, walletType, 'an IP allowlist');
-    this.assertPurchaseInCapable(dto.callbackUrl, walletType, 'a callback URL');
-    this.assertPurchaseInCapable(dto.category, walletType, 'a category');
-    this.assertPurchaseInCapable(dto.subCategory, walletType, 'a sub-category');
-    this.assertVirtualBalanceCapable(dto.virtualAmount, walletType);
+    assertRailEnabled(dto.railType, walletType);
+    assertPurchaseInCapable(dto.terminalId, walletType, 'a terminal id');
+    assertPurchaseInCapable(dto.acceptorCode, walletType, 'an acceptor code');
+    assertPurchaseInCapable(dto.storeName, walletType, 'a store name');
+    assertPurchaseInCapable(dto.storeSite, walletType, 'a store site');
+    assertPurchaseInCapable(dto.allowedIps, walletType, 'an IP allowlist');
+    assertPurchaseInCapable(dto.callbackUrl, walletType, 'a callback URL');
+    assertPurchaseInCapable(dto.category, walletType, 'a category');
+    assertPurchaseInCapable(dto.subCategory, walletType, 'a sub-category');
+    assertVirtualBalanceCapable(dto.virtualAmount, walletType);
     if (dto.settlementAccounts) {
       this.settlementService.validateWalletDefaults(dto.settlementAccounts);
     }
@@ -216,58 +211,15 @@ export class WalletsController {
     const existing = await this.walletsService.getById(user.userId, id);
     const walletType = existing.walletType;
 
-    this.assertPurchaseInCapable(dto.purchaseTimeoutSeconds, walletType);
-    this.assertAutoWithdrawCapable(
-      dto.settlementAccounts,
-      walletType,
-      'settlement accounts',
-    );
-    this.assertAutoWithdrawCapable(
-      dto.railType,
-      walletType,
-      'a withdrawal rail',
-    );
-    this.assertAutoWithdrawCapable(
-      dto.railScheduleTimes,
-      walletType,
-      'a withdrawal rail schedule',
-    );
-    this.assertRailEnabled(dto.railType, walletType);
-    this.assertPurchaseInCapable(dto.terminalId, walletType, 'a terminal id');
-    this.assertPurchaseInCapable(
-      dto.acceptorCode,
-      walletType,
-      'an acceptor code',
-    );
-    this.assertPurchaseInCapable(dto.storeName, walletType, 'a store name');
-    this.assertPurchaseInCapable(dto.storeSite, walletType, 'a store site');
-    this.assertPurchaseInCapable(dto.allowedIps, walletType, 'an IP allowlist');
-    this.assertPurchaseInCapable(dto.callbackUrl, walletType, 'a callback URL');
-    this.assertPurchaseInCapable(dto.category, walletType, 'a category');
-    this.assertPurchaseInCapable(dto.subCategory, walletType, 'a sub-category');
-    this.assertVirtualBalanceCapable(dto.virtualAmount, walletType);
+    assertUpdateApplicable(dto, walletType);
 
     const wallet = await this.dataSource.transaction((manager) =>
-      this.walletsService.updateForUser(manager, user.userId, id, {
-        name: dto.name,
-        purchaseTimeoutSeconds: dto.purchaseTimeoutSeconds,
-        settlementAccounts: dto.settlementAccounts,
-        restrictedCounterparties: dto.restrictedCounterparties,
-        terminalId: dto.terminalId,
-        acceptorCode: dto.acceptorCode,
-        minTransactionAmount: dto.minTransactionAmount,
-        maxTransactionAmount: dto.maxTransactionAmount,
-        storeName: dto.storeName,
-        storeSite: dto.storeSite,
-        allowedIps: dto.allowedIps,
-        callbackUrl: dto.callbackUrl,
-        category: dto.category,
-        subCategory: dto.subCategory,
-        virtualAmount: dto.virtualAmount,
-        nationalCode: dto.nationalCode,
-        railType: dto.railType,
-        railScheduleTimes: dto.railScheduleTimes,
-      }),
+      this.walletsService.updateForUser(
+        manager,
+        user.userId,
+        id,
+        toUpdateOptions(dto),
+      ),
     );
     const [settlementAccounts, balance] = await Promise.all([
       this.settlementService.findForWallet(this.dataSource.manager, wallet.id),
@@ -280,56 +232,5 @@ export class WalletsController {
   async close(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     const wallet = await this.walletsService.closeForUser(user.userId, id);
     return serializeWallet(wallet, '0');
-  }
-
-  // A wallet type the super admin configured payout methods for (see
-  // WalletType.withdrawalMethods) only lets its wallets pick the rails it
-  // enabled.
-  private assertRailEnabled(
-    railType: SettlementRailType | undefined,
-    walletType: Pick<WalletType, 'withdrawalMethods'>,
-  ): void {
-    if (railType && !isRailEnabled(walletType.withdrawalMethods, railType)) {
-      throw new BadRequestException(
-        `The ${railType} withdrawal method is not enabled for this wallet type`,
-      );
-    }
-  }
-
-  private assertAutoWithdrawCapable(
-    value: unknown,
-    walletType: { supportsAutoWithdraw: boolean },
-    label = 'auto-withdraw scheduling',
-  ): void {
-    if (value !== undefined && !walletType.supportsAutoWithdraw) {
-      throw new BadRequestException(
-        label === 'settlement accounts'
-          ? 'This wallet type does not support auto-withdraw scheduling, so settlement accounts are not applicable'
-          : 'This wallet type does not support auto-withdraw scheduling',
-      );
-    }
-  }
-
-  private assertPurchaseInCapable(
-    value: unknown,
-    walletType: { allowPurchaseIn: boolean },
-    label = 'a verification timeout',
-  ): void {
-    if (value !== undefined && !walletType.allowPurchaseIn) {
-      throw new BadRequestException(
-        `This wallet type does not accept purchases, so ${label} is not applicable`,
-      );
-    }
-  }
-
-  private assertVirtualBalanceCapable(
-    value: unknown,
-    walletType: { hasVirtualBalance: boolean },
-  ): void {
-    if (value !== undefined && !walletType.hasVirtualBalance) {
-      throw new BadRequestException(
-        'This wallet type does not support a virtual balance',
-      );
-    }
   }
 }

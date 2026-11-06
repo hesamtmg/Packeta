@@ -244,6 +244,7 @@ function buildService(options: {
           : null;
       },
     ),
+    findPurchaseInWalletByTerminalId: jest.fn(async () => null),
     findEligiblePurchaseInWallet: jest.fn(
       async (_manager: unknown, _userId: string, currencyId: string) => {
         if (!recipientWallet) return null;
@@ -300,7 +301,11 @@ function buildService(options: {
   };
 
   const manager = {
-    findOne: jest.fn().mockResolvedValue({ id: 'recipient-user-id' }),
+    findOne: jest.fn().mockResolvedValue({
+      id: 'recipient-user-id',
+      email: 'merchant@example.com',
+      phoneNumber: '+989121234567',
+    }),
     update: jest.fn().mockResolvedValue(undefined),
     create: jest.fn((_entity: unknown, data: unknown) => data),
     save: jest.fn(async (data: any) => ({ ...data, id: data.id ?? 'tx-1' })),
@@ -1158,7 +1163,7 @@ describe('TransactionsService.initiatePurchase', () => {
       service.initiatePurchase(
         'customer',
         customerWallet.id,
-        'merchant@example.com',
+        '09121234567',
         100,
         'idem-p1',
       ),
@@ -1180,7 +1185,7 @@ describe('TransactionsService.initiatePurchase', () => {
       service.initiatePurchase(
         'customer',
         customerWallet.id,
-        'merchant@example.com',
+        '09121234567',
         100,
         'idem-p2',
       ),
@@ -1207,7 +1212,7 @@ describe('TransactionsService.initiatePurchase', () => {
     const result = await service.initiatePurchase(
       'customer',
       customerWallet.id,
-      'merchant@example.com',
+      '09121234567',
       250,
       'idem-p3',
     );

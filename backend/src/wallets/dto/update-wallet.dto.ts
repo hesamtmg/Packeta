@@ -103,8 +103,10 @@ export class UpdateWalletDto {
   @Min(0)
   virtualAmount?: number;
 
+  // An empty string clears it.
   @IsOptional()
   @IsString()
+  @ValidateIf((o) => o.nationalCode !== '')
   @Matches(/^\d{10}$/, { message: 'nationalCode must be 10 digits' })
   nationalCode?: string;
 
