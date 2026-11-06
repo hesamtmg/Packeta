@@ -14,6 +14,7 @@ import { initials } from '../../utils/adminFormat';
 import SortableTh from '../../components/admin/SortableTh.vue';
 import ListPagination from '../../components/admin/ListPagination.vue';
 import { useAuthStore } from '../../stores/auth';
+import AmountInput from '../../components/AmountInput.vue';
 
 interface WalletType {
   id: string;
@@ -654,7 +655,7 @@ loadRoles();
                   <button v-else type="button" class="admin-btn admin-btn-danger admin-btn-sm" :disabled="walletBusy || w.balance !== '0'" :title="w.balance !== '0' ? t('dashboard.wallets.closeRequiresZero') : ''" @click="closeWallet(selectedUser, w)">{{ t('admin.wallets.close') }}</button>
                 </div>
                 <form v-if="openAdjustId === w.id" class="adjust" @submit.prevent="adjustWallet(selectedUser, w)">
-                  <input v-model="adjustAmount[w.id]" type="number" :step="amountStep(w.walletType.currency)" class="admin-input" :placeholder="t('admin.wallets.amountPlaceholder')" required />
+                  <AmountInput v-model="adjustAmount[w.id]" :currency="w.walletType.currency" :step="amountStep(w.walletType.currency)" class="admin-input" :placeholder="t('admin.wallets.amountPlaceholder')" required />
                   <input v-model="adjustReason[w.id]" type="text" class="admin-input" :placeholder="t('admin.wallets.reasonPlaceholder')" required />
                   <button type="submit" class="admin-btn admin-btn-primary admin-btn-sm" :disabled="walletBusy">{{ t('admin.wallets.save') }}</button>
                 </form>

@@ -10,6 +10,7 @@ import { walletDisplayName } from '../../utils/wallet-name';
 import { transactionTypeClass, transactionStatusClass, type AdminTransaction } from '../../types/admin';
 import type { Wallet } from '../../stores/wallet';
 import AdminLayout from '../../components/admin/AdminLayout.vue';
+import AmountInput from '../../components/AmountInput.vue';
 
 interface AdminWalletDetail extends Wallet {
   ownerId: string;
@@ -234,9 +235,9 @@ onMounted(load);
 
       <form class="adjust-form" @submit.prevent="onAdjust">
         <h2>{{ t('admin.wallets.adjust') }}</h2>
-        <input
+        <AmountInput
           v-model="adjustAmount"
-          type="number"
+          :currency="wallet.walletType.currency"
           :step="10 ** -wallet.walletType.currency.decimalPlaces"
           class="admin-input"
           :placeholder="t('admin.wallets.amountPlaceholder')"

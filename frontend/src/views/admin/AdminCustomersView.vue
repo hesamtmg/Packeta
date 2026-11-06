@@ -25,6 +25,7 @@ import BatchImportCard from '../../components/admin/BatchImportCard.vue';
 import SortableTh from '../../components/admin/SortableTh.vue';
 import ListPagination from '../../components/admin/ListPagination.vue';
 import { useAuthStore } from '../../stores/auth';
+import AmountInput from '../../components/AmountInput.vue';
 
 const { t } = useI18n();
 const auth = useAuthStore();
@@ -477,10 +478,10 @@ loadRoles();
                 <option value="" disabled>{{ t('admin.customers.addWalletChooseType') }}</option>
                 <option v-for="wt in walletTypes" :key="wt.id" :value="wt.id">{{ wt.name }} ({{ wt.currency.code }})</option>
               </select>
-              <input
+              <AmountInput
                 v-if="newWalletType?.hasVirtualBalance"
                 v-model="newWalletVirtualAmount"
-                type="number"
+                :currency="newWalletType.currency"
                 min="0"
                 :step="amountStep(newWalletType.currency)"
                 class="admin-input"

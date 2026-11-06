@@ -16,6 +16,7 @@ import BatchImportCard from '../../components/admin/BatchImportCard.vue';
 import SortableTh from '../../components/admin/SortableTh.vue';
 import ListPagination from '../../components/admin/ListPagination.vue';
 import { useAuthStore } from '../../stores/auth';
+import AmountInput from '../../components/AmountInput.vue';
 
 const { t } = useI18n();
 const router = useRouter();
@@ -331,9 +332,9 @@ onMounted(load);
               <td colspan="7">
                 <form class="adjust-row" @submit.prevent="adjust(w)">
                   <span class="adjust-title">{{ t('admin.wallets.adjustTitle', { wallet: walletDisplayName(w) }) }}</span>
-                  <input
+                  <AmountInput
                     v-model="adjustAmount[w.id]"
-                    type="number"
+                    :currency="w.walletType.currency"
                     :step="amountStep(w.walletType.currency)"
                     class="admin-input"
                     :placeholder="t('admin.wallets.amountPlaceholder')"
