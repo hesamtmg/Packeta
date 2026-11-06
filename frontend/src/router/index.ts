@@ -185,11 +185,18 @@ const router = createRouter({
 
 router.beforeEach((to) => {
   const auth = useAuthStore();
-  if (to.name === 'landing' && auth.isAuthenticated) {
+  // Already signed in: the public landing and the login/signup pages have
+  // nothing to offer, so go straight to the app.
+  if (
+    auth.isAuthenticated &&
+    (to.name === 'landing' || to.name === 'login' || to.name === 'signup')
+  ) {
     return { name: 'dashboard' };
   }
   if (to.meta.requiresAuth && !auth.isAuthenticated) {
-    return { name: 'login' };
+    // Remember where the visitor was headed so login can send them back
+    // there (validated in useCompleteAuth's safeRedirect).
+    return { name: 'login', query: to.fullPath !== '/dashboard' ? { redirect: to.fullPath } : {} };
   }
   if (to.meta.requiresAdmin && !auth.isAdmin) {
     return { name: 'dashboard' };
