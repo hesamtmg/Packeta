@@ -364,7 +364,7 @@ Related endpoints with the same auth + `Idempotency-Key` pattern:
 | `POST /transactions/deposit` `{ walletId, amount }` | Top up your own wallet via the payment gateway |
 | `POST /transactions/withdraw` `{ walletId, amount, railType }` | Pay real money out to a bank rail |
 | `POST /transactions/transfer` `{ fromWalletId, toEmail, amount }` | P2P transfer, no gateway involved |
-| `GET /transactions?walletId=` | Your own transaction history |
+| `GET /transactions?walletId=&limit=&offset=&since=` | Your own transaction history, newest first. Without `limit`/`offset` it returns the full history as an array; with either it returns one page as `{ items, total, limit, offset }` (`limit` 1–100, default 25). `since` (ISO date) keeps only rows created at or after it. |
 | `POST /transactions/:id/reverse` `{ reason }` | Reverse a transaction you're a party to |
 
 ---

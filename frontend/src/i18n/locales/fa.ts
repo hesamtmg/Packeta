@@ -341,6 +341,10 @@ export default {
     history: {
       title: 'تاریخچه تراکنش‌ها',
       allTransactions: 'همه تراکنش‌ها ({count})',
+      showingOf: 'نمایش {shown} از {total}',
+      loadMore: 'بارگذاری بیشتر',
+      loadingMore: 'در حال بارگذاری…',
+      loadMoreError: "بارگذاری تراکنش‌های بیشتر ناموفق بود",
       searchPlaceholder: 'جستجو بر اساس نوع، یادداشت…',
       allTypes: 'همه انواع',
       deposit: 'واریز',
