@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BrandMark from '../components/BrandMark.vue';
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { CARD_THEME_OPTIONS } from '../utils/cardTheme';
@@ -140,7 +141,7 @@ onBeforeUnmount(() => observer?.disconnect());
     <header class="landing-nav">
       <div class="landing-nav-inner">
         <a href="#top" class="brand">
-          <span class="brand-mark">P</span>
+          <span class="brand-mark"><BrandMark /></span>
           <span class="brand-name">Packeta</span>
         </a>
         <nav class="landing-nav-links">
@@ -550,7 +551,7 @@ onBeforeUnmount(() => observer?.disconnect());
 <span class="c-tag">&lt;/button&gt;</span></code></pre>
         </div>
         <div class="widget-button-demo">
-          <span class="logo-dot">P</span>
+          <span class="logo-dot"><BrandMark /></span>
           Pay with Packeta
         </div>
       </div>
@@ -623,7 +624,7 @@ onBeforeUnmount(() => observer?.disconnect());
         </div>
         <div class="admin-mock reveal" aria-hidden="true">
           <div class="admin-mock-side">
-            <span class="admin-mock-logo">P</span>
+            <span class="admin-mock-logo"><BrandMark /></span>
             <span v-for="(item, i) in adminItems.slice(0, 8)" :key="item" class="admin-mock-nav" :class="{ active: i === 2 }">
               <i />{{ t(`adminNav.${item}`) }}
             </span>
@@ -700,7 +701,7 @@ onBeforeUnmount(() => observer?.disconnect());
       <div class="footer-inner">
         <div class="footer-brand">
           <span class="brand">
-            <span class="brand-mark">P</span>
+            <span class="brand-mark"><BrandMark /></span>
             <span class="brand-name">Packeta</span>
           </span>
           <p>{{ t('landing.footer.tagline') }}</p>

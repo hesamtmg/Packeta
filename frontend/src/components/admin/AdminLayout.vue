@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BrandMark from '../BrandMark.vue';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
@@ -199,7 +200,7 @@ onMounted(async () => {
     <div class="admin-shell" :class="{ 'nav-open': navOpen }">
       <aside class="admin-sidebar">
         <router-link :to="{ name: 'admin-dashboard' }" class="admin-brand">
-          <span class="logo">P</span>
+          <span class="logo"><BrandMark /></span>
           <span class="admin-brand-name">Packeta</span>
           <span class="admin-brand-tag">{{ t('adminNav.panelTag') }}</span>
         </router-link>

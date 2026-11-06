@@ -41,6 +41,8 @@ export default defineConfig({
       ],
     }),
   ],
+  // ipg-frontend/public/ holds the SPA's favicons — keep them out of sdk/js/.
+  publicDir: false,
   build: {
     outDir: '../sdk/js',
     // sdk/js/ also holds packeta.js, server-example.js, README.md,
