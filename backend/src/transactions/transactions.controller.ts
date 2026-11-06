@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -24,6 +25,36 @@ import { InitiateChargeDto } from './dto/initiate-charge.dto';
 import { ReverseTransactionDto } from './dto/reverse-transaction.dto';
 import { CustomerActionGuard } from '../admin/guards/customer-action.guard';
 import { RequireCustomerAction } from '../admin/decorators/require-customer-action.decorator';
+
+const HISTORY_DEFAULT_LIMIT = 25;
+const HISTORY_MAX_LIMIT = 100;
+
+function parseIntParam(
+  name: string,
+  raw: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (raw === undefined || raw === '') return fallback;
+  if (!/^\d+$/.test(raw)) {
+    throw new BadRequestException(`${name} must be a non-negative integer`);
+  }
+  const value = Number(raw);
+  if (value < min || value > max) {
+    throw new BadRequestException(`${name} must be between ${min} and ${max}`);
+  }
+  return value;
+}
+
+function parseSince(raw: string | undefined): Date | undefined {
+  if (raw === undefined || raw === '') return undefined;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) {
+    throw new BadRequestException('since must be an ISO date');
+  }
+  return date;
+}
 
 @Controller('transactions')
 @UseGuards(JwtAuthGuard, CustomerActionGuard)
@@ -145,12 +176,35 @@ export class TransactionsController {
     return this.transactionsService.cancelPendingPurchase(id);
   }
 
+  // Without limit/offset this returns the full history as a plain array, as
+  // it always has (third-party integrations rely on that shape). Passing
+  // either switches to a paged envelope: { items, total, limit, offset }.
+  // `since` (ISO date) narrows either form to rows created at or after it.
   @Get()
   history(
     @CurrentUser() user: AuthenticatedUser,
     @Query('walletId') walletId?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('since') since?: string,
   ) {
-    return this.transactionsService.getHistory(user.userId, walletId);
+    const sinceDate = parseSince(since);
+    if (limit === undefined && offset === undefined) {
+      return this.transactionsService.getHistory(user.userId, walletId, {
+        since: sinceDate,
+      });
+    }
+    return this.transactionsService.getHistoryPage(user.userId, walletId, {
+      limit: parseIntParam(
+        'limit',
+        limit,
+        HISTORY_DEFAULT_LIMIT,
+        1,
+        HISTORY_MAX_LIMIT,
+      ),
+      offset: parseIntParam('offset', offset, 0, 0, Number.MAX_SAFE_INTEGER),
+      since: sinceDate,
+    });
   }
 
   @Get(':id')

@@ -17,6 +17,7 @@ import {
   FindOptionsWhere,
   In,
   LessThan,
+  MoreThanOrEqual,
   Repository,
 } from 'typeorm';
 import { Wallet } from '../wallets/entities/wallet.entity';
@@ -3183,7 +3184,61 @@ export class TransactionsService {
     }
   }
 
-  async getHistory(userId: string, walletId?: string): Promise<Transaction[]> {
+  async getHistory(
+    userId: string,
+    walletId?: string,
+    options: { since?: Date } = {},
+  ): Promise<Transaction[]> {
+    const scope = await this.buildHistoryScope(userId, walletId, options.since);
+    if (!scope) return [];
+    const rows = await this.transactionsRepository.find({
+      where: scope.where,
+      order: { createdAt: 'DESC', id: 'DESC' },
+    });
+    return rows.map((row) => this.presentHistoryRow(row, scope));
+  }
+
+  // One page of getHistory, newest first, plus the total row count so the
+  // client knows whether there's more to load. Ordering is tie-broken on id
+  // so pages stay stable when several ledger legs share a createdAt.
+  async getHistoryPage(
+    userId: string,
+    walletId: string | undefined,
+    page: { limit: number; offset: number; since?: Date },
+  ): Promise<{
+    items: Transaction[];
+    total: number;
+    limit: number;
+    offset: number;
+  }> {
+    const { limit, offset } = page;
+    const scope = await this.buildHistoryScope(userId, walletId, page.since);
+    if (!scope) return { items: [], total: 0, limit, offset };
+    const [rows, total] = await this.transactionsRepository.findAndCount({
+      where: scope.where,
+      order: { createdAt: 'DESC', id: 'DESC' },
+      take: limit,
+      skip: offset,
+    });
+    return {
+      items: rows.map((row) => this.presentHistoryRow(row, scope)),
+      total,
+      limit,
+      offset,
+    };
+  }
+
+  // Which ledger rows count as a customer's history — shared by getHistory
+  // and getHistoryPage. Null when the customer has no (visible) wallets.
+  private async buildHistoryScope(
+    userId: string,
+    walletId: string | undefined,
+    since: Date | undefined,
+  ): Promise<{
+    where: FindOptionsWhere<Transaction>[];
+    owned: Set<string>;
+    installmentWalletIds: Map<string, string>;
+  } | null> {
     const wallets = walletId
       ? [await this.walletsService.getById(userId, walletId)]
       : (await this.walletsService.listForUser(userId)).filter(
@@ -3191,7 +3246,7 @@ export class TransactionsService {
         );
     const walletIds = wallets.map((wallet) => wallet.id);
     if (walletIds.length === 0) {
-      return [];
+      return null;
     }
     // Installment repayments (payInstallment) and overdue/offboarding
     // settlements land on the LENDER's repository wallet, not on any wallet
@@ -3210,21 +3265,25 @@ export class TransactionsService {
     if (installmentIds.length) {
       where.push({ installmentId: In(installmentIds) });
     }
-    const owned = new Set(walletIds);
-    const rows = await this.transactionsRepository.find({
-      where,
-      order: { createdAt: 'DESC' },
-    });
-    return rows.map((row) => {
-      const touchesOwn =
-        (row.fromWalletId && owned.has(row.fromWalletId)) ||
-        (row.toWalletId && owned.has(row.toWalletId));
-      if (touchesOwn) return row;
-      const creditWalletId =
-        (row.installmentId && installmentWalletIds.get(row.installmentId)) ||
-        row.settlesWalletId;
-      return creditWalletId ? { ...row, toWalletId: creditWalletId } : row;
-    });
+    if (since) {
+      for (const clause of where) clause.createdAt = MoreThanOrEqual(since);
+    }
+    return { where, owned: new Set(walletIds), installmentWalletIds };
+  }
+
+  private presentHistoryRow(
+    row: Transaction,
+    scope: { owned: Set<string>; installmentWalletIds: Map<string, string> },
+  ): Transaction {
+    const { owned, installmentWalletIds } = scope;
+    const touchesOwn =
+      (row.fromWalletId && owned.has(row.fromWalletId)) ||
+      (row.toWalletId && owned.has(row.toWalletId));
+    if (touchesOwn) return row;
+    const creditWalletId =
+      (row.installmentId && installmentWalletIds.get(row.installmentId)) ||
+      row.settlesWalletId;
+    return creditWalletId ? { ...row, toWalletId: creditWalletId } : row;
   }
 
   // The customer's own credit wallet a repayment transaction pays down —
@@ -3234,9 +3293,10 @@ export class TransactionsService {
     transaction: Transaction,
   ): Promise<string | null> {
     if (transaction.installmentId) {
-      const walletId = await this.installmentsService.findWalletIdForInstallment(
-        transaction.installmentId,
-      );
+      const walletId =
+        await this.installmentsService.findWalletIdForInstallment(
+          transaction.installmentId,
+        );
       if (walletId) return walletId;
     }
     return transaction.settlesWalletId ?? null;

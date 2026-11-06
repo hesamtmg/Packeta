@@ -3166,6 +3166,136 @@ describe('TransactionsService.getHistory', () => {
       expect.objectContaining({ id: 'tx-repay', toWalletId: 'credit-1' }),
     ]);
   });
+
+  it('narrows every OR clause to rows created at or after `since`', async () => {
+    const wallet: WalletFixture = {
+      id: 'w-1',
+      balance: '0',
+      walletType: walletType({ hiddenFromCustomer: false } as any),
+    };
+    const { service, transactionsRepository } = buildHistoryService([wallet]);
+    const since = new Date('2026-01-01T00:00:00Z');
+
+    await service.getHistory('user-1', undefined, { since });
+
+    const { where } = (transactionsRepository.find.mock.calls[0] as any[])[0];
+    expect(where).toHaveLength(3);
+    for (const clause of where) {
+      expect(clause.createdAt).toEqual(
+        expect.objectContaining({ _type: 'moreThanOrEqual', _value: since }),
+      );
+    }
+  });
+});
+
+describe('TransactionsService.getHistoryPage', () => {
+  function buildPagedService(
+    wallets: WalletFixture[],
+    rows: any[],
+    total: number,
+    installmentWalletIds: Map<string, string> = new Map(),
+  ) {
+    const walletsService = {
+      listForUser: jest.fn(async () => wallets),
+      getById: jest.fn(),
+    };
+    const installmentsService = {
+      findWalletIdsByInstallment: jest.fn(async () => installmentWalletIds),
+    };
+    const transactionsRepository = {
+      find: jest.fn(),
+      findAndCount: jest.fn(async () => [rows, total]),
+    };
+    const service = new TransactionsService(
+      {} as any,
+      walletsService as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      installmentsService as any,
+      {} as any,
+      {} as any,
+      transactionsRepository as any,
+      i18nStub as any,
+      { emit: () => undefined } as any,
+    );
+    return { service, transactionsRepository };
+  }
+
+  const credit: WalletFixture = {
+    id: 'credit-1',
+    balance: '0',
+    walletType: walletType({ hiddenFromCustomer: false } as any),
+  };
+
+  it('passes limit/offset through as take/skip with a stable order and returns the total', async () => {
+    const { service, transactionsRepository } = buildPagedService(
+      [credit],
+      [{ id: 'tx-1', fromWalletId: 'credit-1', toWalletId: null }],
+      42,
+    );
+
+    const result = await service.getHistoryPage('user-1', undefined, {
+      limit: 10,
+      offset: 20,
+    });
+
+    expect(transactionsRepository.findAndCount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        order: { createdAt: 'DESC', id: 'DESC' },
+        take: 10,
+        skip: 20,
+      }),
+    );
+    expect(result).toEqual({
+      items: [expect.objectContaining({ id: 'tx-1' })],
+      total: 42,
+      limit: 10,
+      offset: 20,
+    });
+  });
+
+  it("presents repository-side repayments against the customer's credit wallet, like getHistory", async () => {
+    const { service } = buildPagedService(
+      [credit],
+      [
+        {
+          id: 'tx-repay',
+          fromWalletId: null,
+          toWalletId: 'repo-of-lender',
+          installmentId: 'inst-1',
+          settlesWalletId: null,
+        },
+      ],
+      1,
+      new Map([['inst-1', 'credit-1']]),
+    );
+
+    const result = await service.getHistoryPage('user-1', undefined, {
+      limit: 25,
+      offset: 0,
+    });
+
+    expect(result.items).toEqual([
+      expect.objectContaining({ id: 'tx-repay', toWalletId: 'credit-1' }),
+    ]);
+  });
+
+  it('returns an empty page without querying when the customer has no visible wallets', async () => {
+    const { service, transactionsRepository } = buildPagedService([], [], 0);
+
+    const result = await service.getHistoryPage('user-1', undefined, {
+      limit: 25,
+      offset: 0,
+    });
+
+    expect(transactionsRepository.findAndCount).not.toHaveBeenCalled();
+    expect(result).toEqual({ items: [], total: 0, limit: 25, offset: 0 });
+  });
 });
 
 describe('TransactionsService.reverseTransaction', () => {

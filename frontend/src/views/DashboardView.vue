@@ -314,6 +314,19 @@ const historyClusters = computed(() =>
   ),
 );
 
+// Search filters only the pages loaded so far; "Load more" pulls in the next
+// page. A cluster split across a page boundary regroups once its other legs
+// arrive, since grouping runs over everything loaded.
+const loadMoreError = ref('');
+async function loadMoreHistory() {
+  loadMoreError.value = '';
+  try {
+    await wallet.loadMoreTransactions();
+  } catch (err) {
+    loadMoreError.value = err instanceof ApiError ? err.message : t('dashboard.history.loadMoreError');
+  }
+}
+
 const expandedTx = ref(new Set<string>());
 function toggleTx(id: string) {
   const next = new Set(expandedTx.value);
@@ -908,7 +921,7 @@ async function onGrantCredit() {
           <span class="overview-stat-label">{{ t('dashboard.currenciesLabel') }}</span>
         </div>
         <div class="overview-stat">
-          <span class="overview-stat-value">{{ wallet.transactions.length }}</span>
+          <span class="overview-stat-value">{{ wallet.transactionsTotal }}</span>
           <span class="overview-stat-label">{{ t('dashboard.transactionsLabel') }}</span>
         </div>
         <button
@@ -1306,7 +1319,7 @@ async function onGrantCredit() {
     <div class="admin-grid insights-grid">
       <div class="admin-card">
         <h2>{{ t('dashboard.activityHeading') }}</h2>
-        <ActivityChart :transactions="wallet.transactions" />
+        <ActivityChart :transactions="wallet.recentTransactions" />
       </div>
       <div class="admin-card">
         <h2>{{ t('dashboard.latestTransactionHeading') }}</h2>
@@ -1476,7 +1489,7 @@ async function onGrantCredit() {
 
     <div class="admin-card">
       <div class="filter-row">
-        <h2>{{ t('dashboard.history.allTransactions', { count: historySorted.length }) }}</h2>
+        <h2>{{ t('dashboard.history.allTransactions', { count: historySearch ? historySorted.length : wallet.transactionsTotal }) }}</h2>
         <input v-model="historySearch" class="admin-input" :placeholder="t('dashboard.history.searchPlaceholder')" />
       </div>
 
@@ -1568,6 +1581,22 @@ async function onGrantCredit() {
         </div>
 
         <p v-if="!historyClusters.length" class="history-empty">{{ t('dashboard.history.empty') }}</p>
+      </div>
+
+      <div v-if="wallet.transactionsTotal" class="history-pager">
+        <span class="history-pager-count">
+          {{ t('dashboard.history.showingOf', { shown: wallet.transactions.length, total: wallet.transactionsTotal }) }}
+        </span>
+        <button
+          v-if="wallet.hasMoreTransactions"
+          type="button"
+          class="admin-btn admin-btn-ghost admin-btn-sm"
+          :disabled="wallet.loadingMoreTransactions"
+          @click="loadMoreHistory"
+        >
+          {{ wallet.loadingMoreTransactions ? t('dashboard.history.loadingMore') : t('dashboard.history.loadMore') }}
+        </button>
+        <p v-if="loadMoreError" class="admin-error">{{ loadMoreError }}</p>
       </div>
     </div>
   
@@ -2541,6 +2570,18 @@ async function onGrantCredit() {
   color: var(--text-dim);
   text-align: center;
   padding: 20px 0;
+}
+.history-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+}
+.history-pager-count {
+  color: var(--text-dim);
+  font-size: 0.875rem;
 }
 .charge-form {
   display: flex;

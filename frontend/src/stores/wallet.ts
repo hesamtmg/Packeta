@@ -213,13 +213,33 @@ export interface Installment {
   spendBreakdown: InstallmentSpendDetail[];
 }
 
+export interface TransactionPage {
+  items: Transaction[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+const TRANSACTIONS_PAGE_SIZE = 25;
+// ActivityChart's widest view is the last 8 weeks.
+const ACTIVITY_WINDOW_MS = 8 * 7 * 24 * 60 * 60 * 1000;
+
 export const useWalletStore = defineStore('wallet', {
   state: () => ({
     wallets: [] as Wallet[],
     walletTypes: [] as WalletType[],
+    // The history pages loaded so far (newest first), the server-side total
+    // they're drawn from, and a separate time-bounded slice for the activity
+    // chart, which needs every row in its window regardless of paging.
     transactions: [] as Transaction[],
+    transactionsTotal: 0,
+    recentTransactions: [] as Transaction[],
+    loadingMoreTransactions: false,
     installments: [] as Installment[],
   }),
+  getters: {
+    hasMoreTransactions: (state) => state.transactions.length < state.transactionsTotal,
+  },
   actions: {
     async fetchWallets() {
       this.wallets = await apiRequest<Wallet[]>('/wallets');
@@ -227,8 +247,34 @@ export const useWalletStore = defineStore('wallet', {
     async fetchWalletTypes() {
       this.walletTypes = await apiRequest<WalletType[]>('/wallet-types');
     },
+    // Reloads history from the first page (and the chart's window). Called on
+    // mount and after any action that posts new ledger rows.
     async fetchTransactions() {
-      this.transactions = await apiRequest<Transaction[]>('/transactions');
+      const since = new Date(Date.now() - ACTIVITY_WINDOW_MS).toISOString();
+      const [page, recent] = await Promise.all([
+        apiRequest<TransactionPage>(`/transactions?limit=${TRANSACTIONS_PAGE_SIZE}&offset=0`),
+        apiRequest<Transaction[]>(`/transactions?since=${encodeURIComponent(since)}`),
+      ]);
+      this.transactions = page.items;
+      this.transactionsTotal = page.total;
+      this.recentTransactions = recent;
+    },
+    // Appends the next page. Rows posted since the first page shift older
+    // rows down, so the next offset can overlap what's already loaded —
+    // duplicates are dropped by id rather than shown twice.
+    async loadMoreTransactions() {
+      if (this.loadingMoreTransactions || !this.hasMoreTransactions) return;
+      this.loadingMoreTransactions = true;
+      try {
+        const page = await apiRequest<TransactionPage>(
+          `/transactions?limit=${TRANSACTIONS_PAGE_SIZE}&offset=${this.transactions.length}`,
+        );
+        const seen = new Set(this.transactions.map((tx) => tx.id));
+        this.transactions = [...this.transactions, ...page.items.filter((tx) => !seen.has(tx.id))];
+        this.transactionsTotal = page.total;
+      } finally {
+        this.loadingMoreTransactions = false;
+      }
     },
     async fetchInstallments() {
       this.installments = await apiRequest<Installment[]>('/installments');

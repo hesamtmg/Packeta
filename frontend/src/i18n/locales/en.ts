@@ -341,6 +341,10 @@ export default {
     history: {
       title: 'Transaction history',
       allTransactions: 'All transactions ({count})',
+      showingOf: 'Showing {shown} of {total}',
+      loadMore: 'Load more',
+      loadingMore: 'Loading…',
+      loadMoreError: "Couldn't load more transactions",
       searchPlaceholder: 'Search by type, note…',
       allTypes: 'All types',
       deposit: 'Deposit',
