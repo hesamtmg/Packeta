@@ -177,6 +177,21 @@ export class Wallet {
   @Column({ type: 'varchar', length: 5, array: true, nullable: true })
   railScheduleTimes: string[] | null;
 
+  // The wallet's position in its owner's own list, as arranged on the
+  // dashboard (see WalletsService.reorderForUser). Null until the owner
+  // first reorders, and for wallets created since — nulls sort last, by
+  // createdAt, so new wallets land at the end of the list.
+  @Column({ type: 'int', nullable: true })
+  sortOrder: number | null;
+
+  // The owner's chosen default wallet — at most one per user (partial
+  // unique index, see migration AddWalletOrderAndDefault). Preselected on
+  // the dashboard, and preferred when a transfer or purchase into this user
+  // has to resolve which of their wallets receives it (see
+  // findEligibleP2pInWallet / findEligiblePurchaseInWallet).
+  @Column({ type: 'boolean', default: false })
+  isDefault: boolean;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

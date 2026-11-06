@@ -82,6 +82,12 @@ export interface Wallet {
   id: string;
   name: string | null;
   balance: string;
+  // The owner's chosen default wallet (at most one) — preselected on the
+  // dashboard and preferred when someone sends this user money.
+  isDefault: boolean;
+  // Position in the owner's own arrangement; null until first reordered.
+  // The list from GET /wallets already comes back in this order.
+  sortOrder: number | null;
   purchaseTimeoutSeconds: number | null;
   restrictedCounterparties: string[] | null;
   closedAt: string | null;
@@ -254,6 +260,18 @@ export const useWalletStore = defineStore('wallet', {
         method: 'PATCH',
         body: options,
       });
+      await this.fetchWallets();
+    },
+    // Saves the customer's own arrangement of their wallets; the server
+    // returns the list in its new order.
+    async reorderWallets(walletIds: string[]) {
+      this.wallets = await apiRequest<Wallet[]>('/wallets/order', {
+        method: 'PUT',
+        body: { walletIds },
+      });
+    },
+    async setDefaultWallet(walletId: string) {
+      await apiRequest(`/wallets/${walletId}/default`, { method: 'POST' });
       await this.fetchWallets();
     },
     async closeWallet(walletId: string) {

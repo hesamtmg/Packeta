@@ -43,10 +43,16 @@ A multi-wallet app, plus a standalone sandbox payment gateway (IPG) it settles m
   inside a single DB transaction before updating the balance and inserting the ledger row.
 - **Transfers are peer-to-peer between wallets whose type allows it** (only Buy, by default): the sender
   picks which of their own eligible wallets to send from; the recipient is identified by email and their
-  destination wallet is resolved automatically to their oldest eligible wallet — the sender never sees or
+  destination wallet is resolved automatically — their default wallet if it's eligible, otherwise the first
+  eligible wallet in their own arrangement (oldest first if they never reordered) — the sender never sees or
   picks a specific wallet ID belonging to someone else. The two wallets involved are always locked in
   ascending wallet-id order, regardless of transfer direction, so two concurrent transfers between the same
   pair of wallets can't deadlock.
+- **Wallet order and default wallet**: customers arrange their own wallet list (`PUT /wallets/order` with
+  `walletIds` in the new order, stored as `wallets.sortOrder`; wallets never placed sort last, oldest first) and
+  mark one open wallet as their default (`POST /wallets/:id/default`, `wallets.isDefault`, at most one per user via
+  a partial unique index; cleared if that wallet is closed). The default is preselected on the dashboard and
+  preferred when an incoming transfer or purchase resolves which of the user's wallets receives it.
 - **Merchant wallets and purchases**: a `MERCHANT` wallet type (seeded per-currency, opt-in via `POST /wallets`
   rather than part of the default starter set — see `isStarterType` below) can receive `PURCHASE`s from `BUY`
   wallets. A purchase is a real two-phase, IPG-style payment, not an instant transfer:
